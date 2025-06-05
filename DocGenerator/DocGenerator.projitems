@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <SharedGUID>745D6C16-B8EE-4FB9-857D-3B54156CC679</SharedGUID>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration">
+    <Import_RootNamespace>DocGenerator</Import_RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)ClsEnums.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ClsGenerators.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FrmPdfThumbs.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FrmPdfThumbs.Designer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FrmThumbs.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FrmThumbs.Designer.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)FrmPdfThumbs.resx" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)FrmThumbs.resx" />
+  </ItemGroup>
+</Project>

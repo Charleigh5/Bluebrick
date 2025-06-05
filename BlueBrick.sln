@@ -1,0 +1,27 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.1.32210.238
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BlueBrick", "BlueBrick.csproj", "{2713D927-26A2-4437-ABDA-798E2CA0824A}"
+EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "DocGenerator", "DocGenerator\DocGenerator.shproj", "{A37FC90D-36E7-4E07-8A04-E014B16D02FD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2713D927-26A2-4437-ABDA-798E2CA0824A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2713D927-26A2-4437-ABDA-798E2CA0824A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2713D927-26A2-4437-ABDA-798E2CA0824A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2713D927-26A2-4437-ABDA-798E2CA0824A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {E1E0AB25-D45A-4E3E-A979-66E1BB7ECAEF}
+	EndGlobalSection
+EndGlobal
