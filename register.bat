@@ -1,0 +1,1 @@
+"%windir%\Microsoft.NET\Framework64\v4.0.30319\RegAsm" /codebase "C:\Users\cdault\RiderProjects\BlueBrick\bin\Debug\BlueBrick.dll"
