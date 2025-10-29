@@ -48,6 +48,7 @@ namespace BlueBrick
         #region Local Variables
 
         private FrmPane TaskPanWinFormControl;
+        private FrmSandbox _developmentSandbox;
         private int addinID;
 
         private BitmapHandler iBmp;
@@ -79,6 +80,7 @@ namespace BlueBrick
         public const int mainItemID23 = 2322;
         public const int mainItemID24 = 2323;
         public const int mainItemID25 = 2324;
+        public const int mainItemID26 = 2325;
         public const int flyoutGroupID = 2436;
 
         private string[] mainIcons = new string[3];
@@ -249,6 +251,17 @@ namespace BlueBrick
 
         public bool DisconnectFromSW()
         {
+            if (_developmentSandbox != null)
+            {
+                if (!_developmentSandbox.IsDisposed)
+                {
+                    _developmentSandbox.Close();
+                    _developmentSandbox.Dispose();
+                }
+
+                _developmentSandbox = null;
+            }
+
             RemoveCommandMgr();
             DetachEventHandlers();
 
@@ -317,7 +330,8 @@ namespace BlueBrick
                 mainItemID22,
                 mainItemID23,
                 mainItemID24,
-                mainItemID25
+                mainItemID25,
+                mainItemID26
             };
             if (getDataResult)
                 if (!CompareIDs((int[])registryIDs, knownIDs)) //if the IDs don't match, reset the commandGroup
@@ -390,6 +404,9 @@ namespace BlueBrick
             var cmdIndex11 = cmdGroup.AddCommandItem2("Sheet Rename", -1, "Renumber all sheets on drawing.",
                 "Sheet Rename", 11,
                 "barDrawRename", "", mainItemID25, menuToolbarOption);
+            var cmdIndex12 = cmdGroup.AddCommandItem2("Development Sandbox", -1,
+                "Launch the simulated SolidWorks development environment.", "Development Sandbox", 12,
+                nameof(OpenDevelopmentSandbox), "", mainItemID26, menuToolbarOption);
             cmdGroup.AddCommandItem2("Get ASY", -1, "Get a new ASY number for the current part.", "Get ASY", 1,
                 "barPullSerial(1)", "", mainItemID9, menuToolbarOption);
             cmdGroup.AddCommandItem2("Get SUB", -1, "Get a new SUB number for the current part.", "Get SUB", 1,
@@ -440,8 +457,8 @@ namespace BlueBrick
                 if (cmdTab != null) continue;
                 cmdTab = CmdMgr.AddCommandTab(type, Title);
                 var cmdBox = cmdTab.AddCommandTabBox();
-                var cmdIDs = new int[13];
-                var TextType = new int[13];
+                var cmdIDs = new int[14];
+                var TextType = new int[14];
                 cmdIDs[0] = cmdGroup.CommandID[cmdIndex0];
                 TextType[0] = (int)swCommandTabButtonTextDisplay_e.swCommandTabButton_TextBelow;
                 cmdIDs[1] = cmdGroup.CommandID[cmdIndex1];
@@ -468,6 +485,8 @@ namespace BlueBrick
                 TextType[11] = (int)swCommandTabButtonTextDisplay_e.swCommandTabButton_TextBelow;
                 cmdIDs[12] = cmdGroup.CommandID[cmdIndex11];
                 TextType[12] = (int)swCommandTabButtonTextDisplay_e.swCommandTabButton_TextBelow;
+                cmdIDs[13] = cmdGroup.CommandID[cmdIndex12];
+                TextType[13] = (int)swCommandTabButtonTextDisplay_e.swCommandTabButton_TextBelow;
                 cmdBox.AddCommands(cmdIDs, TextType);
 
                 var cmdBox1 = cmdTab.AddCommandTabBox();
@@ -509,6 +528,25 @@ namespace BlueBrick
         public void barCheckIn()
         {
             ClsTools.CheckInAll(TaskPanWinFormControl);
+        }
+
+        public void OpenDevelopmentSandbox()
+        {
+            if (_developmentSandbox == null || _developmentSandbox.IsDisposed)
+            {
+                _developmentSandbox = new FrmSandbox();
+                _developmentSandbox.FormClosed += (_, _) => _developmentSandbox = null;
+                _developmentSandbox.Show();
+            }
+            else
+            {
+                if (_developmentSandbox.WindowState == FormWindowState.Minimized)
+                {
+                    _developmentSandbox.WindowState = FormWindowState.Normal;
+                }
+
+                _developmentSandbox.Activate();
+            }
         }
 
         public void barPullSerial(string data)
