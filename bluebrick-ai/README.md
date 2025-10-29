@@ -29,19 +29,16 @@ bluebrick-ai/
 ### Environment Setup
 
 1. Clone the repository and navigate to the `bluebrick-ai` directory.
-2. Create a Python virtual environment and install dependencies:
-
-   ```bash
-   python -m venv .venv
-   .venv\\Scripts\\activate
-   pip install -e .
-   ```
-
+2. Run `scripts/bootstrap.ps1` (Windows) or `scripts/setup_dev_environment.sh`
+   (macOS/Linux for mock development) to create a virtual environment and
+   install dependencies. Both scripts install editable packages with the
+   optional `dev` extras for running tests.
 3. Copy `configs/env.example` to `.env` and update the values with your local
    SolidWorks, EPDM, and LLM configuration.
-4. Ensure the SolidWorks and EPDM COM libraries are registered (typically part
-   of the standard installation). The bootstrap scripts under `scripts/` can be
-   extended to enforce prerequisites.
+4. Execute `scripts/validate_prerequisites.py` on a SolidWorks workstation to
+   confirm required COM registrations. If SolidWorks/EPDM components were
+   installed outside the default paths, use `scripts/register_com.ps1` to
+   register the relevant libraries.
 
 ### Running the Sample Workflow
 
@@ -55,26 +52,41 @@ python -m samples.create_and_checkin_plate
 
 > **Note:** SolidWorks COM operations must run within a single-threaded
 > apartment (STA). When integrating with async frameworks or task queues, use a
-> dedicated worker thread that initializes COM (see `SolidWorksApp`).
+> dedicated worker thread that initializes COM. The `StaWorker` utility under
+> `src/workers/sta_worker.py` coordinates COM access for the LangChain agent.
+
+### Running Tests
+
+```bash
+pytest
+```
+
+The provided test suite relies on mocked COM interfaces so it can run on any
+platform and within CI. Windows-specific integration tests should be added in a
+separate job once hardware-in-the-loop validation is available.
 
 ## Core Components
 
-- **CAD Adapters (`src/cad/`)**: Provide thin wrappers over SolidWorks and EPDM
-  COM interfaces.
+- **CAD Adapters (`src/cad/`)**: Provide resilient SolidWorks and EPDM COM
+  wrappers with retry logic, structured logging, and expanded geometry/drawing
+  operations.
 - **Agent Orchestration (`src/agents/`)**: LangChain-based tooling that bridges
-  LLM instructions with deterministic CAD operations.
-- **Workflows (`src/workflows/`)**: Higher-level processes that chain together
-  multiple CAD steps, state tracking, and PDM actions.
+  LLM instructions with deterministic CAD operations executed on the STA worker.
+- **Workers (`src/workers/`)**: Dedicated STA dispatcher ensuring all COM calls
+  run on a single thread with progress callbacks.
+- **Workflows (`src/workflows/`)**: Higher-level processes chaining CAD edits
+  with PDM lifecycle actions while recording context state.
 - **Utilities (`src/utils/`)**: Support modules such as context management and
   serialization.
 
 ## Next Steps
 
-- Implement robust error handling and logging via `logging.yaml` configuration.
-- Add integration tests using mock COM interfaces to validate agent tooling.
-- Extend the tool library with geometry primitives, drawing creation, and BOM
-  management.
-- Integrate telemetry and audit trails for production deployments.
+- Configure telemetry, alerting, and operational dashboards for production
+  deployments.
+- Expand workflow library to cover drawing/BOM publication, approval routing,
+  and automated material assignments.
+- Harden the agent prompt/response pipeline with validation and safety checks
+  before executing destructive operations.
 
 ## License
 
