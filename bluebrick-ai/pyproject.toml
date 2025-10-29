@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bluebrick-ai"
+version = "0.1.0"
+description = "AI-assisted SolidWorks and PDM automation framework"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "BlueBrick Automation Team", email = "engineering@example.com" }
+]
+dependencies = [
+    "pywin32>=306",
+    "comtypes>=1.1.14",
+    "langchain>=0.1.0",
+    "openai>=1.0.0",
+    "pydantic>=2.6",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "prefect>=2.14",
+    "faiss-cpu>=1.7.4",
+    "python-dotenv>=1.0",
+    "loguru>=0.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-mock>=3.12",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
