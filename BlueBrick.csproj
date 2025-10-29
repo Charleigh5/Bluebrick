@@ -72,6 +72,7 @@
         <Compile Include="Forms\FrmPane.Designer.cs">
           <DependentUpon>FrmPane.cs</DependentUpon>
         </Compile>
+        <Compile Include="Forms\FrmSandbox.cs" />
         <Compile Include="Forms\FrmQueue.cs">
           <SubType>Form</SubType>
         </Compile>
@@ -100,6 +101,12 @@
         <Compile Include="SwAddin.cs">
             <SubType>Code</SubType>
         </Compile>
+        <Compile Include="Services\FileWorkspaceManager.cs" />
+        <Compile Include="Simulation\MockDocument.cs" />
+        <Compile Include="Simulation\MockApiLogger.cs" />
+        <Compile Include="Simulation\MockSolidWorksEnvironment.cs" />
+        <Compile Include="Simulation\MockSolidWorksExecutor.cs" />
+        <Compile Include="Simulation\UserInteractionSimulator.cs" />
     </ItemGroup>
     <ItemGroup>
         <EmbeddedResource Include="CollapsePanel.resx" />
