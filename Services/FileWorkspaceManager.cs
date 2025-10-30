@@ -86,7 +86,7 @@ namespace BlueBrick.Services
         {
             var absolute = ToAbsolutePath(relativePath);
             Directory.CreateDirectory(Path.GetDirectoryName(absolute) ?? WorkspaceRoot);
-            return File.WriteAllTextAsync(absolute, content ?? string.Empty);
+            return Task.Run(() => File.WriteAllText(absolute, content ?? string.Empty));
         }
 
         public void CreateDirectory(string relativePath)
@@ -126,7 +126,12 @@ namespace BlueBrick.Services
             if (File.Exists(absolute))
             {
                 var newPath = Path.Combine(Path.GetDirectoryName(absolute) ?? WorkspaceRoot, newName);
-                File.Move(absolute, newPath, true);
+                if (File.Exists(newPath))
+                {
+                    File.Delete(newPath);
+                }
+
+                File.Move(absolute, newPath);
             }
             else if (Directory.Exists(absolute))
             {

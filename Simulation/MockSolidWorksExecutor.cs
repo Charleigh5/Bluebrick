@@ -96,7 +96,7 @@ namespace BlueBrick.Simulation
                 return ApiExecutionResult.Failed(command, "File not found");
             }
 
-            var lines = await File.ReadAllLinesAsync(path, token);
+            var lines = File.ReadAllLines(path);
             return await _environment.ExecuteAsync(command, async ct =>
             {
                 for (var index = 0; index < lines.Length; index++)
