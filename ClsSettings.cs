@@ -50,6 +50,10 @@ namespace BlueBrick
 
         internal string GetSetting(string sVar, bool sec = false)
         {
+            // Security: Check environment variables first (allows .env overrides)
+            var envVal = Environment.GetEnvironmentVariable(sVar);
+            if (!string.IsNullOrEmpty(envVal)) return envVal;
+
             var rows = Settings.Select(@"settingName = '" + sVar + "'");
             if (rows.Length == 0) return null;
             var row = rows[0];
@@ -74,13 +78,17 @@ namespace BlueBrick
             Settings.AcceptChanges();
         }
 
-        private static readonly byte[]
-            EntropyKey = Encoding.Unicode.GetBytes("show me your kitties"); //lil salt for taste (>^.^<)
 
+        // SECURITY FIX: Removed hardcoded entropy (CRITICAL-03)
+        // Relying solely on DataProtectionScope.CurrentUser provides adequate protection
+        // for desktop applications without risk of publicly known entropy
+        
         //encrypt sensitive strings
         private static string Encrypt(string input)
         {
-            var encryptedData = ProtectedData.Protect(Encoding.Unicode.GetBytes(input), EntropyKey,
+            var encryptedData = ProtectedData.Protect(
+                Encoding.Unicode.GetBytes(input),
+                null,  // No entropy - DataProtectionScope.CurrentUser is sufficient
                 DataProtectionScope.CurrentUser);
             return Convert.ToBase64String(encryptedData);
         }
@@ -91,7 +99,9 @@ namespace BlueBrick
             string returnVal;
             try
             {
-                var decryptedData = ProtectedData.Unprotect(Convert.FromBase64String(input), EntropyKey,
+                var decryptedData = ProtectedData.Unprotect(
+                    Convert.FromBase64String(input),
+                    null,  // No entropy - must match Encrypt
                     DataProtectionScope.CurrentUser);
                 returnVal = Encoding.Unicode.GetString(decryptedData);
             }

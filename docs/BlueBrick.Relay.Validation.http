@@ -1,0 +1,80 @@
+@relayBase = https://localhost:7085
+@relayToken = bluebrick-relay-dev-token
+@deviceId = cweir-bluebrick-lab-01
+@deviceName = BlueBrick Lab on CWEIR-WS
+@agentBase = http://127.0.0.1:17179
+@agentToken = {{$dotenv AGENT_AUTH_TOKEN}}
+@assistantSessionId = REPLACE_ASSISTANT_SESSION_ID
+@previewSessionId = REPLACE_PREVIEW_SESSION_ID
+
+### Relay health
+GET {{relayBase}}/health
+
+### Protected resource metadata
+GET {{relayBase}}/.well-known/oauth-protected-resource
+
+### Device registration
+POST {{relayBase}}/devices/register
+X-Relay-Token: {{relayToken}}
+Content-Type: application/json
+
+{
+  "deviceId": "{{deviceId}}",
+  "deviceName": "{{deviceName}}",
+  "product": "BlueBrick Lab",
+  "sessions": []
+}
+
+### Device heartbeat
+POST {{relayBase}}/devices/heartbeat
+X-Relay-Token: {{relayToken}}
+Content-Type: application/json
+
+{
+  "deviceId": "{{deviceId}}",
+  "deviceName": "{{deviceName}}",
+  "product": "BlueBrick Lab",
+  "sessions": []
+}
+
+### Relay handoff
+GET {{relayBase}}/chatgpt/handoff?sessionId={{previewSessionId}}&deviceId={{deviceId}}
+
+### MCP unauthenticated challenge
+POST {{relayBase}}/mcp
+Content-Type: application/json
+Accept: application/json, text/event-stream
+MCP-Protocol-Version: 2025-06-18
+
+{
+  "jsonrpc": "2.0",
+  "id": "init-1",
+  "method": "initialize",
+  "params": {}
+}
+
+### Local assistant status
+GET {{agentBase}}/assistant/status
+X-Agent-Auth: {{agentToken}}
+
+### Local preview-session creation
+POST {{agentBase}}/chatgpt/session/create
+X-Agent-Auth: {{agentToken}}
+Content-Type: application/json
+
+{
+  "lastScreenshotPath": ""
+}
+
+### Local vault status
+GET {{agentBase}}/lab/vault/status
+X-Agent-Auth: {{agentToken}}
+
+### Local screenshot capture
+POST {{agentBase}}/assistant/screenshot
+X-Agent-Auth: {{agentToken}}
+Content-Type: application/json
+
+{
+  "sessionId": "{{assistantSessionId}}"
+}

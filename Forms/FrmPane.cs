@@ -12,6 +12,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using Environment = System.Environment;
 using System.Runtime.InteropServices;
 using SolidWorks.Interop.swconst;
@@ -21,7 +22,7 @@ namespace BlueBrick
 {
     public partial class FrmPane : Form
     {
-        private const string KeyPath = @"HKEY_CURRENT_USER\SOFTWARE\ViraInsight\BlueBrick\Settings";
+        private const string LocalModeValueName = "LocalMode";
         private readonly ListViewColumnSorter _lvSort;
         private readonly ISldWorks _swApp;
         public string SFolder;
@@ -29,7 +30,10 @@ namespace BlueBrick
         internal readonly ClsProperties Prop;
         private bool _pause;
         private readonly string _baseFolder;
+        private readonly bool _localMode;
         private ClsSettings _settings;
+        private AssistantPanel _assistantPanel;
+        private bool _assistantPanelLoadFailed;
 
         //public FrmPane(ISldWorks thisSw, int dpi)
         public FrmPane(ISldWorks thisSw)
@@ -49,16 +53,18 @@ namespace BlueBrick
             SetStat(0, "Addon loaded.");
             Prop = new ClsProperties(this);
 
+            SyncLocalModeSetting();
+            _localMode = IsLocalModeEnabled();
+
             //get user settings
-            var key = Registry.GetValue(KeyPath, @"GenUserPath", RegistryValueKind.String);
+            var key = Registry.GetValue(AppIdentity.RegistryRoot, @"GenUserPath", RegistryValueKind.String);
             if (key != null)
             {
                 txtGenLocPath.Text = key.ToString();
             }
             else
             {
-                txtGenLocPath.Text = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                txtGenLocPath.Text += @"\Working\";
+                txtGenLocPath.Text = GetDefaultGenerationFolder();
             }
 
             _lvSort = new ListViewColumnSorter();
@@ -94,8 +100,22 @@ namespace BlueBrick
             cplMainProp.Collapse();
             cplMainSfOpp.Collapse();
 
+            cplMainChat.Collapse();
+            cplMainChat.ExpandedStateChanged += async () =>
+            {
+                if (!cplMainChat.Collapsed)
+                {
+                    await EnsureAssistantPanelAsync();
+                }
+            };
+
             SetPaneVisible();
             SfSetState();
+
+            if (_localMode)
+            {
+                ConfigureLocalModeUi();
+            }
         }
 
         #region Document Generator Event Methods
@@ -119,7 +139,17 @@ namespace BlueBrick
             //set location
             if (radGenLocDesk.Checked) iOpt += (int)ClsEnums.EnumGenOptions.SaveToDesktop;
             if (radGenLocUser.Checked) iOpt += (int)ClsEnums.EnumGenOptions.SaveToUser;
-            if (radGenLocPDM.Checked) iOpt += (int)ClsEnums.EnumGenOptions.SaveToPdm;
+            if (radGenLocPDM.Checked && !_localMode) iOpt += (int)ClsEnums.EnumGenOptions.SaveToPdm;
+            if (_localMode && (iOpt & ((int)ClsEnums.EnumGenOptions.SaveToDesktop + (int)ClsEnums.EnumGenOptions.SaveToUser)) == 0)
+            {
+                iOpt += (int)ClsEnums.EnumGenOptions.SaveToUser;
+            }
+
+            if (_localMode && string.IsNullOrWhiteSpace(txtGenLocPath.Text))
+            {
+                txtGenLocPath.Text = GetDefaultGenerationFolder();
+            }
+
             SFolder = txtGenLocPath.Text;
 
             //fire at will!
@@ -140,7 +170,7 @@ namespace BlueBrick
         {
             if (fldrDiagOpen.ShowDialog() != DialogResult.OK) return;
             txtGenLocPath.Text = fldrDiagOpen.SelectedPath;
-            Registry.SetValue(KeyPath, @"GenUserPath", txtGenLocPath.Text, RegistryValueKind.String);
+            Registry.SetValue(AppIdentity.RegistryRoot, @"GenUserPath", txtGenLocPath.Text, RegistryValueKind.String);
         }
 
         private void btnGenPreCol_Click(object sender, EventArgs e)
@@ -184,7 +214,10 @@ namespace BlueBrick
             chkGenTypSTP.Checked = true;
             chkGenTypIGES.Checked = false;
             chkGenTypPkt.Checked = true;
-            radGenLocPDM.Select();
+            if (_localMode)
+                radGenLocUser.Select();
+            else
+                radGenLocPDM.Select();
         }
 
         private void btnGenPrePDF_Click(object sender, EventArgs e)
@@ -239,8 +272,7 @@ namespace BlueBrick
         private void radGenLocUser_CheckedChanged(object sender, EventArgs e)
         {
             if (txtGenLocPath.Text.Length != 0) return;
-            txtGenLocPath.Text = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-            txtGenLocPath.Text += @"\Working\";
+            txtGenLocPath.Text = GetDefaultGenerationFolder();
         }
 
         private void radGenScopeSingle_CheckedChanged(object sender, EventArgs e)
@@ -891,8 +923,10 @@ namespace BlueBrick
             {
                 msg = "Logging in...";
                 SetStat(0, msg, false, true);
-                var sf = new ClsSalesForce(ref _settings);
-                msg = !sf.Login() ? "Login failed!" : "Logged in successfully!";
+                //Archived 2026-02-06
+                //var sf = new ClsSalesForce(ref _settings);
+                //msg = !sf.Login() ? "Login failed!" : "Logged in successfully!";
+                msg = "Salesforce integration archived.";
             }
             else //logout
             {
@@ -976,11 +1010,14 @@ namespace BlueBrick
         private void GetTaskSf()
         {
             var bClear = false;
-            ClsSalesForce.Opportunity asRecord;
+            //Archived 2026-02-06
+            //ClsSalesForce.Opportunity asRecord;
+            object asRecord = null;
             if (txtSFOSOpp.Text.Length > 0)
             {
-                var sf = new ClsSalesForce(ref _settings);
-                asRecord = sf.GetOpp(txtSFOSOpp.Text);
+                //var sf = new ClsSalesForce(ref _settings);
+                //asRecord = sf.GetOpp(txtSFOSOpp.Text);
+                asRecord = null; //Force null as archived
                 if (asRecord == null)
                 {
                     bClear = true;
@@ -1000,10 +1037,10 @@ namespace BlueBrick
                 //todo: attachments
                 
                 // ReSharper disable once LocalizableElement
-                //txtSFOSDue.Text = DateTime.TryParse(asRecord[0, 2], out var dt) ? $"{dt:M/d/yyyy}" : "";
-                txtSFOSCust.Text = asRecord.records[0].Account.Name;
-                //txtSFOSUser.Text = asRecord[0, 1];
-                txtSFOSDesc.Text = asRecord.records[0].Opportunity_Description__c;
+            //txtSFOSDue.Text = DateTime.TryParse(asRecord[0, 2], out var dt) ? $"{dt:M/d/yyyy}" : "";
+                    //txtSFOSCust.Text = asRecord.records[0].Account.Name;
+                    //txtSFOSUser.Text = asRecord[0, 1];
+                    //txtSFOSDesc.Text = asRecord.records[0].Opportunity_Description__c;
 
                 //setup memo list
                 //cmbSFOSMemoSel.DataSource = null;
@@ -1299,6 +1336,46 @@ namespace BlueBrick
 
         #region General Event Methods
 
+        private void SyncLocalModeSetting()
+        {
+            var localModeSetting = _settings.GetSetting("localModeEnabled");
+            if (!bool.TryParse(localModeSetting, out var enabled))
+            {
+                enabled = AppIdentity.IsLabBuild;
+            }
+#if LAB_BUILD
+            enabled = true;
+#endif
+            Registry.SetValue(AppIdentity.RegistryRoot, LocalModeValueName, enabled.ToString(), RegistryValueKind.String);
+        }
+
+        private bool IsLocalModeEnabled()
+        {
+            var key = Registry.GetValue(AppIdentity.RegistryRoot, LocalModeValueName, null);
+            return key != null && bool.TryParse(key.ToString(), out var enabled) && enabled;
+        }
+
+        private string GetDefaultGenerationFolder()
+        {
+            var configured = _settings.GetSetting("localModeOutputPath");
+            if (_localMode && !string.IsNullOrWhiteSpace(configured)) return configured;
+
+            if (_localMode)
+            {
+                return AppIdentity.DefaultWorkingFolder;
+            }
+
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Working");
+        }
+
+        private void ConfigureLocalModeUi()
+        {
+            radGenLocPDM.Checked = false;
+            radGenLocPDM.Enabled = false;
+            radGenLocUser.Checked = true;
+            SetStat(0, "BlueBrick local mode is enabled. Output will stay outside PDM.");
+        }
+
         private void FrmPane_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.KeyCode != Keys.Tab) return;
@@ -1349,6 +1426,79 @@ namespace BlueBrick
             cplMainProp.Visible = !chk || show;
             chk = bool.TryParse(_settings.GetSetting("cplSalesForce"), out show);
             cplMainSfOpp.Visible = !chk || show;
+            chk = bool.TryParse(_settings.GetSetting("cplMainChatShow"), out show);
+            cplMainChat.Visible = !chk || show;
+
+            if (cplMainGen.Visible || cplMainLky.Visible || cplMainMisc.Visible || cplMainOpp.Visible ||
+                cplMainTls.Visible || cplMainEPS.Visible || cplMainProp.Visible || cplMainSfOpp.Visible ||
+                cplMainChat.Visible)
+            {
+                return;
+            }
+
+            cplMainGen.Visible = true;
+            cplMainLky.Visible = true;
+            cplMainMisc.Visible = true;
+            cplMainOpp.Visible = true;
+            cplMainTls.Visible = true;
+            cplMainEPS.Visible = true;
+            cplMainProp.Visible = true;
+            cplMainSfOpp.Visible = true;
+            cplMainChat.Visible = true;
+            SetStat(0, "BlueBrick panel visibility settings were invalid; restored all main panels for recovery.");
+        }
+
+        private async Task EnsureAssistantPanelAsync()
+        {
+            if (_assistantPanelLoadFailed)
+            {
+                return;
+            }
+
+            if (_assistantPanel == null)
+            {
+                try
+                {
+                    _assistantPanel = new AssistantPanel
+                    {
+                        Dock = DockStyle.Fill,
+                        Name = "_assistantPanel"
+                    };
+
+                    pnlAssistantHost.Controls.Clear();
+                    pnlAssistantHost.Controls.Add(_assistantPanel);
+                }
+                catch (Exception ex)
+                {
+                    ShowAssistantPanelError("AI Assistant failed to load.", ex);
+                    return;
+                }
+            }
+
+            try
+            {
+                await _assistantPanel.EnsureInitializedAsync();
+            }
+            catch (Exception ex)
+            {
+                ShowAssistantPanelError("AI Assistant failed to initialize.", ex);
+            }
+        }
+
+        private void ShowAssistantPanelError(string message, Exception ex)
+        {
+            _assistantPanelLoadFailed = true;
+            pnlAssistantHost.Controls.Clear();
+            pnlAssistantHost.Controls.Add(new Label
+            {
+                Dock = DockStyle.Fill,
+                ForeColor = Color.DarkRed,
+                Padding = new Padding(8),
+                Text = message + Environment.NewLine + ex.Message,
+                TextAlign = ContentAlignment.MiddleCenter
+            });
+
+            SetStat(0, message + " " + ex.Message);
         }
 
         private void btnOpt_Click(object sender, EventArgs e)

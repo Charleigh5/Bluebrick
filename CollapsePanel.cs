@@ -13,6 +13,8 @@ namespace BlueBrick
         private bool _collapsed;
         private int _height;
 
+        public event Action ExpandedStateChanged;
+
         public CollapsePanel()
         {
             InitializeComponent();
@@ -74,6 +76,8 @@ namespace BlueBrick
             {
                 Height = _height;
             }
+
+            ExpandedStateChanged?.Invoke();
         }
 
         public void Collapse()

@@ -56,8 +56,20 @@
         <settingName>cplSalesForce</settingName>
         <settingValue>True</settingValue>
     </settings>
-    <settings>
-        <settingName>cplMainPropShow</settingName>
-        <settingValue>True</settingValue>
-    </settings>
+<settings>
+<settingName>cplMainPropShow</settingName>
+<settingValue>True</settingValue>
+</settings>
+<settings>
+<settingName>cplMainChatShow</settingName>
+<settingValue>True</settingValue>
+</settings>
+  <settings>
+    <settingName>localModeEnabled</settingName>
+    <settingValue>False</settingValue>
+  </settings>
+  <settings>
+    <settingName>localModeOutputPath</settingName>
+    <settingValue></settingValue>
+  </settings>
 </dataroot>

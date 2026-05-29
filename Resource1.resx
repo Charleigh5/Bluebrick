@@ -267,7 +267,39 @@
       PublicKeyToken=b03f5f7f11d50a3a</value>
   </data>
   <data name="icon_TlsQueue" type="System.Resources.ResXFileRef, System.Windows.Forms">
-    <value>Resources\icon_TlsQueue.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral,
-      PublicKeyToken=b03f5f7f11d50a3a</value>
+    <value>Resources\icon_TlsQueue.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="icon_AssistantNew" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>Resources\icon_AssistantNew.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="icon_AssistantSnap" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>Resources\icon_AssistantSnap.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="icon_AssistantAttach" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>Resources\icon_AssistantAttach.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="icon_AssistantIndex" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>Resources\icon_AssistantIndex.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="icon_AssistantReset" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>Resources\icon_AssistantReset.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="icon_AssistantFolder" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>Resources\icon_AssistantFolder.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="icon_AssistantChat" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>Resources\icon_AssistantChat.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="icon_AssistantTest" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>Resources\icon_AssistantTest.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="icon_AssistantMode" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>Resources\icon_AssistantMode.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="icon_AssistantSettings" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>Resources\icon_AssistantSettings.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
+  <data name="icon_AssistantSend" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>Resources\icon_AssistantSend.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
   </data>
 </root>

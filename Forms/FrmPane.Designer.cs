@@ -271,6 +271,8 @@ namespace BlueBrick
 	        this.lstPropOrd = new System.Windows.Forms.ListView();
 	        this.tlpPropCmds = new System.Windows.Forms.TableLayoutPanel();
 	        this.cplMainTls = new BlueBrick.CollapsePanel();
+        this.cplMainChat = new BlueBrick.CollapsePanel();
+        this.pnlAssistantHost = new System.Windows.Forms.Panel();
 	        this.tlpMainTls = new System.Windows.Forms.TableLayoutPanel();
 	        this.btnTlsTaskQ = new System.Windows.Forms.Button();
 	        this.btnTlsDwgNum = new System.Windows.Forms.Button();
@@ -330,9 +332,10 @@ namespace BlueBrick
 	        this.tlpPropCmts.SuspendLayout();
 	        this.tpgPropOrd.SuspendLayout();
 	        this.tlpPropCmds.SuspendLayout();
-	        this.cplMainTls.Content.SuspendLayout();
-	        this.tlpMainTls.SuspendLayout();
-	        this.pnlMain.SuspendLayout();
+this.cplMainTls.Content.SuspendLayout();
+            this.tlpMainTls.SuspendLayout();
+            this.cplMainChat.Content.SuspendLayout();
+            this.pnlMain.SuspendLayout();
 	        this.tlpMain.SuspendLayout();
 	        this.tlpMainStat.SuspendLayout();
 	        this.SuspendLayout();
@@ -1814,6 +1817,38 @@ namespace BlueBrick
 	        this.cplMainMisc.Size = new System.Drawing.Size(223, 283);
 	        this.cplMainMisc.TabIndex = 6;
 	        this.cplMainMisc.Title = "Misc. Utilities";
+            //
+            // cplMainChat
+            //
+            this.cplMainChat.AutoScroll = true;
+            //
+            // cplMainChat.Content
+            //
+            this.cplMainChat.Content.AutoSize = true;
+            this.cplMainChat.Content.Controls.Add(this.pnlAssistantHost);
+            this.cplMainChat.Content.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.cplMainChat.Content.Location = new System.Drawing.Point(5, 24);
+            this.cplMainChat.Content.Margin = new System.Windows.Forms.Padding(4);
+            this.cplMainChat.Content.Name = "Content";
+            this.cplMainChat.Content.Size = new System.Drawing.Size(211, 360);
+            this.cplMainChat.Content.TabIndex = 1;
+            this.cplMainChat.Dock = System.Windows.Forms.DockStyle.Top;
+            this.cplMainChat.Location = new System.Drawing.Point(0, 0);
+            this.cplMainChat.Margin = new System.Windows.Forms.Padding(4);
+            this.cplMainChat.MaximumSize = new System.Drawing.Size(750, 812);
+            this.cplMainChat.MinimumSize = new System.Drawing.Size(90, 18);
+            this.cplMainChat.Name = "cplMainChat";
+            this.cplMainChat.Size = new System.Drawing.Size(223, 391);
+            this.cplMainChat.TabIndex = 8;
+            this.cplMainChat.Title = "AI Assistant";
+            //
+            // pnlAssistantHost
+            //
+            this.pnlAssistantHost.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.pnlAssistantHost.Location = new System.Drawing.Point(0, 0);
+            this.pnlAssistantHost.Name = "pnlAssistantHost";
+            this.pnlAssistantHost.Size = new System.Drawing.Size(211, 360);
+            this.pnlAssistantHost.TabIndex = 0;
 	        // 
 	        // tlpMainMisc
 	        // 
@@ -3665,6 +3700,7 @@ namespace BlueBrick
 	        this.pnlMain.Controls.Add(this.cplMainProp);
 	        this.pnlMain.Controls.Add(this.cplMainTls);
 	        this.pnlMain.Controls.Add(this.cplMainGen);
+            this.pnlMain.Controls.Add(this.cplMainChat);
 	        this.pnlMain.Dock = System.Windows.Forms.DockStyle.Fill;
 	        this.pnlMain.Location = new System.Drawing.Point(2, 2);
 	        this.pnlMain.Margin = new System.Windows.Forms.Padding(2);
@@ -3844,11 +3880,10 @@ namespace BlueBrick
 	        this.tpgPropOrd.ResumeLayout(false);
 	        this.tlpPropCmds.ResumeLayout(false);
 	        this.tlpPropCmds.PerformLayout();
-	        this.cplMainTls.Content.ResumeLayout(false);
-	        this.cplMainTls.Content.PerformLayout();
-	        this.tlpMainTls.ResumeLayout(false);
-	        this.tlpMainTls.PerformLayout();
-	        this.pnlMain.ResumeLayout(false);
+this.cplMainTls.Content.ResumeLayout(false);
+            this.tlpMainTls.ResumeLayout(false);
+            this.cplMainChat.Content.ResumeLayout(false);
+            this.pnlMain.ResumeLayout(false);
 	        this.tlpMain.ResumeLayout(false);
 	        this.tlpMain.PerformLayout();
 	        this.tlpMainStat.ResumeLayout(false);
@@ -3876,6 +3911,8 @@ namespace BlueBrick
         private BlueBrick.CollapsePanel cplMainProp;
         private BlueBrick.CollapsePanel cplMainSfOpp;
         private BlueBrick.CollapsePanel cplMainTls;
+        private BlueBrick.CollapsePanel cplMainChat;
+        private System.Windows.Forms.Panel pnlAssistantHost;
         private System.Windows.Forms.Button btnConvBfAdd;
         private System.Windows.Forms.Button btnConvBfClr;
         private System.Windows.Forms.Button btnConvBfDel;

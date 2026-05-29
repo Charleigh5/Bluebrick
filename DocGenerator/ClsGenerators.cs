@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Diagnostics;
@@ -13,12 +13,15 @@ using Microsoft.Win32;
 using PdfSharp.Pdf;
 using PdfSharp.Pdf.IO;
 using SolidWorks.Interop.swconst;
-using sw = SolidWorks.Interop.sldworks; //to resolve ambiguities with System.Windows.Forms.View
+using sw = SolidWorks.Interop.sldworks;
+using BlueBrick.Vault;
+using AppIdentity = BlueBrick.AppIdentity;
 
 namespace DocGenerator
 {
     internal class ClsGenerators
     {
+        private const string LocalModeValueName = "LocalMode";
         //constants
         private const string
             DxfFmt = @"C:\_PDMVault\Templates\VI Templates\VI DRAWING FOR DXF.drwdot"; //template for DXF
@@ -28,7 +31,9 @@ namespace DocGenerator
         private const string MiscFolderPath = @"\Misc\"; //png subfolder
         private readonly string _tempPath = Path.GetTempPath(); //temp folder
         private string _sFolder = "";
+        private string _dxfTemplatePath = DxfFmt;
         private int _progBar;
+        private bool _localMode;
         private bool _silent;
         private object _return;
 
@@ -46,6 +51,9 @@ namespace DocGenerator
                 //init globals
                 _swApp = swAppL;
                 _sFolder = sFolder;
+                _localMode = IsLocalModeEnabled();
+                if (_localMode && string.IsNullOrWhiteSpace(_sFolder))
+                    _sFolder = GetDefaultLocalOutputFolder();
                 if ((iOpt & (int)ClsEnums.EnumGenOptions.Silent) == (int)ClsEnums.EnumGenOptions.Silent)
                     _silent = true;
 
@@ -84,14 +92,38 @@ namespace DocGenerator
                 var setSaved = ChangeSettings();
                 ChangeSettings(true);
 
-                //login to vault
-                var oVault = (IEdmVault20)new EdmVault5();
-                if (!oVault.IsLoggedIn) oVault.LoginAuto(@"_PDMVault", 0);
+                var usePdm = !_localMode &&
+                             (iOpt & (int)ClsEnums.EnumGenOptions.SaveToPdm) ==
+                             (int)ClsEnums.EnumGenOptions.SaveToPdm;
+                IEdmVault20 oVault = null;
+                IEdmFile15 oFile = null;
+                IEdmFolder8 oFolder = null;
+                IEdmFolder5 oTemp = null;
+                if (usePdm)
+                {
+                    //login to vault
+                    oVault = (IEdmVault20)new EdmVault5();
+                    if (!oVault.IsLoggedIn) oVault.LoginAuto(@"_PDMVault", 0);
 
-                //get latest version of dxf template
-                var oFile = (IEdmFile15)oVault.GetFileFromPath(DxfFmt, out var oTemp);
-                var oFolder = (IEdmFolder8)oTemp;
-                if (oFile.CurrentVersion != oFile.GetLocalVersionNo2(oFolder.ID, out _)) oFile.GetFileCopy(0);
+                    //get latest version of dxf template
+                    oFile = (IEdmFile15)oVault.GetFileFromPath(DxfFmt, out oTemp);
+                    oFolder = (IEdmFolder8)oTemp;
+                    if (oFile != null &&
+                        oFile.CurrentVersion != oFile.GetLocalVersionNo2(oFolder.ID, out _))
+                        oFile.GetFileCopy(0);
+                }
+                else if (_localMode)
+                {
+                    Status(@"BlueBrick local mode is enabled. PDM and SQL writes are disabled.");
+                }
+
+                _dxfTemplatePath = ResolveDxfTemplatePath();
+                if ((iOpt & (int)ClsEnums.EnumGenOptions.Dxf) == (int)ClsEnums.EnumGenOptions.Dxf &&
+                    string.IsNullOrWhiteSpace(_dxfTemplatePath))
+                {
+                    Status(@"DXF output was skipped because no local DXF template was found.");
+                    iOpt &= ~(int)ClsEnums.EnumGenOptions.Dxf;
+                }
                 var dxfThumbs = new Dictionary<string, DxfThumb>();
                 var pdfThumbs = new Dictionary<string, PdfThumb>();
 
@@ -158,8 +190,7 @@ namespace DocGenerator
                 }
 
                 //check for locked documents
-                if ((iOpt & (int)ClsEnums.EnumGenOptions.SaveToPdm) ==
-                    (int)ClsEnums.EnumGenOptions.SaveToPdm)
+                if (usePdm)
                 {
                     var lstCheck = new Dictionary<string, string>();
                     foreach (var entry in lstCad)
@@ -305,21 +336,24 @@ namespace DocGenerator
                     if ((iOpt & iChk) != 0 && !(_silent && ent.Ignore)) //needs PDF
                     {
                         //get the latest version of drawing if PDM
-                        var oFileDrw = (IEdmFile15)oVault.GetFileFromPath(ent.Drawing, out var oTempDrw);
-                        if (oFileDrw != null)
+                        if (usePdm)
                         {
-                            oFileDrw.GetLocalVersionNo2(oTempDrw.ID, out var bObs);
-                            if (bObs)
+                            var oFileDrw = (IEdmFile15)oVault.GetFileFromPath(ent.Drawing, out var oTempDrw);
+                            if (oFileDrw != null)
                             {
-                                try
+                                oFileDrw.GetLocalVersionNo2(oTempDrw.ID, out var bObs);
+                                if (bObs)
                                 {
-                                    oFileDrw.GetFileCopy(0);
-                                }
-                                catch
-                                {
-                                    Status(@"You're version of '" + ent.Drawing +
-                                           "' is outdated. Failed to get latest version of file from PDM.");
-                                    continue;
+                                    try
+                                    {
+                                        oFileDrw.GetFileCopy(0);
+                                    }
+                                    catch
+                                    {
+                                        Status(@"You're version of '" + ent.Drawing +
+                                               "' is outdated. Failed to get latest version of file from PDM.");
+                                        continue;
+                                    }
                                 }
                             }
                         }
@@ -351,8 +385,7 @@ namespace DocGenerator
                             //var sTemp = swSheet.GetTemplateName();
 
                             //generate PDF
-                            if ((iOpt & (int)ClsEnums.EnumGenOptions.SaveToPdm) ==
-                                (int)ClsEnums.EnumGenOptions.SaveToPdm)
+                            if (usePdm)
                             {
                                 sPath = ent.Drawing.Substring(0, ent.Drawing.LastIndexOf('\\'));
                                 sPath = sPath.Substring(0, sPath.LastIndexOf('\\'));
@@ -367,7 +400,7 @@ namespace DocGenerator
                             if (ent.TopLevel != (int)ClsEnums.EnumGenTop.No &&
                                 (iOpt & (int)ClsEnums.EnumGenOptions.Packet) == (int)ClsEnums.EnumGenOptions.Packet)
                                 stamp = false;
-                            if (stamp)
+                            if (stamp && !_localMode)
                             {
                                 LogWeight(ent.Properties.PartNo, ent.Weight, ent.Weight);
                                 //    var doc = PdfReader.Open(sOut);
@@ -728,7 +761,8 @@ namespace DocGenerator
 
                     //stamp the PDF
                     //oOutDoc = StampPdf(oOutDoc, metal, _topTemplate, true, total); -remove stamping for now
-                    LogWeight(docPkt.Properties.PartNo, total, metal);
+                    if (!_localMode)
+                        LogWeight(docPkt.Properties.PartNo, total, metal);
 
                     //save the packet out
                     var sPkt = _tempPath + docPkt.FileName;
@@ -781,8 +815,7 @@ namespace DocGenerator
                 }
 
                 //process documents
-                if ((iOpt & (int)ClsEnums.EnumGenOptions.SaveToPdm) !=
-                    (int)ClsEnums.EnumGenOptions.SaveToPdm) //outside PDM
+                if (!usePdm) //outside PDM
                 {
                     //get the path depending on options
                     if ((iOpt & (int)ClsEnums.EnumGenOptions.SaveToDesktop) ==
@@ -811,9 +844,24 @@ namespace DocGenerator
                     foreach (var entry in lstDocs)
                     {
                         var ent = entry.Value;
+                        var finalPath = sPath + ent.FileName;
                         try
                         {
-                            File.Copy(_tempPath + ent.FileName, sPath + ent.FileName, true);
+                            File.Copy(_tempPath + ent.FileName, finalPath, true);
+                            if (AppIdentity.IsLabBuild)
+                            {
+                                VaultWorkspaceFactory.Current.SaveGeneratedArtifact(new GeneratedArtifactRecord
+                                {
+                                    SourcePath = _tempPath + ent.FileName,
+                                    OutputPath = finalPath,
+                                    ArtifactType = ResolveArtifactType(ent.FileName),
+                                    PartNumber = ent.Properties.PartNo,
+                                    DocumentNumber = ent.Properties.DocNo,
+                                    Description = ent.Properties.Description,
+                                    Customer = ent.Properties.Customer,
+                                    CreatedUtc = DateTime.UtcNow
+                                });
+                            }
                             try
                             {
                                 File.Delete(_tempPath + ent.FileName);
@@ -1166,7 +1214,7 @@ namespace DocGenerator
 
                 //create the drawing and activate
                 var swDraw = (sw.DrawingDoc)_swApp.NewDocument(
-                    DxfFmt, (int)swDwgPaperSizes_e.swDwgPaperEsize, 0, 0); //make new dwg
+                    _dxfTemplatePath, (int)swDwgPaperSizes_e.swDwgPaperEsize, 0, 0); //make new dwg
                 if (swDraw is null)
                 {
                     var sMsg = @"Failed to create drawing for DXF output during procedure GenDXF, ";
@@ -1180,7 +1228,7 @@ namespace DocGenerator
                 var swSheet = swDraw.Sheet[swSheets[0]]; //select the first sheet
                 swDraw.SetupSheet6(swSheet.GetName(), (int)swDwgPaperSizes_e.swDwgPaperEsize,
                     (int)swDwgTemplates_e.swDwgTemplateCustom,
-                    1, 1, false, DxfFmt, 0, 0, @"Default", true, 0.5, 0.5,
+                    1, 1, false, _dxfTemplatePath, 0, 0, @"Default", true, 0.5, 0.5,
                     0.5, 0.5, 1, 1); //set template
                 // ReSharper disable once SuspiciousTypeConversion.Global
                 sw.IModelDoc2 swTemp = (sw.ModelDoc2)swDraw;
@@ -1749,6 +1797,33 @@ namespace DocGenerator
             {
                 Status(@"Error '" + ex.Message + @"' during procedure CheckFeat");
             }
+        }
+
+        private static bool IsLocalModeEnabled()
+        {
+            var key = Registry.GetValue(AppIdentity.RegistryRoot, LocalModeValueName, null);
+            return key != null && bool.TryParse(key.ToString(), out var enabled) && enabled;
+        }
+
+        private static string GetDefaultLocalOutputFolder()
+        {
+            return AppIdentity.DefaultWorkingFolder;
+        }
+
+        private string ResolveDxfTemplatePath()
+        {
+            if (File.Exists(DxfFmt)) return DxfFmt;
+
+            var localTemplate = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                AppIdentity.ProductName, "Templates", "VI DRAWING FOR DXF.drwdot");
+            return File.Exists(localTemplate) ? localTemplate : string.Empty;
+        }
+
+        private static string ResolveArtifactType(string fileName)
+        {
+            var extension = Path.GetExtension(fileName);
+            if (string.IsNullOrWhiteSpace(extension)) return "misc";
+            return extension.TrimStart('.').ToLowerInvariant();
         }
 
         //get or set user settings

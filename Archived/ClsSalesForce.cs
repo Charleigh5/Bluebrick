@@ -39,13 +39,17 @@ namespace BlueBrick
             //set tls1.2 for sf
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 
+            //get settings
+            var clientId = _clsSettings.GetSetting("sfClientId") ?? "3MVG9dZJodJWITSuBuCvzSXGEXK7wa47mSU1SLqJXN.6fFhtb40dRlqP2MjFw8dlnLPJHdtsDczVtjl2banNu"; // Fallback to default if not set
+            var redirectUri = _clsSettings.GetSetting("sfRedirectUri") ?? "http://localhost/winforms.client";
+
             //init sf api options
             var options = new OidcClientOptions
             {
                 Authority = @"https://virainsight.my.salesforce.com/",
-                ClientId = @"3MVG9dZJodJWITSuBuCvzSXGEXK7wa47mSU1SLqJXN.6fFhtb40dRlqP2MjFw8dlnLPJHdtsDczVtjl2banNu",
+                ClientId = clientId,
                 Scope = @"full refresh_token offline_access",
-                RedirectUri = @"http://localhost/winforms.client"
+                RedirectUri = redirectUri
             };
 
             var oidcClient = new OidcClient(options);
@@ -117,6 +121,13 @@ namespace BlueBrick
         {
             try
             {
+                // Validate input to prevent SOQL injection
+                if (string.IsNullOrWhiteSpace(oppNum) || !System.Text.RegularExpressions.Regex.IsMatch(oppNum, @"^[a-zA-Z0-9_\-]+$"))
+                {
+                     // Invalid input format
+                     return null;
+                }
+
                 //generate query
                 var query =
                     $@"SELECT Id, Opportunity_Description__c, Account.Name, Owner.Email FROM Opportunity WHERE Opportunity_Number__c = '{oppNum}'";

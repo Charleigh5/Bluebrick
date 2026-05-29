@@ -1,0 +1,35 @@
+## Build output
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+
+## Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## NuGet
+packages/
+*.nupkg
+
+## Environment / secrets
+.env
+.env.*
+!.env.example
+
+## Temp files
+*.tmp
+*.bak
+tmp-snapshot.txt
+
+## IDE
+.vscode/
+.idea/
+
+## Test artifacts
+TestResults/
+Forms/_write_test.txt
+Forms/hello2.txt

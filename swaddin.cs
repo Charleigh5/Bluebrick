@@ -16,6 +16,7 @@ using SolidWorks.Interop.swconst;
 using SolidWorks.Interop.swpublished;
 using SolidWorksTools;
 using SolidWorksTools.File;
+using BlueBrick.Agent;
 using Attribute = System.Attribute;
 
 // ReSharper disable LocalizableElement
@@ -25,11 +26,17 @@ namespace BlueBrick
     ///     Summary description for SolidWorksAddIn1.
     /// </summary>
     [SuppressMessage("ReSharper", "InconsistentNaming")]
-    [Guid("C56E0AFF-0BD3-4364-90CB-1A581046CD7D")]
+    [Guid(
+#if LAB_BUILD
+        "251d6df2-3e7b-42ef-b7fc-175e1fdcb4c5"
+#else
+        "C56E0AFF-0BD3-4364-90CB-1A581046CD7D"
+#endif
+    )]
     [ComVisible(true)]
     [SwAddin(
-        Description = "ViraInsight SolidWorks add-in",
-        Title = "BlueBrick",
+        Description = AppIdentity.AddinDescription,
+        Title = AppIdentity.ProductName,
         LoadAtStartup = true
     )]
     public class SwAddin : ISwAddin
@@ -50,10 +57,50 @@ namespace BlueBrick
         private FrmPane TaskPanWinFormControl;
         private FrmSandbox _developmentSandbox;
         private int addinID;
+        private static bool _dependencyResolverRegistered;
+
+        private AgentHttpServer _agentServer;
+        private AgentOverlay _agentOverlay;
+        private AgentConfig _agentConfig;
+        private FrmAgentWindow _agentWindow;
+#if LAB_BUILD
+        private FrmAssistantWindow _assistantWindow;
+#endif
 
         private BitmapHandler iBmp;
         //private int registerID;
 
+#if LAB_BUILD
+        public const int mainCmdGroupID = 3215;
+        public const int mainItemID1 = 3300;
+        public const int mainItemID2 = 3301;
+        public const int mainItemID3 = 3302;
+        public const int mainItemID4 = 3303;
+        public const int mainItemID5 = 3304;
+        public const int mainItemID6 = 3305;
+        public const int mainItemID7 = 3306;
+        public const int mainItemID8 = 3307;
+        public const int mainItemID9 = 3308;
+        public const int mainItemID10 = 3309;
+        public const int mainItemID11 = 3310;
+        public const int mainItemID12 = 3311;
+        public const int mainItemID13 = 3312;
+        public const int mainItemID14 = 3313;
+        public const int mainItemID15 = 3314;
+        public const int mainItemID16 = 3315;
+        public const int mainItemID17 = 3316;
+        public const int mainItemID18 = 3317;
+        public const int mainItemID19 = 3318;
+        public const int mainItemID20 = 3319;
+        public const int mainItemID21 = 3320;
+        public const int mainItemID22 = 3321;
+        public const int mainItemID23 = 3322;
+        public const int mainItemID24 = 3323;
+        public const int mainItemID25 = 3324;
+        public const int mainItemID26 = 3325;
+        public const int mainItemID27 = 3326;
+        public const int flyoutGroupID = 3436;
+#else
         public const int mainCmdGroupID = 2215;
         public const int mainItemID1 = 2300;
         public const int mainItemID2 = 2301;
@@ -82,6 +129,7 @@ namespace BlueBrick
         public const int mainItemID25 = 2324;
         public const int mainItemID26 = 2325;
         public const int flyoutGroupID = 2436;
+#endif
 
         private string[] mainIcons = new string[3];
         private string[] icons = new string[3];
@@ -187,64 +235,162 @@ namespace BlueBrick
 
         public bool ConnectToSW(object ThisSW, int cookie)
         {
+            EnsureDependencyResolution();
+            TraceDiagnostic("ConnectToSW start");
             SwApp = (ISldWorks)ThisSW;
             addinID = cookie;
 
             //Setup callbacks
-            SwApp.SetAddinCallbackInfo(0, this, addinID);
+            try
+            {
+                SwApp.SetAddinCallbackInfo(0, this, addinID);
+                TraceDiagnostic("SetAddinCallbackInfo complete");
+            }
+            catch (Exception ex)
+            {
+                TraceDiagnostic("SetAddinCallbackInfo failed: " + ex);
+            }
 
             #region Setup the Command Manager
 
-            CmdMgr = SwApp.GetCommandManager(cookie);
-            AddCommandMgr();
+            try
+            {
+                CmdMgr = SwApp.GetCommandManager(cookie);
+                AddCommandMgr();
+                TraceDiagnostic("Command manager initialized");
+            }
+            catch (Exception ex)
+            {
+                TraceDiagnostic("Command manager initialization failed: " + ex);
+            }
 
             #endregion
 
             #region Setup the Event Handlers
 
-            SwEventPtr = (SldWorks)SwApp;
-            OpenDocs = new Hashtable();
-            AttachEventHandlers();
+            try
+            {
+                SwEventPtr = (SldWorks)SwApp;
+                OpenDocs = new Hashtable();
+                AttachEventHandlers();
+                TraceDiagnostic("Event handlers attached");
+            }
+            catch (Exception ex)
+            {
+                TraceDiagnostic("Event handler attachment failed: " + ex);
+            }
 
             #endregion
 
             #region Setup Icons
 
             var bitmap = new string[6];
-            var sTemp = Path.GetTempPath();
-            var imgFmt = ImageFormat.Png;
-            var sPath = sTemp + "ViraInsight_icon20.png";
-            Resource1.ViraInsight_icon20.Save(sPath, imgFmt);
-            bitmap[0] = sPath;
-            sPath = sTemp + "ViraInsight_icon32.png";
-            Resource1.ViraInsight_icon32.Save(sPath, imgFmt);
-            bitmap[1] = sPath;
-            sPath = sTemp + "ViraInsight_icon40.png";
-            Resource1.ViraInsight_icon40.Save(sPath, imgFmt);
-            bitmap[2] = sPath;
-            sPath = sTemp + "ViraInsight_icon64.png";
-            Resource1.ViraInsight_icon64.Save(sPath, imgFmt);
-            bitmap[3] = sPath;
-            sPath = sTemp + "ViraInsight_icon96.png";
-            Resource1.ViraInsight_icon96.Save(sPath, imgFmt);
-            bitmap[4] = sPath;
-            sPath = sTemp + "ViraInsight_icon128.png";
-            Resource1.ViraInsight_icon128.Save(sPath, imgFmt);
-            bitmap[5] = sPath;
+            try
+            {
+                var sTemp = Path.GetTempPath();
+                var imgFmt = ImageFormat.Png;
+                var sPath = sTemp + "ViraInsight_icon20.png";
+                Resource1.ViraInsight_icon20.Save(sPath, imgFmt);
+                bitmap[0] = sPath;
+                sPath = sTemp + "ViraInsight_icon32.png";
+                Resource1.ViraInsight_icon32.Save(sPath, imgFmt);
+                bitmap[1] = sPath;
+                sPath = sTemp + "ViraInsight_icon40.png";
+                Resource1.ViraInsight_icon40.Save(sPath, imgFmt);
+                bitmap[2] = sPath;
+                sPath = sTemp + "ViraInsight_icon64.png";
+                Resource1.ViraInsight_icon64.Save(sPath, imgFmt);
+                bitmap[3] = sPath;
+                sPath = sTemp + "ViraInsight_icon96.png";
+                Resource1.ViraInsight_icon96.Save(sPath, imgFmt);
+                bitmap[4] = sPath;
+                sPath = sTemp + "ViraInsight_icon128.png";
+                Resource1.ViraInsight_icon128.Save(sPath, imgFmt);
+                bitmap[5] = sPath;
+                TraceDiagnostic("Task pane icons prepared");
+            }
+            catch (Exception ex)
+            {
+                TraceDiagnostic("Task pane icon preparation failed: " + ex);
+            }
 
             #endregion Setup Icons
 
             #region Create task pane View
 
-            const string toolTip = "ViraInsight BlueBrick";
-            if (SwApp == null) return true;
+            try
+            {
+                var toolTip = "ViraInsight " + AppIdentity.ProductName;
+                if (SwApp == null) return true;
 
-            var ctrl = SwApp.CreateTaskpaneView3(bitmap, toolTip);
-            TaskPanWinFormControl = new FrmPane(SwApp);
-            ctrl.DisplayWindowFromHandle(TaskPanWinFormControl.Handle.ToInt32());
+                var ctrl = SwApp.CreateTaskpaneView3(bitmap, toolTip);
+                if (ctrl == null)
+                {
+                    TraceDiagnostic("CreateTaskpaneView3 returned null");
+                }
+                else
+                {
+                    TraceDiagnostic("Creating FrmPane instance");
+                    TaskPanWinFormControl = new FrmPane(SwApp);
+                    TraceDiagnostic("FrmPane constructed");
+                    var handle = TaskPanWinFormControl.Handle;
+                    TraceDiagnostic("FrmPane handle created: " + handle);
+                    ctrl.DisplayWindowFromHandle(handle.ToInt32());
+                    TraceDiagnostic("Task pane hosted from handle");
+                    TraceDiagnostic("Task pane created");
+                }
+            }
+            catch (Exception ex)
+            {
+                TraceDiagnostic("Task pane creation failed: " + ex);
+            }
 
             #endregion Create task pane View
 
+            try
+            {
+                _agentConfig = AgentConfig.Load();
+                TraceDiagnostic("AgentConfig.Load complete");
+
+                // Initialize the font loader with fonts from the configured path
+                try
+                {
+                var assemblyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                if (assemblyPath != null && _agentConfig.UI?.Fonts?.FontsPath != null)
+                {
+                    AgentFontLoader.Initialize(_agentConfig);
+                    TraceDiagnostic("AgentFontLoader initialized");
+                }
+                }
+                catch (Exception fontEx)
+                {
+                    // Log font loading errors but don't block add-in startup
+                    Console.WriteLine("Font loader initialization failed: " + fontEx.Message);
+                    TraceDiagnostic("AgentFontLoader failed: " + fontEx);
+                }
+
+                _agentOverlay = new AgentOverlay(ParseColor(_agentConfig.Agent.OverlayColor));
+                TraceDiagnostic("AgentOverlay created");
+                _agentServer = new AgentHttpServer(SwApp, _agentConfig, _agentOverlay);
+                TraceDiagnostic("AgentHttpServer created");
+                _agentServer.Start();
+                TraceDiagnostic("AgentHttpServer started");
+#if LAB_BUILD
+                if (_assistantWindow == null || _assistantWindow.IsDisposed)
+                {
+                    _assistantWindow = new FrmAssistantWindow();
+                }
+                _assistantWindow.Show();
+                TraceDiagnostic("Assistant window shown");
+#endif
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Agent server failed to start: " + ex.Message);
+                TraceDiagnostic("Agent startup failed: " + ex);
+            }
+
+            TraceDiagnostic("ConnectToSW success");
             return true;
         }
 
@@ -265,6 +411,17 @@ namespace BlueBrick
             RemoveCommandMgr();
             DetachEventHandlers();
 
+            try
+            {
+                _agentServer?.Stop();
+                _agentOverlay?.HideOverlay();
+                _agentOverlay?.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+
             Marshal.ReleaseComObject(CmdMgr);
             CmdMgr = null;
             Marshal.ReleaseComObject(SwApp);
@@ -280,6 +437,97 @@ namespace BlueBrick
         }
 
         #endregion
+
+        private static Color ParseColor(string hex)
+        {
+            try
+            {
+                return ColorTranslator.FromHtml(hex);
+            }
+            catch
+            {
+                return Color.LimeGreen;
+            }
+        }
+
+        private static void TraceDiagnostic(string message)
+        {
+            try
+            {
+                var assemblyDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? Path.GetTempPath();
+                var path = Path.Combine(assemblyDir, "bluebrick-startup.log");
+                File.AppendAllText(path, DateTime.Now.ToString("O") + " | " + message + System.Environment.NewLine);
+            }
+            catch
+            {
+                // ignore diagnostic logging failures
+            }
+        }
+
+        private static void EnsureDependencyResolution()
+        {
+            if (_dependencyResolverRegistered)
+            {
+                return;
+            }
+
+            AppDomain.CurrentDomain.AssemblyResolve += ResolveLocalDependency;
+            _dependencyResolverRegistered = true;
+            TraceDiagnostic("AssemblyResolve handler registered");
+        }
+
+        private static Assembly ResolveLocalDependency(object sender, ResolveEventArgs args)
+        {
+            try
+            {
+                var requested = new AssemblyName(args.Name).Name;
+                if (string.IsNullOrWhiteSpace(requested))
+                {
+                    return null;
+                }
+
+                var knownDependencies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "System.Resources.Extensions",
+                    "System.Buffers",
+                    "System.Memory",
+                    "System.Numerics.Vectors",
+                    "System.Runtime.CompilerServices.Unsafe",
+                    "System.Text.Encodings.Web",
+                    "System.Text.Json",
+                    "System.Threading.Tasks.Extensions",
+                    "Microsoft.Bcl.AsyncInterfaces",
+                    "System.ValueTuple",
+                    "netstandard"
+                };
+
+                if (!knownDependencies.Contains(requested))
+                {
+                    return null;
+                }
+
+                var assemblyDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                if (string.IsNullOrWhiteSpace(assemblyDir))
+                {
+                    return null;
+                }
+
+                var candidate = Path.Combine(assemblyDir, requested + ".dll");
+                if (!File.Exists(candidate))
+                {
+                    TraceDiagnostic("AssemblyResolve missing candidate: " + candidate);
+                    return null;
+                }
+
+                TraceDiagnostic("AssemblyResolve loading: " + candidate + " for " + args.Name);
+                return Assembly.LoadFrom(candidate);
+            }
+            catch (Exception ex)
+            {
+                TraceDiagnostic("AssemblyResolve failed: " + ex);
+                return null;
+            }
+        }
 
         #region UI Methods
 
@@ -331,7 +579,10 @@ namespace BlueBrick
                 mainItemID23,
                 mainItemID24,
                 mainItemID25,
-                mainItemID26
+mainItemID26
+#if LAB_BUILD
+        , mainItemID27
+#endif
             };
             if (getDataResult)
                 if (!CompareIDs((int[])registryIDs, knownIDs)) //if the IDs don't match, reset the commandGroup
@@ -404,9 +655,14 @@ namespace BlueBrick
             var cmdIndex11 = cmdGroup.AddCommandItem2("Sheet Rename", -1, "Renumber all sheets on drawing.",
                 "Sheet Rename", 11,
                 "barDrawRename", "", mainItemID25, menuToolbarOption);
-            var cmdIndex12 = cmdGroup.AddCommandItem2("Development Sandbox", -1,
-                "Launch the simulated SolidWorks development environment.", "Development Sandbox", 12,
-                nameof(OpenDevelopmentSandbox), "", mainItemID26, menuToolbarOption);
+var cmdIndex12 = cmdGroup.AddCommandItem2("Agent", -1, "Open VIRA Agent",
+            "Agent", 12,
+            "barAgent", "", mainItemID26, menuToolbarOption);
+#if LAB_BUILD
+            cmdGroup.AddCommandItem2("Assistant", -1, "Open BlueBrick Lab Assistant",
+            "Assistant", 12,
+            "barAssistant", "", mainItemID27, menuToolbarOption);
+#endif
             cmdGroup.AddCommandItem2("Get ASY", -1, "Get a new ASY number for the current part.", "Get ASY", 1,
                 "barPullSerial(1)", "", mainItemID9, menuToolbarOption);
             cmdGroup.AddCommandItem2("Get SUB", -1, "Get a new SUB number for the current part.", "Get SUB", 1,
@@ -643,6 +899,43 @@ namespace BlueBrick
         {
             ClsTools.CopyDwg(TaskPanWinFormControl, SwApp);
         }
+
+        public void barAgent()
+        {
+            try
+            {
+                if (_agentWindow == null || _agentWindow.IsDisposed)
+                {
+                    _agentWindow = new FrmAgentWindow();
+                }
+                _agentWindow.Show();
+                _agentWindow.BringToFront();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to open VIRA Agent panel: " + ex.Message);
+            }
+        }
+
+#if LAB_BUILD
+        public void barAssistant()
+        {
+            try
+            {
+                if (_assistantWindow == null || _assistantWindow.IsDisposed)
+                {
+                    _assistantWindow = new FrmAssistantWindow();
+                }
+
+                _assistantWindow.Show();
+                _assistantWindow.BringToFront();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to open BlueBrick Lab Assistant: " + ex.Message);
+            }
+        }
+#endif
 
         public void barShowHide()
         {

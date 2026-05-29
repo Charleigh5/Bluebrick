@@ -43,10 +43,19 @@ namespace BlueBrick
 
         private async Task PrepBrowser()
         {
-            var env = CoreWebView2Environment.CreateAsync(userDataFolder: Path.GetTempPath()).Result;
             try
             {
+                var env = await CoreWebView2Environment.CreateAsync(userDataFolder: Path.GetTempPath());
                 await wvwSfLogin.EnsureCoreWebView2Async(env);
+
+                // Hardening: Disable features not needed for auth
+                if (wvwSfLogin.CoreWebView2 != null)
+                {
+                    wvwSfLogin.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                    wvwSfLogin.CoreWebView2.Settings.AreDevToolsEnabled = false;
+                    wvwSfLogin.CoreWebView2.Settings.IsWebMessageEnabled = false;
+                }
+
                 wvwSfLogin.CoreWebView2.CookieManager.DeleteAllCookies();
                 wvwSfLogin.CoreWebView2.Navigate(_startUrl);
             }

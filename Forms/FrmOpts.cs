@@ -33,6 +33,8 @@ namespace BlueBrick
             chkSalesForce.Checked = !chk || show;
             chk = bool.TryParse(Settings.GetSetting("cplMainPropShow"), out show);
             chkProp.Checked = !chk || show;
+            chk = bool.TryParse(Settings.GetSetting("cplMainChatShow"), out show);
+            chkChat.Checked = !chk || show;
 
             //salesforce user api
             chk = bool.TryParse(Settings.GetSetting("sfLoggedIn"), out show);
@@ -66,6 +68,7 @@ namespace BlueBrick
             Settings.SetSetting("cplMainEPSShow", chkEpiSrch.Checked.ToString());
             Settings.SetSetting("cplSalesForce", chkSalesForce.Checked.ToString());
             Settings.SetSetting("cplMainPropShow", chkProp.Checked.ToString());
+            Settings.SetSetting("cplMainChatShow", chkChat.Checked.ToString());
 
             //cleanup
             Settings.WriteSettings();

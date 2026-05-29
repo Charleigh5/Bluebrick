@@ -588,5 +588,82 @@ namespace BlueBrick {
                 return ((System.Drawing.Bitmap)(obj));
             }
         }
+
+        internal static System.Drawing.Bitmap icon_AssistantNew {
+            get {
+                object obj = ResourceManager.GetObject("icon_AssistantNew", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+
+        internal static System.Drawing.Bitmap icon_AssistantSnap {
+            get {
+                object obj = ResourceManager.GetObject("icon_AssistantSnap", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+
+        internal static System.Drawing.Bitmap icon_AssistantAttach {
+            get {
+                object obj = ResourceManager.GetObject("icon_AssistantAttach", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+
+        internal static System.Drawing.Bitmap icon_AssistantIndex {
+            get {
+                object obj = ResourceManager.GetObject("icon_AssistantIndex", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+
+        internal static System.Drawing.Bitmap icon_AssistantReset {
+            get {
+                object obj = ResourceManager.GetObject("icon_AssistantReset", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+
+        internal static System.Drawing.Bitmap icon_AssistantFolder {
+            get {
+                object obj = ResourceManager.GetObject("icon_AssistantFolder", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+
+        internal static System.Drawing.Bitmap icon_AssistantChat {
+            get {
+                object obj = ResourceManager.GetObject("icon_AssistantChat", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+
+        internal static System.Drawing.Bitmap icon_AssistantTest {
+            get {
+                object obj = ResourceManager.GetObject("icon_AssistantTest", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+
+    internal static System.Drawing.Bitmap icon_AssistantMode {
+        get {
+            object obj = ResourceManager.GetObject("icon_AssistantMode", resourceCulture);
+            return ((System.Drawing.Bitmap)(obj));
+        }
     }
+
+    internal static System.Drawing.Bitmap icon_AssistantSettings {
+        get {
+            object obj = ResourceManager.GetObject("icon_AssistantSettings", resourceCulture);
+            return ((System.Drawing.Bitmap)(obj));
+        }
+    }
+
+    internal static System.Drawing.Bitmap icon_AssistantSend {
+        get {
+            object obj = ResourceManager.GetObject("icon_AssistantSend", resourceCulture);
+            return ((System.Drawing.Bitmap)(obj));
+        }
+    }
+}
 }

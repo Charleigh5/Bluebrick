@@ -6,6 +6,7 @@ using System.Windows.Forms;
 using EPDM.Interop.epdm;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
+using BlueBrick.Vault;
 
 namespace BlueBrick
 {
@@ -23,6 +24,41 @@ namespace BlueBrick
                 }
 
                 sSearch = sSearch.Trim();
+
+#if LAB_BUILD
+                var workspace = VaultWorkspaceFactory.Current;
+                frmStat.SetStat(iStat: 0, sStat: @"Searching local lab vault...", bDone: false, bStart: true);
+                var results = workspace.Search(sSearch, 12);
+                if (results.Count == 0)
+                {
+                    frmStat.SetStat(iStat: 100, sStat: @"No files were found.", bDone: true);
+                    return;
+                }
+
+                frmStat.SetStat(iStat: 60, sStat: results.Count + @" results returned. Adding to list...");
+                var listViewItems = new ListViewItem[results.Count];
+                for (var i = 0; i < results.Count; i++)
+                {
+                    var result = results[i];
+                    var item = new ListViewItem(text: result.Id, imageIndex: i);
+                    item.SubItems.Add(text: result.FileName);
+                    item.SubItems.Add(text: result.DirectoryPath);
+                    if (!string.IsNullOrWhiteSpace(result.ThumbnailPath) && System.IO.File.Exists(result.ThumbnailPath))
+                    {
+                        frmStat.imlThumbs.Images.Add(Image.FromFile(result.ThumbnailPath));
+                    }
+                    else
+                    {
+                        frmStat.imlThumbs.Images.Add(Resource1.thumb);
+                    }
+
+                    listViewItems[i] = item;
+                }
+
+                frmStat.lstLkyResults.Items.AddRange(listViewItems);
+                frmStat.SetStat(iStat: 100, sStat: @"Operation completed successfully.", bDone: true);
+                return;
+#endif
 
                 //login to vault
                 frmStat.SetStat(iStat: 0, sStat: @"Logging into vault...", bDone: false, bStart: true);
@@ -126,6 +162,14 @@ namespace BlueBrick
         {
             try
             {
+#if LAB_BUILD
+                var workspace = VaultWorkspaceFactory.Current;
+                var resolved = workspace.ResolveFile(sFile) ?? workspace.ResolveFile(iFileId.ToString());
+                var openPath = resolved?.FullPath ?? sFile;
+                OpenLocalFile(frmStat, swApp, openPath, bIns);
+                return;
+#endif
+
                 //login to vault
                 var oVault = (IEdmVault20)new EdmVault5();
                 if (!oVault.IsLoggedIn) oVault.LoginAuto(@"_PDMVault", 0);
@@ -206,6 +250,58 @@ namespace BlueBrick
             {
                 frmStat.SetStat(100, ex.Message, true);
             }
+        }
+
+        private static void OpenLocalFile(FrmPane frmStat, ISldWorks swApp, string filePath, bool insert)
+        {
+            if (!System.IO.File.Exists(filePath))
+            {
+                frmStat.SetStat(100, @"File not found in lab vault.", true, true);
+                return;
+            }
+
+            frmStat.SetStat(0, @"Opening local file...", false, true);
+            var extension = System.IO.Path.GetExtension(filePath).ToUpperInvariant();
+            int docType;
+            switch (extension)
+            {
+                case ".SLDASM":
+                    docType = (int)swDocumentTypes_e.swDocASSEMBLY;
+                    break;
+                case ".SLDDRW":
+                    if (insert)
+                    {
+                        frmStat.SetStat(100, @"Cannot insert drawing.", true);
+                        return;
+                    }
+                    docType = (int)swDocumentTypes_e.swDocDRAWING;
+                    break;
+                case ".SLDPRT":
+                    docType = (int)swDocumentTypes_e.swDocPART;
+                    break;
+                default:
+                    frmStat.SetStat(100, @"Not a SolidWorks file, aborting...", true);
+                    return;
+            }
+
+            var errors = 0;
+            var warnings = 0;
+            if (insert)
+            {
+                var model = (ModelDoc2)swApp.ActiveDoc;
+                if (model != null && model.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY)
+                {
+                    var assembly = (AssemblyDoc)model;
+                    assembly.AddComponent5(filePath, 0, "", false, "", 0, 0, 0);
+                }
+            }
+            else
+            {
+                swApp.OpenDoc6(filePath, docType, (int)swOpenDocOptions_e.swOpenDocOptions_Silent, "", ref errors,
+                    ref warnings);
+            }
+
+            frmStat.SetStat(100, @"Operation completed successfully.", true);
         }
     }
 }

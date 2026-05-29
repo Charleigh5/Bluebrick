@@ -57,6 +57,8 @@ namespace BlueBrick
             this.lblEpiSrch = new System.Windows.Forms.Label();
             this.lblEpiOpp = new System.Windows.Forms.Label();
             this.lblMisc = new System.Windows.Forms.Label();
+            this.chkChat = new System.Windows.Forms.CheckBox();
+            this.lblChat = new System.Windows.Forms.Label();
             this.chkGen = new System.Windows.Forms.CheckBox();
             this.chkTools = new System.Windows.Forms.CheckBox();
             this.chkProp = new System.Windows.Forms.CheckBox();
@@ -84,7 +86,7 @@ namespace BlueBrick
             this.tlpOpts.Controls.Add(this.chkSalesForce, 1, 8);
             this.tlpOpts.Controls.Add(this.lblSalesForce, 0, 8);
             this.tlpOpts.Controls.Add(this.lblSetting, 0, 0);
-            this.tlpOpts.Controls.Add(this.tlpSfFields, 0, 10);
+            this.tlpOpts.Controls.Add(this.tlpSfFields, 0, 11);
             this.tlpOpts.Controls.Add(this.lblValue, 1, 0);
             this.tlpOpts.Controls.Add(this.lblViki, 0, 1);
             this.tlpOpts.Controls.Add(this.lblGen, 0, 2);
@@ -102,10 +104,13 @@ namespace BlueBrick
             this.tlpOpts.Controls.Add(this.chkEpiOpp, 1, 7);
             this.tlpOpts.Controls.Add(this.txtViki, 1, 1);
             this.tlpOpts.Controls.Add(this.chkMisc, 1, 9);
+            this.tlpOpts.Controls.Add(this.lblChat, 0, 10);
+            this.tlpOpts.Controls.Add(this.chkChat, 1, 10);
             this.tlpOpts.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tlpOpts.Location = new System.Drawing.Point(3, 3);
             this.tlpOpts.Name = "tlpOpts";
-            this.tlpOpts.RowCount = 11;
+            this.tlpOpts.RowCount = 12;
+            this.tlpOpts.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 6F));
             this.tlpOpts.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 6F));
             this.tlpOpts.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 6F));
             this.tlpOpts.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 6F));
@@ -444,6 +449,24 @@ namespace BlueBrick
             this.chkMisc.TabIndex = 19;
             this.chkMisc.Text = "Visible";
             this.chkMisc.UseVisualStyleBackColor = true;
+            //
+            // chkChat
+            //
+            this.chkChat.Location = new System.Drawing.Point(137, 304);
+            this.chkChat.Name = "chkChat";
+            this.chkChat.Size = new System.Drawing.Size(104, 19);
+            this.chkChat.TabIndex = 21;
+            this.chkChat.Text = "Visible";
+            this.chkChat.UseVisualStyleBackColor = true;
+            //
+            // lblChat
+            //
+            this.lblChat.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblChat.Location = new System.Drawing.Point(4, 301);
+            this.lblChat.Name = "lblChat";
+            this.lblChat.Size = new System.Drawing.Size(126, 29);
+            this.lblChat.TabIndex = 22;
+            this.lblChat.Text = "AI Assistant";
             // 
             // tlpMain
             // 
@@ -554,6 +577,8 @@ namespace BlueBrick
         private System.Windows.Forms.CheckBox chkEpiSrch;
         private System.Windows.Forms.CheckBox chkEpiOpp;
         private System.Windows.Forms.CheckBox chkMisc;
+        private System.Windows.Forms.CheckBox chkChat;
+        private System.Windows.Forms.Label lblChat;
         private System.Windows.Forms.TextBox txtViki;
 
         private System.Windows.Forms.TableLayoutPanel tlpMain;
