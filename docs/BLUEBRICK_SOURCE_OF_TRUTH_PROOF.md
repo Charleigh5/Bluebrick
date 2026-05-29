@@ -1,6 +1,6 @@
 # BlueBrick Source-Of-Truth Proof
 
-Last captured: 2026-05-28
+Last captured: 2026-05-29 (updated after P0 baseline commit)
 
 ## Purpose
 
@@ -76,18 +76,44 @@ An untracked `.env` file exists. It was not opened or printed.
 | Gate Item | Status | Notes |
 |---|---|---|
 | Active workspace identified | PASS | The inspected path is `C:\Users\cweir\Documents\GitHub\VIRA GITHUB\Bluebrick`. |
-| Branch and commit identified | PASS | Branch is `main`; HEAD is `1904fc9`. |
-| WIP state captured | PASS | Dirty tracked and untracked state captured above. |
-| Assistant/relay/docs/tests tracked or intentionally baselined | PARTIAL | These are currently untracked WIP. They can be valid working state, but not a durable baseline yet. |
-| Secrets protected | PASS | `.env` was observed but not opened. |
+| Branch and commit identified | PASS | Branch is `main`; HEAD is `ee99e55` (P0 baseline). |
+| WIP state captured | PASS | All WIP now tracked and committed. |
+| Assistant/relay/docs/tests tracked or intentionally baselined | PASS | Commit `ee99e55` adds 150 files including all Agent/, Vault/, Relay, tests, config, and docs. |
+| Secrets protected | PASS | `.env` excluded via `.gitignore`; no secrets in committed files. |
 | No SolidWorks/PDM/lab mutation endpoints exercised | PASS | This was a read-only evidence capture. |
 
-## Required Next Action
+## Baseline Commit
 
-Before claiming a durable baseline, choose one of these:
+**Commit**: `ee99e55` on `main`
+**Date**: 2026-05-29
+**Summary**: P0 gate fixes and assistant WIP baseline (150 files, 22,400 insertions)
 
-1. Add the intended assistant/relay/config/docs/test WIP to a reviewed Git baseline.
-2. Keep it untracked but write an explicit local-WIP handoff listing the required files and why they are intentionally untracked.
-3. Move experimental or generated files out of the project root before baseline.
+### What the baseline includes:
 
-Until one of those happens, implementation claims should say: "verified in current local WIP, not yet baselined in Git."
+- All 39 Agent/ service files
+- AssistantPanel.cs + FrmAssistantWindow.cs (with bug fixes and security hardening)
+- BlueBrick.Relay/ (ASP.NET Core 8.0 relay server)
+- BlueBrick.Relay.Tests/ + BlueBrick.UI.Tests/ (45+ test methods)
+- Vault/ (local + PDM workspace implementations)
+- config/appsettings.json + appsettings.lab.json (with P0.4 model profile fields)
+- docs/ (architecture, security, ADR, route manifest, specs, plan, source-of-truth proof)
+- Resources/ (assistant UI icons)
+- .gitignore (excludes bin/, obj/, .env, temp files)
+
+### Bug fixes in baseline:
+
+| Bug | Fix | Files |
+|-----|-----|-------|
+| 1: PostStreamingAsync hangs | 90s read timeout via Task.WhenAny | AgentPanelClient.cs |
+| 2: bbGetTranscript double-encode | Remove JSON.stringify wrapper | AssistantPanel.cs, FrmAssistantWindow.cs |
+| 3: SSE line splitting breaks across buffers | Line buffer accumulator | AgentPanelClient.cs |
+| 4: message.Text extraction fails | Case-insensitive multi-fallback | AssistantPanel.cs, FrmAssistantWindow.cs |
+| 5: Double-serialize anti-pattern | Remove SerializeObject on already-JSON | AssistantPanel.cs, FrmAssistantWindow.cs, RelayTunnelClient.cs |
+| 6: LogErrorAsync race condition | Lock around File.AppendAllText | AssistantPanel.cs, FrmAssistantWindow.cs |
+
+### Security hardening in baseline:
+
+- FrmAssistantWindow: DevTools off, host objects blocked, web messages disabled, navigation allowlist, popup blocker, isolated user data, init guard
+- RelayTunnelClient: Payload changed from string to JToken to prevent double-escaping
+- AssistantToolService: capture_screenshot dispatch wired with graceful fallback
+- Production config: P0.4 model profile fields + Relay section with safe defaults
