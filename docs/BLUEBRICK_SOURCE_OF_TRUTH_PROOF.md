@@ -117,3 +117,9 @@ An untracked `.env` file exists. It was not opened or printed.
 - RelayTunnelClient: Payload changed from string to JToken to prevent double-escaping
 - AssistantToolService: capture_screenshot dispatch wired with graceful fallback
 - Production config: P0.4 model profile fields + Relay section with safe defaults
+
+### Body-size limit (P0.6):
+
+- AgentHttpServer: MaxRequestBodyBytes = 1,048,576 (1 MB)
+- Content-Length header checked before routing; returns 413 if exceeded
+- ReadBody uses chunked read with size guard as defense-in-depth against absent/spoofed Content-Length

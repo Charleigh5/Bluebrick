@@ -21,6 +21,8 @@ namespace BlueBrick.Agent
 {
     internal class AgentHttpServer
     {
+        internal const int MaxRequestBodyBytes = 1_048_576;
+
         private readonly ISldWorks _swApp;
         private readonly AgentConfig _config;
         private readonly AgentOverlay _overlay;
@@ -128,14 +130,22 @@ namespace BlueBrick.Agent
             var token = context.Request.Headers["X-Agent-Auth"];
             var expectedToken = GetAuthToken();
             
-            if (string.IsNullOrEmpty(token) || token != expectedToken)
-            {
-                context.Response.StatusCode = 403;
-                await WriteJson(context, new { error = "Invalid or missing authentication token", traceId });
-                return;
-            }
-            
-            var path = context.Request.Url.AbsolutePath.ToLowerInvariant();
+        if (string.IsNullOrEmpty(token) || token != expectedToken)
+        {
+            context.Response.StatusCode = 403;
+            await WriteJson(context, new { error = "Invalid or missing authentication token", traceId });
+            return;
+        }
+
+        var contentLength = context.Request.ContentLength64;
+        if (contentLength > MaxRequestBodyBytes)
+        {
+            context.Response.StatusCode = 413;
+            await WriteJson(context, new { error = "Request body too large", maxBytes = MaxRequestBodyBytes, traceId });
+            return;
+        }
+
+        var path = context.Request.Url.AbsolutePath.ToLowerInvariant();
             
             // Security: Origin/Referer check for PDM/CAD endpoints
             if (path.StartsWith("/pdm/") || path.StartsWith("/sw/"))
@@ -300,8 +310,18 @@ namespace BlueBrick.Agent
             return;
         }
 
-            var body = await ReadBody(context.Request);
-            JObject json;
+        string body;
+        try
+        {
+            body = await ReadBody(context.Request);
+        }
+        catch (InvalidOperationException)
+        {
+            context.Response.StatusCode = 413;
+            await WriteJson(context, new { error = "Request body too large", maxBytes = MaxRequestBodyBytes, traceId });
+            return;
+        }
+        JObject json;
             if (string.IsNullOrWhiteSpace(body))
             {
                 json = new JObject();
@@ -1389,9 +1409,25 @@ await WriteJson(context, new { status = "ok", traceId });
 
         private static async Task<string> ReadBody(HttpListenerRequest request)
         {
-            using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+            using (var stream = request.InputStream)
+            using (var reader = new StreamReader(stream, request.ContentEncoding))
             {
-                return await reader.ReadToEndAsync();
+                var buf = new char[8192];
+                var sb = new StringBuilder();
+                int totalChars = 0;
+                int maxChars = MaxRequestBodyBytes / 2 + 1;
+                while (true)
+                {
+                    var read = await reader.ReadAsync(buf, 0, buf.Length).ConfigureAwait(false);
+                    if (read == 0) break;
+                    totalChars += read;
+                    if (totalChars > maxChars)
+                    {
+                        throw new InvalidOperationException("Request body exceeds maximum allowed size.");
+                    }
+                    sb.Append(buf, 0, read);
+                }
+                return sb.ToString();
             }
         }
 

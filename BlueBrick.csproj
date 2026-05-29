@@ -14,7 +14,7 @@
         <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
         <FileAlignment>512</FileAlignment>
         <Deterministic>false</Deterministic>
-        <LangVersion>8</LangVersion>
+        <LangVersion>9</LangVersion>
         <CefSharpAnyCpuSupport>true</CefSharpAnyCpuSupport>
         <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
     </PropertyGroup>

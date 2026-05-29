@@ -50,7 +50,7 @@ namespace BlueBrick
         private StatusStrip _statusStrip = null!;
         private ToolStripStatusLabel _coordinateLabel = null!;
         private ToolStripStatusLabel _statusLabel = null!;
-        private Timer _coordinateTimer = null!;
+        private System.Windows.Forms.Timer _coordinateTimer = null!;
         private Label _environmentStatus = null!;
         private ContextMenuStrip _fileTreeContext = null!;
 
@@ -620,7 +620,7 @@ namespace BlueBrick
             _statusStrip.Items.Add(new ToolStripStatusLabel { Spring = true });
             _statusStrip.Items.Add(_coordinateLabel);
 
-            _coordinateTimer = new Timer { Interval = 800 };
+            _coordinateTimer = new System.Windows.Forms.Timer { Interval = 800 };
             _coordinateTimer.Tick += (_, _) => UpdateCoordinateDisplay();
             _coordinateTimer.Start();
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Windows.Forms;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using BlueBrick.Agent;
@@ -14,14 +15,40 @@ namespace BlueBrick.UI.Tests
         private TestHttpServer _server;
         private TraceViewerControl _control;
 
+        private static void RequireWinFormsUi()
+        {
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+            {
+                Assert.Inconclusive("WinForms UI control test requires Windows.");
+            }
+            if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
+            {
+                Assert.Inconclusive("WinForms UI control test requires STA thread.");
+            }
+            try
+            {
+                using (var probe = new Control())
+                {
+                    var handle = probe.Handle;
+                }
+            }
+            catch (Exception ex) when (
+                ex is InvalidOperationException ||
+                ex is TypeInitializationException ||
+                ex is System.ComponentModel.Win32Exception)
+            {
+                Assert.Inconclusive("WinForms UI control test requires an interactive/headed UI environment: " + ex.Message);
+            }
+        }
+
         [TestInitialize]
         public void Setup()
         {
-            _server = new TestHttpServer(17188); // Use different port than default
+            RequireWinFormsUi();
+            _server = new TestHttpServer(17188);
             _server.Start();
             AgentPanelClient.BaseUrl = _server.BaseUrl;
-            
-            // Note: In a real environment, we'd need an STA thread for WinForms
+
             _control = new TraceViewerControl();
         }
 
@@ -35,42 +62,48 @@ namespace BlueBrick.UI.Tests
         [TestMethod]
         public void TestTraceLoading()
         {
-            // Setup mock handler
-            _server.RegisterHandler("/agent/telemetry/trace/test-123", context => {
-                var json = new JObject {
-                    ["traceId"] = "test-123",
-                    ["events"] = new JArray {
-                        new JObject {
-                            ["timestamp"] = DateTime.UtcNow.ToString("O"),
-                            ["source"] = "agent",
-                            ["event"] = "TaskStarted",
-                            ["data"] = new JObject { ["task"] = "Test Task" }
-                        }
+            _server.RegisterHandler("/agent/telemetry/trace", context =>
+            {
+                var events = new JArray
+                {
+                    new JObject
+                    {
+                        ["timestamp"] = 1700000000.0,
+                        ["type"] = "task",
+                        ["operation"] = "TestOperation",
+                        ["success"] = true,
+                        ["duration_ms"] = 50.0,
+                        ["source"] = "agent"
                     }
+                };
+                var json = new JObject
+                {
+                    ["events"] = events
                 };
                 return json.ToString();
             });
 
-            // Trigger fetch (using reflection if private, but let's assume public or accessible)
-            var traceIdBox = GetPrivateField<TextBox>(_control, "_traceIdBox");
-            traceIdBox.Text = "test-123";
-            
-            var fetchBtn = GetPrivateField<Button>(_control, "_fetchBtn");
-            
-            // We can't easily wait for async in WinForms event handlers in tests without extra sync
-            // but we can call the method directly if we make it accessible or use reflection
-            InvokePrivateMethod(_control, "FetchButton_Click", new object[] { fetchBtn, EventArgs.Empty });
+            var traceInput = GetPrivateField<TextBox>(_control, "_traceInput");
+            traceInput.Text = "test-123";
 
-            // Since it's async, we might need a small delay or a better way to wait
-            System.Threading.Thread.Sleep(500);
+            var fetchButton = GetPrivateField<Button>(_control, "_fetchButton");
+            InvokePrivateMethod(_control, "FetchButton_Click", new object[] { fetchButton, EventArgs.Empty });
 
+            var timeout = DateTime.UtcNow.AddSeconds(5);
             var list = GetPrivateField<ListView>(_control, "_list");
+            while (list.VirtualListSize == 0 && DateTime.UtcNow < timeout)
+            {
+                System.Threading.Thread.Sleep(100);
+                Application.DoEvents();
+            }
+
             Assert.AreEqual(1, list.VirtualListSize, "List should have one event loaded");
         }
 
         private T GetPrivateField<T>(object obj, string fieldName)
         {
             var field = obj.GetType().GetField(fieldName, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (field == null) throw new NullReferenceException($"Field '{fieldName}' not found on {obj.GetType().Name}");
             return (T)field.GetValue(obj);
         }
 

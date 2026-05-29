@@ -664,7 +664,7 @@ namespace BlueBrick.UI.Tests
         public async Task AssistantToolService_Records_Audit_Receipts_For_Allowed_And_Denied_Tools()
         {
             var audit = new AssistantToolAuditLog();
-            var service = new AssistantToolService(new AgentConfig(), audit);
+            var service = new AssistantToolService(new AgentConfig(), null, audit);
             var query = "unlikely-query-" + Guid.NewGuid().ToString("N");
 
             var denied = await service.ExecuteAsync(new AssistantToolRequest
@@ -708,7 +708,7 @@ namespace BlueBrick.UI.Tests
             try
             {
                 var audit = new AssistantToolAuditLog(logRoot);
-                var service = new AssistantToolService(new AgentConfig(), audit);
+                var service = new AssistantToolService(new AgentConfig(), null, audit);
 
                 var result = await service.ExecuteAsync(new AssistantToolRequest
                 {
@@ -1023,8 +1023,8 @@ namespace BlueBrick.UI.Tests
                 ToolName = "capture_screenshot"
             }, "trace-capture-no-service").Result;
 
-            Assert.AreEqual("error", result.Status);
-            Assert.IsTrue(result.Message.Contains("active assistant service"));
+        Assert.AreEqual("unavailable", result.Status);
+        Assert.IsTrue(result.Message.Contains("active assistant service"));
         }
 
         [TestMethod]
@@ -1036,10 +1036,10 @@ namespace BlueBrick.UI.Tests
                 ToolName = "nonexistent_tool"
             }, "trace-unknown").Result;
 
-            Assert.AreEqual("error", result.Status);
-            Assert.IsNotNull(result.Receipt);
-            Assert.AreEqual("unsupported", result.Receipt.PolicyCode);
-        }
+        Assert.AreEqual("unknown", result.Status);
+        Assert.IsNotNull(result.Receipt);
+        Assert.AreEqual("unknown", result.Receipt.PolicyCode);
+    }
 
         [TestMethod]
         public void AssistantToolService_Disabled_Tool_Is_Rejected()
@@ -1058,10 +1058,10 @@ namespace BlueBrick.UI.Tests
                 Query = "test"
             }, "trace-pdm-disabled").Result;
 
-            Assert.AreEqual("error", result.Status);
-            Assert.IsNotNull(result.Receipt);
-            Assert.AreEqual("disabled", result.Receipt.PolicyCode);
-        }
+        Assert.AreEqual("disabled", result.Status);
+        Assert.IsNotNull(result.Receipt);
+        Assert.AreEqual("disabled", result.Receipt.PolicyCode);
+    }
 
         [TestMethod]
         public void Cancellation_CancellationTokenSource_Disposes_Cleanly_On_Second_Send()
@@ -1093,8 +1093,67 @@ namespace BlueBrick.UI.Tests
             Assert.IsTrue(AssistantWebViewSecurity.ContainsSensitiveTokenText("NVIDIA_API_KEY=nvapi-xxx"));
             Assert.IsTrue(AssistantWebViewSecurity.ContainsSensitiveTokenText(".agent_token"));
             Assert.IsFalse(AssistantWebViewSecurity.ContainsSensitiveTokenText("<div>Hello World</div>"));
-            Assert.IsFalse(AssistantWebViewSecurity.ContainsSensitiveTokenText(null));
-            Assert.IsFalse(AssistantWebViewSecurity.ContainsSensitiveTokenText(""));
+        Assert.IsFalse(AssistantWebViewSecurity.ContainsSensitiveTokenText(null));
+        Assert.IsFalse(AssistantWebViewSecurity.ContainsSensitiveTokenText(""));
+        }
+
+        [TestMethod]
+        public void AgentHttpServer_MaxRequestBodyBytes_Is_OneMB()
+        {
+            Assert.AreEqual(1_048_576, AgentHttpServer.MaxRequestBodyBytes);
+        }
+
+        [TestMethod]
+        public void AgentHttpServer_ContentLength_Exceeding_Max_Returns413()
+        {
+            var contentLength = AgentHttpServer.MaxRequestBodyBytes + 1;
+            Assert.IsTrue(contentLength > AgentHttpServer.MaxRequestBodyBytes,
+                $"Content-Length {contentLength} must exceed MaxRequestBodyBytes {AgentHttpServer.MaxRequestBodyBytes}");
+        }
+
+        [TestMethod]
+        public async Task OpenAiAssistantService_MockMode_Wins_Over_EnvKey()
+        {
+            var prevKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+            try
+            {
+                Environment.SetEnvironmentVariable("OPENAI_API_KEY", "test-key-that-must-not-be-used");
+                var config = new AgentConfig
+                {
+                    Agent = new AgentSettings { BridgePort = 17179, OverlayColor = "#D9FF5A" },
+                    Vault = new VaultSettings
+                    {
+                        Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                        SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                    },
+                    Assistant = new AssistantSettings
+                    {
+                        ApiBaseUrl = "https://api.openai.com/v1",
+                        Model = "gpt-4.1-mini",
+                        Mode = "mock",
+                        SystemPrompt = "mock",
+                        Detail = "low",
+                        EnableUploads = true,
+                        MaxImageDimension = 1600,
+                        JpegQuality = 75,
+                        ConnectionTestPrompt = "ready",
+                        RequireExplicitUploadConsent = true,
+                        MaxHistory = 10
+                    }
+                };
+
+                var service = new OpenAiAssistantService(config);
+                var status = await service.GetStatusAsync();
+                Assert.AreEqual("mock", status.AssistantMode);
+
+                var response = await service.SendMessageAsync(null, "test", Array.Empty<string>());
+                Assert.IsTrue(response.AssistantAvailable);
+                Assert.IsTrue(response.Message.Text.IndexOf("Mock preview mode", StringComparison.OrdinalIgnoreCase) >= 0);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("OPENAI_API_KEY", prevKey);
+            }
         }
     }
 }

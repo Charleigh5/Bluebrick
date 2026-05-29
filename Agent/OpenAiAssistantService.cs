@@ -551,8 +551,14 @@ namespace BlueBrick.Agent
 
         private string ResolveMode(bool keyConfigured)
         {
+            var configMode = NormalizeMode(_config.Assistant.Mode);
+            if (string.Equals(configMode, MockMode, StringComparison.OrdinalIgnoreCase))
+            {
+                return MockMode;
+            }
+
             var overrideMode = Registry.GetValue(AppIdentity.RegistryRoot, AssistantModeValueName, null)?.ToString();
-            var configuredMode = NormalizeMode(overrideMode) ?? NormalizeMode(_config.Assistant.Mode);
+            var configuredMode = configMode ?? NormalizeMode(overrideMode);
             if (!string.IsNullOrWhiteSpace(configuredMode))
             {
                 if (string.Equals(configuredMode, RealMode, StringComparison.OrdinalIgnoreCase) && !keyConfigured)

@@ -93,13 +93,13 @@ namespace BlueBrick.Simulation
                 await action(token);
                 Status = "Idle";
                 _logger.Log($"Completed {commandName}");
-                return ApiExecutionResult.Success(commandName);
+                return ApiExecutionResult.Succeeded(commandName);
             }
             catch (OperationCanceledException)
             {
                 Status = "Cancelled";
                 _logger.Log($"Cancelled {commandName}");
-                return ApiExecutionResult.Cancelled(commandName);
+                return ApiExecutionResult.CancelledByUser(commandName);
             }
             catch (Exception ex)
             {
@@ -138,9 +138,9 @@ namespace BlueBrick.Simulation
 
         public string? Message { get; }
 
-        public static ApiExecutionResult Success(string command) => new ApiExecutionResult(command, false, true, null);
+        public static ApiExecutionResult Succeeded(string command) => new ApiExecutionResult(command, false, true, null);
 
-        public static ApiExecutionResult Cancelled(string command) => new ApiExecutionResult(command, true, false, "Cancelled by user");
+        public static ApiExecutionResult CancelledByUser(string command) => new ApiExecutionResult(command, true, false, "Cancelled by user");
 
         public static ApiExecutionResult Failed(string command, string error) => new ApiExecutionResult(command, false, false, error);
     }
