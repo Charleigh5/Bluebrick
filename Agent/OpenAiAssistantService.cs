@@ -558,15 +558,17 @@ namespace BlueBrick.Agent
             }
 
             var overrideMode = Registry.GetValue(AppIdentity.RegistryRoot, AssistantModeValueName, null)?.ToString();
-            var configuredMode = configMode ?? NormalizeMode(overrideMode);
-            if (!string.IsNullOrWhiteSpace(configuredMode))
-            {
-                if (string.Equals(configuredMode, RealMode, StringComparison.OrdinalIgnoreCase) && !keyConfigured)
-                {
-                    return RealMode;
-                }
+            var registryMode = NormalizeMode(overrideMode);
+            var configuredMode = configMode ?? registryMode;
 
-                return configuredMode;
+            if (string.Equals(configuredMode, RealMode, StringComparison.OrdinalIgnoreCase))
+            {
+                return keyConfigured ? RealMode : MockMode;
+            }
+
+            if (string.Equals(configuredMode, MockMode, StringComparison.OrdinalIgnoreCase))
+            {
+                return MockMode;
             }
 
             return keyConfigured ? RealMode : MockMode;

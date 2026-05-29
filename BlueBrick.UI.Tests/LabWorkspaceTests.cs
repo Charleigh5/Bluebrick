@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using BlueBrick.Agent;
 using BlueBrick.Vault;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Microsoft.Win32;
 using Newtonsoft.Json.Linq;
 
 namespace BlueBrick.UI.Tests
@@ -1150,10 +1151,229 @@ namespace BlueBrick.UI.Tests
                 Assert.IsTrue(response.AssistantAvailable);
                 Assert.IsTrue(response.Message.Text.IndexOf("Mock preview mode", StringComparison.OrdinalIgnoreCase) >= 0);
             }
-            finally
+        finally
+        {
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", prevKey);
+        }
+    }
+
+    [TestMethod]
+    public async Task OpenAiAssistantService_RealMode_WithoutKey_FallsBackToMock()
+    {
+        var prevOpenAiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        var prevNvidiaKey = Environment.GetEnvironmentVariable("NVIDIA_API_KEY");
+        var prevRegistryMode = Registry.GetValue(AppIdentity.RegistryRoot, "AssistantMode", null)?.ToString();
+        var prevRegistryApiKey = Registry.GetValue(AppIdentity.RegistryRoot, "AssistantApiKey", null)?.ToString();
+        try
+        {
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", null);
+            Environment.SetEnvironmentVariable("NVIDIA_API_KEY", null);
+            Registry.SetValue(AppIdentity.RegistryRoot, "AssistantMode", "real", RegistryValueKind.String);
+            ClearRegistryValue("AssistantApiKey");
+
+            var config = new AgentConfig
             {
-                Environment.SetEnvironmentVariable("OPENAI_API_KEY", prevKey);
+                Agent = new AgentSettings { BridgePort = 17179, OverlayColor = "#D9FF5A" },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings
+                {
+                    ApiBaseUrl = "https://integrate.api.nvidia.com/v1",
+                    Model = "meta/llama-3.1-70b-instruct",
+                    Mode = "real",
+                    SystemPrompt = "mock",
+                    Detail = "low",
+                    EnableUploads = true,
+                    MaxImageDimension = 1600,
+                    JpegQuality = 75,
+                    ConnectionTestPrompt = "ready",
+                    RequireExplicitUploadConsent = true,
+                    MaxHistory = 10
+                }
+            };
+
+            var service = new OpenAiAssistantService(config);
+            var status = await service.GetStatusAsync();
+            Assert.AreEqual("mock", status.AssistantMode);
+
+            var response = await service.SendMessageAsync(null, "test real-no-key", Array.Empty<string>());
+            Assert.IsTrue(response.AssistantAvailable);
+            Assert.IsTrue(response.Message.Text.IndexOf("Mock preview mode", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", prevOpenAiKey);
+            Environment.SetEnvironmentVariable("NVIDIA_API_KEY", prevNvidiaKey);
+            RestoreRegistryMode(prevRegistryMode);
+            RestoreRegistryApiKey(prevRegistryApiKey);
+        }
+    }
+
+    [TestMethod]
+    public async Task OpenAiAssistantService_RealMode_WithKey_Succeeds()
+    {
+        var prevKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        var prevRegistryMode = Registry.GetValue(AppIdentity.RegistryRoot, "AssistantMode", null)?.ToString();
+        var prevRegistryApiKey = Registry.GetValue(AppIdentity.RegistryRoot, "AssistantApiKey", null)?.ToString();
+        try
+        {
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", "test-key-real-mode-verify");
+            Registry.SetValue(AppIdentity.RegistryRoot, "AssistantMode", "real", RegistryValueKind.String);
+            ClearRegistryValue("AssistantApiKey");
+
+            var config = new AgentConfig
+            {
+                Agent = new AgentSettings { BridgePort = 17179, OverlayColor = "#D9FF5A" },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings
+                {
+                    ApiBaseUrl = "https://api.openai.com/v1",
+                    Model = "gpt-4.1-mini",
+                    Mode = "real",
+                    SystemPrompt = "mock",
+                    Detail = "low",
+                    EnableUploads = true,
+                    MaxImageDimension = 1600,
+                    JpegQuality = 75,
+                    ConnectionTestPrompt = "ready",
+                    RequireExplicitUploadConsent = true,
+                    MaxHistory = 10
+                }
+            };
+
+            var service = new OpenAiAssistantService(config);
+            var status = await service.GetStatusAsync();
+            Assert.AreEqual("real", status.AssistantMode);
+            Assert.IsTrue(status.KeyConfigured);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", prevKey);
+            RestoreRegistryMode(prevRegistryMode);
+            RestoreRegistryApiKey(prevRegistryApiKey);
+        }
+    }
+
+    [TestMethod]
+    public async Task OpenAiAssistantService_MockMode_Wins_Over_NvidiaKey()
+    {
+        var prevNvidiaKey = Environment.GetEnvironmentVariable("NVIDIA_API_KEY");
+        var prevOpenAiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        var prevRegistryMode = Registry.GetValue(AppIdentity.RegistryRoot, "AssistantMode", null)?.ToString();
+        var prevRegistryApiKey = Registry.GetValue(AppIdentity.RegistryRoot, "AssistantApiKey", null)?.ToString();
+        try
+        {
+            Environment.SetEnvironmentVariable("NVIDIA_API_KEY", "test-nvidia-key-that-must-not-be-used");
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", null);
+            Registry.SetValue(AppIdentity.RegistryRoot, "AssistantMode", "real", RegistryValueKind.String);
+            ClearRegistryValue("AssistantApiKey");
+
+            var config = new AgentConfig
+            {
+                Agent = new AgentSettings { BridgePort = 17179, OverlayColor = "#D9FF5A" },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings
+                {
+                    ApiBaseUrl = "https://integrate.api.nvidia.com/v1",
+                    Model = "meta/llama-3.1-70b-instruct",
+                    Mode = "mock",
+                    SystemPrompt = "mock",
+                    Detail = "low",
+                    EnableUploads = true,
+                    MaxImageDimension = 1600,
+                    JpegQuality = 75,
+                    ConnectionTestPrompt = "ready",
+                    RequireExplicitUploadConsent = true,
+                    MaxHistory = 10,
+                    ModelProfiles = new[]
+                    {
+                        new AssistantModelProfile
+                        {
+                            Id = "nvidia-test",
+                            Name = "NVIDIA Test",
+                            Provider = "NVIDIA",
+                            ApiBaseUrl = "https://integrate.api.nvidia.com/v1",
+                            Model = "meta/llama-3.1-70b-instruct",
+                            KeyEnvironmentVariable = "NVIDIA_API_KEY",
+                            IsDefault = true,
+                            SupportsVision = false
+                        }
+                    }
+                }
+            };
+
+            var service = new OpenAiAssistantService(config);
+            var status = await service.GetStatusAsync();
+            Assert.AreEqual("mock", status.AssistantMode);
+
+            var response = await service.SendMessageAsync(null, "test nvidia-mock", Array.Empty<string>());
+            Assert.IsTrue(response.AssistantAvailable);
+            Assert.IsTrue(response.Message.Text.IndexOf("Mock preview mode", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("NVIDIA_API_KEY", prevNvidiaKey);
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", prevOpenAiKey);
+            RestoreRegistryMode(prevRegistryMode);
+            RestoreRegistryApiKey(prevRegistryApiKey);
+        }
+    }
+
+    private static void RestoreRegistryMode(string previousValue)
+    {
+        if (previousValue == null)
+        {
+            try { Registry.CurrentUser.DeleteSubKey(AppIdentity.RegistryRoot + "\\AssistantMode", false); } catch { }
+            try
+            {
+                var subKeyPath = AppIdentity.RegistryRoot.Replace(@"HKEY_CURRENT_USER\", "");
+                using (var key = Registry.CurrentUser.OpenSubKey(subKeyPath, true))
+                {
+                    if (key != null) key.DeleteValue("AssistantMode", false);
+                }
+            }
+            catch { }
+        }
+        else
+        {
+            Registry.SetValue(AppIdentity.RegistryRoot, "AssistantMode", previousValue, RegistryValueKind.String);
+        }
+    }
+
+    private static void ClearRegistryValue(string valueName)
+    {
+        try
+        {
+            var subKeyPath = AppIdentity.RegistryRoot.Replace(@"HKEY_CURRENT_USER\", "");
+            using (var key = Registry.CurrentUser.OpenSubKey(subKeyPath, true))
+            {
+                if (key != null) key.DeleteValue(valueName, false);
             }
         }
+        catch { }
+    }
+
+    private static void RestoreRegistryApiKey(string previousValue)
+    {
+        if (previousValue == null)
+        {
+            ClearRegistryValue("AssistantApiKey");
+        }
+        else
+        {
+            Registry.SetValue(AppIdentity.RegistryRoot, "AssistantApiKey", previousValue, RegistryValueKind.String);
+        }
+    }
     }
 }
