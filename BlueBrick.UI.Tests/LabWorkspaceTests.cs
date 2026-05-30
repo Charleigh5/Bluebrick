@@ -1364,16 +1364,72 @@ namespace BlueBrick.UI.Tests
         catch { }
     }
 
-    private static void RestoreRegistryApiKey(string previousValue)
-    {
-        if (previousValue == null)
+        private static void RestoreRegistryApiKey(string previousValue)
         {
-            ClearRegistryValue("AssistantApiKey");
+            if (previousValue == null)
+            {
+                ClearRegistryValue("AssistantApiKey");
+            }
+            else
+            {
+                Registry.SetValue(AppIdentity.RegistryRoot, "AssistantApiKey", previousValue, RegistryValueKind.String);
+            }
         }
-        else
+
+        [TestMethod]
+        public async Task OpenAiAssistantService_RealConnectionTest_WithNvidiaKey()
         {
-            Registry.SetValue(AppIdentity.RegistryRoot, "AssistantApiKey", previousValue, RegistryValueKind.String);
+            var prevApiKey = Registry.GetValue(AppIdentity.RegistryRoot, "AssistantApiKey", null)?.ToString();
+            if (string.IsNullOrEmpty(prevApiKey))
+            {
+                Assert.Inconclusive("No NVIDIA API key in registry - cannot test real connection");
+            }
+
+            var prevRegistryMode = Registry.GetValue(AppIdentity.RegistryRoot, "AssistantMode", null)?.ToString();
+            try
+            {
+                Registry.SetValue(AppIdentity.RegistryRoot, "AssistantMode", "real", RegistryValueKind.String);
+
+                var config = new AgentConfig
+                {
+                    Agent = new AgentSettings { BridgePort = 17179, OverlayColor = "#D9FF5A" },
+                    Vault = new VaultSettings
+                    {
+                        Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                        SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                    },
+                    Assistant = new AssistantSettings
+                    {
+                        ApiBaseUrl = "https://integrate.api.nvidia.com/v1",
+                        Model = "meta/llama-3.1-70b-instruct",
+                        Mode = "real",
+                        SystemPrompt = "You are the BlueBrick Lab assistant.",
+                        Detail = "low",
+                        EnableUploads = true,
+                        MaxImageDimension = 1600,
+                        JpegQuality = 75,
+                        ConnectionTestPrompt = "Reply with the word READY and one short sentence confirming the BlueBrick Lab assistant connection is working.",
+                        RequireExplicitUploadConsent = true,
+                        MaxHistory = 10
+                    }
+                };
+
+                var service = new OpenAiAssistantService(config);
+                var status = await service.GetStatusAsync();
+                Assert.AreEqual("real", status.AssistantMode, "Mode should be real with registry key present");
+                Assert.IsTrue(status.KeyConfigured, "Key should be configured from registry");
+
+                var result = await service.TestConnectionAsync();
+                Assert.IsTrue(result.Success, "Connection test should succeed. Message: " + result.Message);
+                Assert.AreEqual("real", result.Mode);
+                Assert.IsTrue(result.LatencyMs > 0, "Should report latency");
+                Assert.IsTrue((result.Message ?? "").IndexOf("READY", StringComparison.OrdinalIgnoreCase) >= 0,
+                    "Response should contain READY. Got: " + result.Message);
+            }
+            finally
+            {
+                RestoreRegistryMode(prevRegistryMode);
+            }
         }
-    }
     }
 }
