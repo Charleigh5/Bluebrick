@@ -409,6 +409,9 @@ case "/pdm/check_out":
             case "/assistant/message":
                 await HandleAssistantMessage(context, json, traceId);
                 return;
+            case "/assistant/message/stream":
+                await HandleAssistantMessageStream(context, json, traceId);
+                return;
             case "/assistant/screenshot":
                 await HandleAssistantScreenshot(context, json, traceId);
                 return;
@@ -1081,12 +1084,73 @@ await WriteJson(context, new { status = "ok", traceId });
                 assistantAvailable = result.AssistantAvailable,
                 error = result.Error,
                 errorCode = result.ErrorCode,
-                message = result.Message,
+        message = result.Message,
                 traceId
             }).ConfigureAwait(false);
-        }
+    }
 
-        private async Task HandleAssistantScreenshot(HttpListenerContext context, JObject json, string traceId)
+    private async Task HandleAssistantMessageStream(HttpListenerContext context, JObject json, string traceId)
+    {
+        var sessionId = json.Value<string>("sessionId");
+        var message = json.Value<string>("message");
+        var attachments = json["attachmentPaths"]?.ToObject<string[]>() ?? new string[0];
+
+        context.Response.ContentType = "text/event-stream";
+        context.Response.Headers["Cache-Control"] = "no-cache";
+        context.Response.Headers["Connection"] = "keep-alive";
+        context.Response.StatusCode = 200;
+
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        cts.CancelAfter(TimeSpan.FromMinutes(5));
+
+        try
+        {
+            await _assistantService.SendMessageStreamAsync(sessionId, message, attachments, chunk =>
+            {
+                var payload = JsonConvert.SerializeObject(new
+                {
+                    type = chunk.Type,
+                    text = chunk.Text,
+                    toolName = chunk.ToolName,
+                    toolCallId = chunk.ToolCallId,
+                    toolArguments = chunk.ToolArguments,
+                    errorCode = chunk.ErrorCode,
+                    errorMessage = chunk.ErrorMessage,
+                    done = chunk.Done,
+                    traceId
+                }, Formatting.None);
+                var sseData = "data: " + payload + "\n\n";
+                var bytes = Encoding.UTF8.GetBytes(sseData);
+                context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+                context.Response.OutputStream.Flush();
+            }, cts.Token).ConfigureAwait(false);
+
+            var donePayload = JsonConvert.SerializeObject(new { type = "done", done = true, traceId }, Formatting.None);
+            var doneBytes = Encoding.UTF8.GetBytes("data: " + donePayload + "\n\n");
+            context.Response.OutputStream.Write(doneBytes, 0, doneBytes.Length);
+            context.Response.OutputStream.Flush();
+        }
+        catch (OperationCanceledException)
+        {
+            var cancelPayload = JsonConvert.SerializeObject(new { type = "error", errorCode = "cancelled", errorMessage = "Request cancelled.", traceId }, Formatting.None);
+            var cancelBytes = Encoding.UTF8.GetBytes("data: " + cancelPayload + "\n\n");
+            try { context.Response.OutputStream.Write(cancelBytes, 0, cancelBytes.Length); context.Response.OutputStream.Flush(); } catch { }
+        }
+        catch (Exception ex)
+        {
+            var classified = AssistantErrorClassifier.FromException(ex);
+            var errorPayload = JsonConvert.SerializeObject(new { type = "error", errorCode = classified.Code, errorMessage = classified.Message, traceId }, Formatting.None);
+            var errorBytes = Encoding.UTF8.GetBytes("data: " + errorPayload + "\n\n");
+            try { context.Response.OutputStream.Write(errorBytes, 0, errorBytes.Length); context.Response.OutputStream.Flush(); } catch { }
+        }
+        finally
+        {
+            try { context.Response.OutputStream.Close(); } catch { }
+            cts.Dispose();
+        }
+    }
+
+    private async Task HandleAssistantScreenshot(HttpListenerContext context, JObject json, string traceId)
         {
             var request = json.ToObject<AssistantScreenshotCaptureRequest>() ?? new AssistantScreenshotCaptureRequest();
             request.SessionId = string.IsNullOrWhiteSpace(request.SessionId) ? json.Value<string>("sessionId") : request.SessionId;

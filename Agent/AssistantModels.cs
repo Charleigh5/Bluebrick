@@ -390,6 +390,38 @@ namespace BlueBrick.Agent
         public string BaseUrl { get; set; }
     }
 
+    internal class AssistantStreamChunk
+    {
+        public string Type { get; set; }
+        public string Text { get; set; }
+        public string ToolName { get; set; }
+        public string ToolCallId { get; set; }
+        public string ToolArguments { get; set; }
+        public string ErrorCode { get; set; }
+        public string ErrorMessage { get; set; }
+        public bool Done { get; set; }
+
+        internal static AssistantStreamChunk TextDelta(string text)
+        {
+            return new AssistantStreamChunk { Type = "text_delta", Text = text ?? string.Empty };
+        }
+
+        internal static AssistantStreamChunk ToolCall(string name, string id, string arguments)
+        {
+            return new AssistantStreamChunk { Type = "tool_call", ToolName = name, ToolCallId = id, ToolArguments = arguments ?? string.Empty };
+        }
+
+        internal static AssistantStreamChunk Error(string code, string message)
+        {
+            return new AssistantStreamChunk { Type = "error", ErrorCode = code, ErrorMessage = message };
+        }
+
+        internal static AssistantStreamChunk Complete()
+        {
+            return new AssistantStreamChunk { Type = "done", Done = true };
+        }
+    }
+
     internal class ChatGptHandoffPayload
     {
         public string SessionId { get; set; }

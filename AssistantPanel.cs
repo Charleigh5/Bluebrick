@@ -760,24 +760,35 @@ namespace BlueBrick
             var fullResponse = new StringBuilder();
             try
             {
-                await AgentPanelClient.PostStreamingAsync("/assistant/message", payload, chunk =>
+            await AgentPanelClient.PostStreamingAsync("/assistant/message/stream", payload, chunk =>
+            {
+                try
                 {
-                    try
+                    var jObj = JObject.Parse(chunk);
+                    var chunkType = jObj.Value<string>("type");
+                    if (chunkType == "text_delta")
                     {
-                        var jObj = JObject.Parse(chunk);
-                        var textChunk = jObj["text"]?.ToString() ?? jObj["content"]?.ToString() ?? jObj["delta"]?["content"]?.ToString();
-                        if (textChunk != null)
+                        var textChunk = jObj.Value<string>("text") ?? string.Empty;
+                        if (textChunk.Length > 0)
                         {
                             fullResponse.Append(textChunk);
                             _webView.ExecuteScriptAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject(textChunk) + ");");
                         }
                     }
-                    catch
+                    else if (chunkType == "error")
                     {
-                        fullResponse.Append(chunk);
-                        _webView.ExecuteScriptAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject(chunk) + ");");
+                        var errorCode = jObj.Value<string>("errorCode") ?? "unknown";
+                        var errorMessage = jObj.Value<string>("errorMessage") ?? "Unknown error";
+                        fullResponse.Clear();
+                        fullResponse.Append(BuildUserFacingError(errorCode, errorMessage));
                     }
-                }, requestCts.Token);
+                }
+                catch
+                {
+                    fullResponse.Append(chunk);
+                    _webView.ExecuteScriptAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject(chunk) + ");");
+                }
+            }, requestCts.Token);
 
                 var finalText = fullResponse.ToString();
                 if (string.IsNullOrWhiteSpace(finalText))

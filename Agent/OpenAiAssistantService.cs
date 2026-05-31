@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32;
 using Newtonsoft.Json;
@@ -25,6 +26,11 @@ namespace BlueBrick.Agent
         private static readonly HttpClient Client = new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(45)
+        };
+
+        private static readonly HttpClient StreamClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromMinutes(5)
         };
 
         static OpenAiAssistantService()
@@ -265,20 +271,118 @@ namespace BlueBrick.Agent
                     Message = assistantMessage
                 };
             }
-            catch (Exception ex)
+        catch (Exception ex)
+        {
+            var classified = AssistantErrorClassifier.FromException(ex);
+            return new AssistantSessionResponse
             {
-                var classified = AssistantErrorClassifier.FromException(ex);
-                return new AssistantSessionResponse
-                {
-                    SessionId = session.SessionId,
-                    AssistantAvailable = false,
-                    Error = classified.Message,
-                    ErrorCode = classified.Code
-                };
+                SessionId = session.SessionId,
+                AssistantAvailable = false,
+                Error = classified.Message,
+                ErrorCode = classified.Code
+            };
+        }
+    }
+
+    public async Task SendMessageStreamAsync(string sessionId, string message,
+        IList<string> attachmentPaths, Action<AssistantStreamChunk> onChunk, CancellationToken cancellationToken)
+    {
+        var session = _store.Get(sessionId) ?? _store.Create();
+        var uploadPaths = _config.Assistant.EnableUploads
+            ? attachmentPaths?.Where(File.Exists).ToList() ?? new List<string>()
+            : new List<string>();
+
+        var userMessage = new AssistantMessage
+        {
+            Role = "user",
+            Text = message?.Trim() ?? string.Empty,
+            AttachmentPaths = uploadPaths,
+            CreatedUtc = DateTime.UtcNow
+        };
+        session.Messages.Add(userMessage);
+        TrimHistory(session);
+        _store.Save(session);
+
+        var status = BuildStatus();
+        if (string.Equals(status.AssistantMode, MockMode, StringComparison.OrdinalIgnoreCase))
+        {
+            var mockText = BuildMockResponse(userMessage, status);
+            var mockMessage = new AssistantMessage
+            {
+                Role = "assistant",
+                Text = mockText,
+                CreatedUtc = DateTime.UtcNow
+            };
+            session.Messages.Add(mockMessage);
+            TrimHistory(session);
+            _store.Save(session);
+
+            foreach (var word in mockText.Split(' '))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                onChunk(AssistantStreamChunk.TextDelta(word + " "));
+                await Task.Delay(15, cancellationToken).ConfigureAwait(false);
             }
+            onChunk(AssistantStreamChunk.Complete());
+            return;
         }
 
-        private AssistantPreviewStatus BuildStatus()
+        var profile = ResolveProfile();
+        var keyInfo = ResolveApiKeyInfo(profile);
+        if (!keyInfo.Configured)
+        {
+            onChunk(AssistantStreamChunk.Error("key_missing",
+                "AI API key not configured. Set OPENAI_API_KEY or AssistantApiKey in the registry."));
+            onChunk(AssistantStreamChunk.Complete());
+            return;
+        }
+
+        var fullText = new StringBuilder();
+        try
+        {
+            await StreamChatCompletionAsync(BuildChatRequestBody(session, true), keyInfo.ApiKey, profile, chunk =>
+            {
+                fullText.Append(chunk);
+                onChunk(AssistantStreamChunk.TextDelta(chunk));
+            }, cancellationToken).ConfigureAwait(false);
+
+            var assistantMessage = new AssistantMessage
+            {
+                Role = "assistant",
+                Text = fullText.ToString(),
+                CreatedUtc = DateTime.UtcNow
+            };
+            session.Messages.Add(assistantMessage);
+            TrimHistory(session);
+            _store.Save(session);
+            onChunk(AssistantStreamChunk.Complete());
+        }
+        catch (OperationCanceledException)
+        {
+            if (fullText.Length > 0)
+            {
+                var partialMessage = new AssistantMessage
+                {
+                    Role = "assistant",
+                    Text = fullText.ToString(),
+                    CreatedUtc = DateTime.UtcNow
+                };
+                session.Messages.Add(partialMessage);
+                TrimHistory(session);
+                _store.Save(session);
+            }
+            onChunk(AssistantStreamChunk.Error("cancelled", "Request cancelled."));
+            onChunk(AssistantStreamChunk.Complete());
+        }
+        catch (Exception ex)
+        {
+            var classified = AssistantErrorClassifier.FromException(ex);
+            onChunk(AssistantStreamChunk.Error(classified.Code, classified.Message));
+            onChunk(AssistantStreamChunk.Complete());
+        }
+    }
+
+    private AssistantPreviewStatus BuildStatus()
         {
             var profile = ResolveProfile();
             var keyInfo = ResolveApiKeyInfo(profile);
@@ -336,7 +440,7 @@ namespace BlueBrick.Agent
             };
         }
 
-        private string BuildChatRequestBody(AssistantSession session)
+        private string BuildChatRequestBody(AssistantSession session, bool streaming = false)
         {
             var messages = new JArray();
             messages.Add(new JObject
@@ -394,33 +498,116 @@ namespace BlueBrick.Agent
                 });
             }
 
-            return new JObject
-            {
-                ["model"] = ResolveProfile().Model,
-                ["messages"] = messages
-            }.ToString(Formatting.None);
+        var requestObj = new JObject
+        {
+            ["model"] = ResolveProfile().Model,
+            ["messages"] = messages,
+            ["stream"] = streaming
+        };
+        return requestObj.ToString(Formatting.None);
         }
 
-        private async Task<string> SendChatCompletionAsync(string requestBody, string apiKey, AssistantModelProfile profile)
+    private async Task<string> SendChatCompletionAsync(string requestBody, string apiKey, AssistantModelProfile profile)
+    {
+        using (var request = new HttpRequestMessage(HttpMethod.Post,
+            profile.ApiBaseUrl.TrimEnd('/') + "/chat/completions"))
         {
-            using (var request = new HttpRequestMessage(HttpMethod.Post,
-                       profile.ApiBaseUrl.TrimEnd('/') + "/chat/completions"))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-                request.Headers.Add("User-Agent", "BlueBrick-AI-Assistant/1.0");
-                request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            request.Headers.Add("User-Agent", "BlueBrick-AI-Assistant/1.0");
+            request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
 
-                var response = await Client.SendAsync(request).ConfigureAwait(false);
-                var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var response = await Client.SendAsync(request).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                var classified = AssistantErrorClassifier.FromProviderFailure(body);
+                throw new InvalidOperationException(classified.Message);
+            }
+
+            return body;
+        }
+    }
+
+    private async Task StreamChatCompletionAsync(string requestBody, string apiKey,
+        AssistantModelProfile profile, Action<string> onChunk, CancellationToken cancellationToken)
+    {
+        using (var request = new HttpRequestMessage(HttpMethod.Post,
+            profile.ApiBaseUrl.TrimEnd('/') + "/chat/completions"))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            request.Headers.Add("User-Agent", "BlueBrick-AI-Assistant/1.0");
+            request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
+
+            using (var response = await StreamClient.SendAsync(request,
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false))
+            {
                 if (!response.IsSuccessStatusCode)
                 {
-                    var classified = AssistantErrorClassifier.FromProviderFailure(body);
+                    var errorBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    var classified = AssistantErrorClassifier.FromProviderFailure(errorBody);
                     throw new InvalidOperationException(classified.Message);
                 }
 
-                return body;
+                using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                using (var reader = new StreamReader(stream, Encoding.UTF8))
+                {
+                    var lineBuffer = new StringBuilder();
+                    var buffer = new char[4096];
+
+                    while (!cancellationToken.IsCancellationRequested)
+                    {
+                        var readTask = reader.ReadAsync(buffer, 0, buffer.Length);
+                        var completed = await Task.WhenAny(readTask,
+                            Task.Delay(TimeSpan.FromSeconds(90), cancellationToken)).ConfigureAwait(false);
+
+                        if (completed != readTask)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            throw new TimeoutException("Streaming response timed out waiting for data.");
+                        }
+
+                        var count = await readTask.ConfigureAwait(false);
+                        if (count == 0) break;
+
+                        lineBuffer.Append(buffer, 0, count);
+                        var content = lineBuffer.ToString();
+                        var lastNewline = content.LastIndexOf('\n');
+                        if (lastNewline < 0) continue;
+
+                        var completeLines = content.Substring(0, lastNewline + 1);
+                        lineBuffer.Clear();
+                        lineBuffer.Append(content.Substring(lastNewline + 1));
+
+                        foreach (var line in completeLines.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                        {
+                            var trimmed = line.Trim();
+                            if (!trimmed.StartsWith("data:")) continue;
+                            var data = trimmed.Substring(5).Trim();
+                            if (data == "[DONE]") return;
+
+                            try
+                            {
+                                var chunk = JObject.Parse(data);
+                                var choices = chunk["choices"] as JArray;
+                                if (choices == null || choices.Count == 0) continue;
+                                var delta = choices[0]["delta"];
+                                if (delta == null) continue;
+                                var text = delta.Value<string>("content");
+                                if (!string.IsNullOrEmpty(text))
+                                {
+                                    onChunk(text);
+                                }
+                            }
+                            catch
+                            {
+                                continue;
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
 
         private static string ExtractAssistantText(string body)
         {

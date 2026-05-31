@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace BlueBrick.Agent
@@ -7,6 +9,7 @@ namespace BlueBrick.Agent
     {
         Task<AssistantSession> CreateSessionAsync();
         Task<AssistantSessionResponse> SendMessageAsync(string sessionId, string message, IList<string> attachmentPaths);
+        Task SendMessageStreamAsync(string sessionId, string message, IList<string> attachmentPaths, Action<AssistantStreamChunk> onChunk, CancellationToken cancellationToken);
         Task<string> CaptureScreenshotAsync(string sessionId);
         Task<AssistantScreenshotArtifact> CaptureScreenshotArtifactAsync(string sessionId);
         Task<AssistantScreenshotArtifact> CaptureScreenshotArtifactAsync(AssistantScreenshotCaptureRequest request);

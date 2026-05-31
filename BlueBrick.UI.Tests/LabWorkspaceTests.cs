@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using BlueBrick.Agent;
 using BlueBrick.Vault;
@@ -1425,11 +1427,97 @@ namespace BlueBrick.UI.Tests
                 Assert.IsTrue(result.LatencyMs > 0, "Should report latency");
                 Assert.IsTrue((result.Message ?? "").IndexOf("READY", StringComparison.OrdinalIgnoreCase) >= 0,
                     "Response should contain READY. Got: " + result.Message);
-            }
-            finally
-            {
-                RestoreRegistryMode(prevRegistryMode);
-            }
         }
+        finally
+        {
+            RestoreRegistryMode(prevRegistryMode);
+        }
+    }
+
+    [TestMethod]
+    public async Task OpenAiAssistantService_MockStreaming_YieldsTextDeltas()
+    {
+        var config = new AgentConfig
+        {
+            Agent = new AgentSettings { BridgePort = 17179, OverlayColor = "#D9FF5A" },
+            Vault = new VaultSettings
+            {
+                Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+            },
+            Assistant = new AssistantSettings
+            {
+                Mode = "mock",
+                SystemPrompt = "mock",
+                Detail = "low",
+                EnableUploads = false,
+                MaxImageDimension = 1600,
+                JpegQuality = 75,
+                ConnectionTestPrompt = "ready",
+                RequireExplicitUploadConsent = false,
+                MaxHistory = 10
+            }
+        };
+
+        var service = new OpenAiAssistantService(config);
+        var session = await service.CreateSessionAsync();
+        var chunks = new List<AssistantStreamChunk>();
+
+        await service.SendMessageStreamAsync(session.SessionId, "hello", null,
+            chunk => chunks.Add(chunk), CancellationToken.None);
+
+        Assert.IsTrue(chunks.Count > 0, "Should yield at least one chunk");
+        var textChunks = chunks.Where(c => c.Type == "text_delta").ToList();
+        Assert.IsTrue(textChunks.Count > 0, "Should yield text_delta chunks in mock mode");
+        var combinedText = string.Concat(textChunks.Select(c => c.Text));
+        Assert.IsTrue(combinedText.Length > 0, "Combined text should not be empty");
+        Assert.IsTrue(chunks.Any(c => c.Type == "done"), "Should yield a done chunk");
+    }
+
+    [TestMethod]
+    public async Task OpenAiAssistantService_MockStreaming_Cancellation_StopsStream()
+    {
+        var config = new AgentConfig
+        {
+            Agent = new AgentSettings { BridgePort = 17179, OverlayColor = "#D9FF5A" },
+            Vault = new VaultSettings
+            {
+                Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+            },
+            Assistant = new AssistantSettings
+            {
+                Mode = "mock",
+                SystemPrompt = "mock",
+                Detail = "low",
+                EnableUploads = false,
+                MaxImageDimension = 1600,
+                JpegQuality = 75,
+                ConnectionTestPrompt = "ready",
+                RequireExplicitUploadConsent = false,
+                MaxHistory = 10
+            }
+        };
+
+        var service = new OpenAiAssistantService(config);
+        var session = await service.CreateSessionAsync();
+        var chunks = new List<AssistantStreamChunk>();
+        var cts = new CancellationTokenSource();
+
+        try
+        {
+            await service.SendMessageStreamAsync(session.SessionId, "hello", null,
+                chunk =>
+                {
+                    chunks.Add(chunk);
+                    if (chunks.Count >= 2) cts.Cancel();
+                }, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        Assert.IsTrue(chunks.Count >= 1, "Should yield at least one chunk before cancellation");
+    }
     }
 }
