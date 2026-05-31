@@ -113,6 +113,7 @@ namespace BlueBrick.Agent
                 Assistant.RequireExplicitUploadConsent = true;
             }
             Assistant.MaxHistory = Assistant.MaxHistory <= 0 ? 20 : Assistant.MaxHistory;
+        Assistant.MaxTotalAttachmentBytes = Assistant.MaxTotalAttachmentBytes <= 0 ? 10 * 1024 * 1024 : Assistant.MaxTotalAttachmentBytes;
 
             AssistantTools.PdmMaxResults = AssistantTools.PdmMaxResults <= 0 ? 25 : Math.Min(AssistantTools.PdmMaxResults, 50);
             AssistantTools.EpicorMaxResults = AssistantTools.EpicorMaxResults <= 0 ? 25 : Math.Min(AssistantTools.EpicorMaxResults, 50);
@@ -286,6 +287,7 @@ namespace BlueBrick.Agent
         internal string ConnectionTestPrompt { get; set; }
         internal bool RequireExplicitUploadConsent { get; set; }
         internal int MaxHistory { get; set; }
+        internal long MaxTotalAttachmentBytes { get; set; }
         internal AssistantModelProfile[] ModelProfiles { get; set; }
     }
 

@@ -32,13 +32,21 @@ namespace BlueBrick.Agent
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
         }
 
+        private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(5);
+
         private readonly AgentConfig _config;
         private readonly AssistantSessionStore _store;
+        private readonly RegistryCache _registryCache;
+        private volatile List<AssistantModelProfile> _profilesCache;
+        private readonly Stopwatch _tokenCacheStopwatch = Stopwatch.StartNew();
+        private bool _tokenCachedResult;
+        private bool _tokenCacheValid;
 
         internal OpenAiAssistantService(AgentConfig config)
         {
             _config = config;
             _store = new AssistantSessionStore();
+            _registryCache = new RegistryCache(CacheTtl);
         }
 
         public Task<AssistantSession> CreateSessionAsync()
@@ -95,18 +103,20 @@ namespace BlueBrick.Agent
         {
             var normalized = NormalizeMode(mode);
             Registry.SetValue(AppIdentity.RegistryRoot, AssistantModeValueName, normalized, RegistryValueKind.String);
+            _registryCache.Invalidate(AssistantModeValueName);
             return Task.FromResult(BuildStatus());
         }
 
         public Task<IList<AssistantModelProfile>> GetModelsAsync()
         {
-            return Task.FromResult<IList<AssistantModelProfile>>(GetModelProfiles().Select(NormalizeProfile).ToList());
+            return Task.FromResult<IList<AssistantModelProfile>>(GetCachedProfiles());
         }
 
         public Task<AssistantPreviewStatus> SetModelAsync(string modelId)
         {
             var profile = ResolveProfile(modelId);
             Registry.SetValue(AppIdentity.RegistryRoot, AssistantModelValueName, profile.Id, RegistryValueKind.String);
+            _registryCache.Invalidate(AssistantModelValueName);
             return Task.FromResult(BuildStatus());
         }
 
@@ -350,14 +360,21 @@ namespace BlueBrick.Agent
                     }
                 };
 
-                if (_config.Assistant.EnableUploads)
+            if (_config.Assistant.EnableUploads)
+            {
+                long totalBytes = 0;
+                var maxBytes = _config.Assistant.MaxTotalAttachmentBytes;
+                var enforceCap = maxBytes > 0;
+                foreach (var attachmentPath in msg.AttachmentPaths.Select(path =>
+                    AssistantImageTools.PrepareAttachment(session.SessionId, path,
+                        _config.Assistant.MaxImageDimension, _config.Assistant.JpegQuality))
+                    .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path)))
                 {
-                    foreach (var attachmentPath in msg.AttachmentPaths.Select(path =>
-                                 AssistantImageTools.PrepareAttachment(session.SessionId, path,
-                                     _config.Assistant.MaxImageDimension, _config.Assistant.JpegQuality))
-                             .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path)))
-                    {
-                        var base64 = Convert.ToBase64String(File.ReadAllBytes(attachmentPath));
+                    var fi = new FileInfo(attachmentPath);
+                    if (enforceCap && totalBytes + fi.Length > maxBytes) break;
+                    totalBytes += fi.Length;
+
+                    var base64 = Convert.ToBase64String(File.ReadAllBytes(attachmentPath));
                         content.Add(new JObject
                         {
                             ["type"] = "image_url",
@@ -424,9 +441,10 @@ namespace BlueBrick.Agent
 
         private void TrimHistory(AssistantSession session)
         {
-            while (session.Messages.Count > _config.Assistant.MaxHistory)
+            var excess = session.Messages.Count - _config.Assistant.MaxHistory;
+            if (excess > 0)
             {
-                session.Messages.RemoveAt(0);
+                session.Messages.RemoveRange(0, excess);
             }
         }
 
@@ -447,7 +465,7 @@ namespace BlueBrick.Agent
                 return new ApiKeyInfo(env.Trim(), "environment:OPENAI_API_KEY");
             }
 
-            var key = Registry.GetValue(AppIdentity.RegistryRoot, AssistantApiKeyValueName, null)?.ToString();
+            var key = _registryCache.GetValue(AppIdentity.RegistryRoot, AssistantApiKeyValueName);
             if (!string.IsNullOrWhiteSpace(key))
             {
                 return new ApiKeyInfo(key.Trim(), "registry");
@@ -458,17 +476,26 @@ namespace BlueBrick.Agent
 
         private AssistantModelProfile ResolveProfile(string requestedId = null)
         {
-            var profiles = GetModelProfiles().ToList();
+            var profiles = GetCachedProfiles();
             var activeId = requestedId;
             if (string.IsNullOrWhiteSpace(activeId))
             {
-                activeId = Registry.GetValue(AppIdentity.RegistryRoot, AssistantModelValueName, null)?.ToString();
+                activeId = _registryCache.GetValue(AppIdentity.RegistryRoot, AssistantModelValueName);
             }
 
             var profile = profiles.FirstOrDefault(p => string.Equals(p.Id, activeId, StringComparison.OrdinalIgnoreCase));
             if (profile != null) return profile;
 
             return profiles.FirstOrDefault(p => p.IsDefault) ?? profiles.First();
+        }
+
+        private List<AssistantModelProfile> GetCachedProfiles()
+        {
+            var cached = _profilesCache;
+            if (cached != null) return cached;
+            cached = GetModelProfiles().ToList();
+            _profilesCache = cached;
+            return cached;
         }
 
         private IEnumerable<AssistantModelProfile> GetModelProfiles()
@@ -489,7 +516,7 @@ namespace BlueBrick.Agent
                 yield break;
             }
 
-            yield return new AssistantModelProfile
+            yield return NormalizeProfile(new AssistantModelProfile
             {
                 Id = "configured-default",
                 Name = _config.Assistant.Model,
@@ -507,7 +534,7 @@ namespace BlueBrick.Agent
                 SecretRef = "runtime-only",
                 Enabled = true,
                 Source = "bluebrick"
-            };
+            });
         }
 
         private static AssistantModelProfile NormalizeProfile(AssistantModelProfile profile)
@@ -557,7 +584,7 @@ namespace BlueBrick.Agent
                 return MockMode;
             }
 
-            var overrideMode = Registry.GetValue(AppIdentity.RegistryRoot, AssistantModeValueName, null)?.ToString();
+            var overrideMode = _registryCache.GetValue(AppIdentity.RegistryRoot, AssistantModeValueName);
             var registryMode = NormalizeMode(overrideMode);
             var configuredMode = configMode ?? registryMode;
 
@@ -581,10 +608,18 @@ namespace BlueBrick.Agent
             return null;
         }
 
-        private static bool HasAgentToken()
+        private bool HasAgentToken()
         {
+            if (_tokenCacheValid && _tokenCacheStopwatch.Elapsed < CacheTtl)
+            {
+                return _tokenCachedResult;
+            }
+
             var tokenPath = GetAgentTokenPath();
-            return File.Exists(tokenPath) && !string.IsNullOrWhiteSpace(File.ReadAllText(tokenPath));
+            _tokenCachedResult = File.Exists(tokenPath) && !string.IsNullOrWhiteSpace(File.ReadAllText(tokenPath));
+            _tokenCacheValid = true;
+            _tokenCacheStopwatch.Restart();
+            return _tokenCachedResult;
         }
 
         private static string GetAgentTokenPath()
@@ -632,6 +667,55 @@ namespace BlueBrick.Agent
             internal string ApiKey { get; }
             internal string KeySource { get; }
             internal bool Configured => !string.IsNullOrWhiteSpace(ApiKey);
+        }
+
+        private sealed class RegistryCache
+        {
+            private readonly TimeSpan _ttl;
+            private readonly Dictionary<string, CachedEntry> _entries = new Dictionary<string, CachedEntry>(StringComparer.OrdinalIgnoreCase);
+            private readonly Stopwatch _clock = Stopwatch.StartNew();
+
+            internal RegistryCache(TimeSpan ttl)
+            {
+                _ttl = ttl;
+            }
+
+            internal string GetValue(string keyPath, string valueName)
+            {
+                var key = valueName;
+                CachedEntry entry;
+                if (_entries.TryGetValue(key, out entry) && (_clock.ElapsedTicks - entry.Timestamp) < _ttl.Ticks)
+                {
+                    return (string)entry.Value;
+                }
+
+                var raw = Registry.GetValue(keyPath, valueName, null);
+                var value = raw?.ToString();
+                _entries[key] = new CachedEntry(value, _clock.ElapsedTicks);
+                return value;
+            }
+
+            internal void Invalidate(string valueName)
+            {
+                _entries.Remove(valueName);
+            }
+
+            internal void InvalidateAll()
+            {
+                _entries.Clear();
+            }
+
+            private struct CachedEntry
+            {
+                internal readonly object Value;
+                internal readonly long Timestamp;
+
+                internal CachedEntry(object value, long timestamp)
+                {
+                    Value = value;
+                    Timestamp = timestamp;
+                }
+            }
         }
     }
 }
