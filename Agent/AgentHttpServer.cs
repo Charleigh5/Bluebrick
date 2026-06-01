@@ -1105,20 +1105,21 @@ await WriteJson(context, new { status = "ok", traceId });
 
         try
         {
-            await _assistantService.SendMessageStreamAsync(sessionId, message, attachments, chunk =>
-            {
-                var payload = JsonConvert.SerializeObject(new
+                await _assistantService.SendMessageStreamAsync(sessionId, message, attachments, chunk =>
                 {
-                    type = chunk.Type,
-                    text = chunk.Text,
-                    toolName = chunk.ToolName,
-                    toolCallId = chunk.ToolCallId,
-                    toolArguments = chunk.ToolArguments,
-                    errorCode = chunk.ErrorCode,
-                    errorMessage = chunk.ErrorMessage,
-                    done = chunk.Done,
-                    traceId
-                }, Formatting.None);
+                    var payload = JsonConvert.SerializeObject(new
+                    {
+                        type = chunk.Type,
+                        text = chunk.Text,
+                        toolName = chunk.ToolName,
+                        toolCallId = chunk.ToolCallId,
+                        toolArguments = chunk.ToolArguments,
+                        toolResultContent = chunk.ToolResultContent,
+                        errorCode = chunk.ErrorCode,
+                        errorMessage = chunk.ErrorMessage,
+                        done = chunk.Done,
+                        traceId
+                    }, Formatting.None);
                 var sseData = "data: " + payload + "\n\n";
                 var bytes = Encoding.UTF8.GetBytes(sseData);
                 context.Response.OutputStream.Write(bytes, 0, bytes.Length);

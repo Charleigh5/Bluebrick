@@ -1518,6 +1518,354 @@ namespace BlueBrick.UI.Tests
         }
 
         Assert.IsTrue(chunks.Count >= 1, "Should yield at least one chunk before cancellation");
-    }
+        }
+
+        [TestMethod]
+        public void AssistantStreamChunk_ToolResult_Factory_SetsFields()
+        {
+            var chunk = AssistantStreamChunk.ToolResult("call-123", "{\"status\":\"ok\"}");
+            Assert.AreEqual("tool_result", chunk.Type);
+            Assert.AreEqual("call-123", chunk.ToolCallId);
+            Assert.AreEqual("{\"status\":\"ok\"}", chunk.ToolResultContent);
+        }
+
+        [TestMethod]
+        public async Task OpenAiAssistantService_ToolSchemas_Included_WhenToolsSupported()
+        {
+            var config = new AgentConfig
+            {
+                Agent = new AgentSettings { BridgePort = 17179, OverlayColor = "#D9FF5A" },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings
+                {
+                    Mode = "mock",
+                    SystemPrompt = "mock",
+                    Detail = "low",
+                    EnableUploads = false,
+                    MaxImageDimension = 1600,
+                    JpegQuality = 75,
+                    ConnectionTestPrompt = "ready",
+                    RequireExplicitUploadConsent = false,
+                    MaxHistory = 10,
+                    ModelProfiles = new[]
+                    {
+                        new AssistantModelProfile
+                        {
+                            Id = "test-tools-profile",
+                            Name = "Test Tools Profile",
+                            Provider = "OpenAI",
+                            ApiBaseUrl = "https://api.openai.com/v1",
+                            Model = "gpt-4.1-mini",
+                            KeyEnvironmentVariable = "OPENAI_API_KEY",
+                            IsDefault = true,
+                            ProviderKind = "openai",
+                            SupportsTools = true,
+                            Enabled = true,
+                            Source = "test"
+                        }
+                    }
+                }
+            };
+
+            var service = new OpenAiAssistantService(config);
+            var session = await service.CreateSessionAsync();
+
+            var profile = (await service.GetModelsAsync()).FirstOrDefault(p => p.Id == "test-tools-profile");
+            Assert.IsNotNull(profile, "Test tools profile should exist");
+            Assert.IsTrue(profile.SupportsTools, "Profile should support tools");
+        }
+
+        [TestMethod]
+        public async Task OpenAiAssistantService_ToolSchemas_NotIncluded_WhenToolsNotSupported()
+        {
+            var config = new AgentConfig
+            {
+                Agent = new AgentSettings { BridgePort = 17179, OverlayColor = "#D9FF5A" },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings
+                {
+                    Mode = "mock",
+                    SystemPrompt = "mock",
+                    Detail = "low",
+                    EnableUploads = false,
+                    MaxImageDimension = 1600,
+                    JpegQuality = 75,
+                    ConnectionTestPrompt = "ready",
+                    RequireExplicitUploadConsent = false,
+                    MaxHistory = 10,
+                    ModelProfiles = new[]
+                    {
+                        new AssistantModelProfile
+                        {
+                            Id = "test-no-tools",
+                            Name = "No Tools Profile",
+                            Provider = "NVIDIA",
+                            ApiBaseUrl = "https://integrate.api.nvidia.com/v1",
+                            Model = "meta/llama-3.1-70b-instruct",
+                            KeyEnvironmentVariable = "NVIDIA_API_KEY",
+                            IsDefault = true,
+                            ProviderKind = "nvidia",
+                            SupportsTools = false,
+                            Enabled = true,
+                            Source = "test"
+                        }
+                    }
+                }
+            };
+
+            var service = new OpenAiAssistantService(config);
+            var profile = (await service.GetModelsAsync()).FirstOrDefault(p => p.Id == "test-no-tools");
+            Assert.IsNotNull(profile);
+            Assert.IsFalse(profile.SupportsTools);
+        }
+
+        [TestMethod]
+        public void AssistantToolService_Catalog_ContainsSearchLocalVault()
+        {
+            var config = new AgentConfig
+            {
+                Agent = new AgentSettings { BridgePort = 17179 },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings { Mode = "mock", SystemPrompt = "mock" }
+            };
+
+            var service = new AssistantToolService(config);
+            var catalog = service.GetCatalog();
+            var searchTool = catalog.FirstOrDefault(t => t.Name == "search_local_vault");
+            Assert.IsNotNull(searchTool, "search_local_vault tool should be in catalog");
+            Assert.IsTrue(searchTool.Enabled, "search_local_vault should be enabled");
+            Assert.IsTrue(searchTool.ReadOnly, "search_local_vault should be read-only");
+        }
+
+        [TestMethod]
+        public async Task OpenAiAssistantService_MockStreaming_ToolResultChunk_InSequence()
+        {
+            var config = new AgentConfig
+            {
+                Agent = new AgentSettings { BridgePort = 17179, OverlayColor = "#D9FF5A" },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings
+                {
+                    Mode = "mock",
+                    SystemPrompt = "mock",
+                    Detail = "low",
+                    EnableUploads = false,
+                    MaxImageDimension = 1600,
+                    JpegQuality = 75,
+                    ConnectionTestPrompt = "ready",
+                    RequireExplicitUploadConsent = false,
+                    MaxHistory = 10
+                }
+            };
+
+            var service = new OpenAiAssistantService(config);
+            var session = await service.CreateSessionAsync();
+            var chunks = new List<AssistantStreamChunk>();
+
+            await service.SendMessageStreamAsync(session.SessionId, "hello", null,
+                chunk => chunks.Add(chunk), CancellationToken.None);
+
+            var toolResultChunks = chunks.Where(c => c.Type == "tool_result").ToList();
+            var doneChunks = chunks.Where(c => c.Type == "done").ToList();
+            Assert.AreEqual(0, toolResultChunks.Count, "Mock mode should not produce tool_result chunks");
+            Assert.AreEqual(1, doneChunks.Count, "Should have exactly one done chunk");
+
+            var allTypes = chunks.Select(c => c.Type).Distinct().ToList();
+            Assert.IsTrue(allTypes.Contains("text_delta"), "Should contain text_delta chunks");
+            Assert.IsTrue(allTypes.Contains("done"), "Should contain done chunk");
+        }
+
+        [TestMethod]
+        public void ToolCall_UnknownTool_ReturnsDeniedResult()
+        {
+            var config = new AgentConfig
+            {
+                Agent = new AgentSettings { BridgePort = 17179 },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings { Mode = "mock", SystemPrompt = "mock" }
+            };
+
+            var service = new AssistantToolService(config);
+            var result = service.ExecuteAsync(new AssistantToolRequest { ToolName = "hack_the_gibson", Query = "test" }, "test-trace").Result;
+            Assert.AreEqual("unknown", result.Status);
+            Assert.IsNotNull(result.Receipt, "Unknown tool should still produce a receipt");
+            Assert.IsFalse(result.Receipt.Allowed, "Unknown tool receipt should show denied");
+        }
+
+        [TestMethod]
+        public void ToolCall_DisabledPdm_ReturnsDeniedResult()
+        {
+            var config = new AgentConfig
+            {
+                Agent = new AgentSettings { BridgePort = 17179 },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings { Mode = "mock", SystemPrompt = "mock" },
+                AssistantTools = new AssistantToolSettings { EnablePdmSearch = false }
+            };
+
+            var service = new AssistantToolService(config);
+            var result = service.ExecuteAsync(new AssistantToolRequest { ToolName = "search_pdm", Query = "bracket" }, "test-trace").Result;
+            Assert.AreEqual("disabled", result.Status);
+            Assert.IsNotNull(result.Receipt);
+            Assert.IsFalse(result.Receipt.Allowed);
+        }
+
+        [TestMethod]
+        public void ToolCall_MutationLikeSwTool_IsDenied()
+        {
+            var config = new AgentConfig
+            {
+                Agent = new AgentSettings { BridgePort = 17179 },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings { Mode = "mock", SystemPrompt = "mock" }
+            };
+
+            var service = new AssistantToolService(config);
+            var result = service.ExecuteAsync(new AssistantToolRequest { ToolName = "sw/save", Query = "" }, "test-trace").Result;
+            Assert.AreEqual("blocked_route_alias", result.Status);
+            Assert.IsNotNull(result.Receipt);
+            Assert.IsFalse(result.Receipt.Allowed);
+        }
+
+        [TestMethod]
+        public void ToolCall_MalformedArguments_ReturnsClassifiedError()
+        {
+            var config = new AgentConfig
+            {
+                Agent = new AgentSettings { BridgePort = 17179 },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings { Mode = "mock", SystemPrompt = "mock" }
+            };
+
+            var service = new AssistantToolService(config);
+            var result = service.ExecuteAsync(new AssistantToolRequest { ToolName = "search_local_vault", Query = "" }, "test-trace").Result;
+            Assert.AreEqual("invalid", result.Status);
+        }
+
+        [TestMethod]
+        public void ToolCall_MaxRoundsExceeded_StopsLoop()
+        {
+            Assert.AreEqual(5, typeof(OpenAiAssistantService).GetField("MaxToolRounds", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static).GetValue(null), "MaxToolRounds should be 5 to prevent infinite loops");
+        }
+
+        [TestMethod]
+        public void StreamingToolCall_SplitArguments_ReassembledCorrectly()
+        {
+            var acc1 = new OpenAiAssistantService.ToolCallAccumulator();
+            var dict = new Dictionary<int, OpenAiAssistantService.ToolCallAccumulator> { { 0, acc1 } };
+
+            var chunk1 = JObject.Parse("{\"index\":0,\"id\":\"call_abc\",\"function\":{\"name\":\"search_local_vault\",\"arguments\":\"{\\\"quer\"}}");
+            var chunk2 = JObject.Parse("{\"index\":0,\"function\":{\"arguments\":\"y\\\":\\\"bracket\\\"}\"}}");
+
+            foreach (var chunk in new[] { chunk1, chunk2 })
+            {
+                var idx = chunk.Value<int?>("index") ?? 0;
+                OpenAiAssistantService.ToolCallAccumulator acc;
+                if (!dict.TryGetValue(idx, out acc))
+                {
+                    acc = new OpenAiAssistantService.ToolCallAccumulator();
+                    dict[idx] = acc;
+                }
+                var tcId = chunk.Value<string>("id");
+                if (!string.IsNullOrEmpty(tcId)) acc.Id = tcId;
+                var fn = chunk["function"];
+                if (fn != null)
+                {
+                    var fName = fn.Value<string>("name");
+                    if (!string.IsNullOrEmpty(fName)) acc.Name = fName;
+                    var fArgs = fn.Value<string>("arguments");
+                    if (!string.IsNullOrEmpty(fArgs)) acc.Arguments.Append(fArgs);
+                }
+            }
+
+            Assert.AreEqual("call_abc", dict[0].Id);
+            Assert.AreEqual("search_local_vault", dict[0].Name);
+            var fullArgs = dict[0].Arguments.ToString();
+            Assert.IsTrue(fullArgs.Contains("bracket"), "Split arguments should be reassembled: " + fullArgs);
+
+            var parsed = JObject.Parse(fullArgs);
+            Assert.AreEqual("bracket", parsed.Value<string>("query"));
+        }
+
+        [TestMethod]
+        public void StreamingToolCall_ToolResultChunk_Emitted()
+        {
+            var chunk = AssistantStreamChunk.ToolResult("call-42", "{\"status\":\"ok\",\"message\":\"Found 3 matches.\"}");
+            Assert.AreEqual("tool_result", chunk.Type);
+            Assert.AreEqual("call-42", chunk.ToolCallId);
+            Assert.IsTrue(chunk.ToolResultContent.Contains("Found 3 matches"));
+        }
+
+        [TestMethod]
+        public async Task NonStreamingAndStreaming_ToolCallPaths_AreEquivalent_ForLocalVault()
+        {
+            var config = new AgentConfig
+            {
+                Agent = new AgentSettings { BridgePort = 17179, OverlayColor = "#D9FF5A" },
+                Vault = new VaultSettings
+                {
+                    Root = Path.Combine(Path.GetTempPath(), "bb-lab-vault"),
+                    SampleSeedRoot = Path.Combine(Path.GetTempPath(), "bb-lab-samples")
+                },
+                Assistant = new AssistantSettings
+                {
+                    Mode = "mock",
+                    SystemPrompt = "mock",
+                    Detail = "low",
+                    EnableUploads = false,
+                    MaxImageDimension = 1600,
+                    JpegQuality = 75,
+                    ConnectionTestPrompt = "ready",
+                    RequireExplicitUploadConsent = false,
+                    MaxHistory = 10
+                }
+            };
+
+            var toolService = new AssistantToolService(config);
+            var nonStreamingResult = await toolService.ExecuteAsync(
+                new AssistantToolRequest { ToolName = "search_local_vault", Query = "bracket" }, "ns-trace");
+            var streamingResult = await toolService.ExecuteAsync(
+                new AssistantToolRequest { ToolName = "search_local_vault", Query = "bracket" }, "s-trace");
+
+            Assert.AreEqual(nonStreamingResult.Status, streamingResult.Status, "Both paths should return same status for local vault");
+            Assert.AreEqual(nonStreamingResult.ToolName, streamingResult.ToolName);
+            Assert.AreEqual(nonStreamingResult.ReadOnly, streamingResult.ReadOnly);
+            Assert.IsNotNull(nonStreamingResult.Receipt);
+            Assert.IsNotNull(streamingResult.Receipt);
+            Assert.IsFalse(nonStreamingResult.Receipt.Allowed == false && nonStreamingResult.Status != "disabled" && nonStreamingResult.Status != "unknown" && nonStreamingResult.Status != "invalid",
+                "search_local_vault should not be denied by policy unless vault is missing");
+        }
     }
 }

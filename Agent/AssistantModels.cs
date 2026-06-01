@@ -397,6 +397,7 @@ namespace BlueBrick.Agent
         public string ToolName { get; set; }
         public string ToolCallId { get; set; }
         public string ToolArguments { get; set; }
+        public string ToolResultContent { get; set; }
         public string ErrorCode { get; set; }
         public string ErrorMessage { get; set; }
         public bool Done { get; set; }
@@ -409,6 +410,11 @@ namespace BlueBrick.Agent
         internal static AssistantStreamChunk ToolCall(string name, string id, string arguments)
         {
             return new AssistantStreamChunk { Type = "tool_call", ToolName = name, ToolCallId = id, ToolArguments = arguments ?? string.Empty };
+        }
+
+        internal static AssistantStreamChunk ToolResult(string toolCallId, string content)
+        {
+            return new AssistantStreamChunk { Type = "tool_result", ToolCallId = toolCallId, ToolResultContent = content ?? string.Empty };
         }
 
         internal static AssistantStreamChunk Error(string code, string message)

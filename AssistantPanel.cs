@@ -782,6 +782,28 @@ namespace BlueBrick
                         fullResponse.Clear();
                         fullResponse.Append(BuildUserFacingError(errorCode, errorMessage));
                     }
+                    else if (chunkType == "tool_call")
+                    {
+                        var toolName = jObj.Value<string>("toolName") ?? "unknown";
+                        var toolCallId = jObj.Value<string>("toolCallId") ?? "";
+                        var toolLabel = string.IsNullOrWhiteSpace(toolName) ? "tool" : toolName;
+                        _webView.ExecuteScriptAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject("[Calling " + toolLabel + "...]") + ");");
+                    }
+                    else if (chunkType == "tool_result")
+                    {
+                        var resultContent = jObj.Value<string>("toolResultContent") ?? "";
+                        string summaryText;
+                        try
+                        {
+                            var resultObj = JObject.Parse(resultContent);
+                            summaryText = resultObj.Value<string>("message") ?? "Tool completed.";
+                        }
+                        catch
+                        {
+                            summaryText = "Tool completed.";
+                        }
+                        _webView.ExecuteScriptAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject("[" + summaryText + "]") + ");");
+                    }
                 }
                 catch
                 {

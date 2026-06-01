@@ -22,6 +22,7 @@ namespace BlueBrick.Agent
         private const string AssistantModeValueName = "AssistantMode";
         private const string AssistantApiKeyValueName = "AssistantApiKey";
         private const string AssistantModelValueName = "AssistantModel";
+        private const int MaxToolRounds = 5;
 
         private static readonly HttpClient Client = new HttpClient
         {
@@ -43,16 +44,23 @@ namespace BlueBrick.Agent
         private readonly AgentConfig _config;
         private readonly AssistantSessionStore _store;
         private readonly RegistryCache _registryCache;
+        private readonly AssistantToolService _toolService;
         private volatile List<AssistantModelProfile> _profilesCache;
+        private volatile JArray _toolSchemasCache;
         private readonly Stopwatch _tokenCacheStopwatch = Stopwatch.StartNew();
         private bool _tokenCachedResult;
         private bool _tokenCacheValid;
 
-        internal OpenAiAssistantService(AgentConfig config)
+        internal OpenAiAssistantService(AgentConfig config) : this(config, new AssistantToolService(config, null))
+        {
+        }
+
+        internal OpenAiAssistantService(AgentConfig config, AssistantToolService toolService)
         {
             _config = config;
             _store = new AssistantSessionStore();
             _registryCache = new RegistryCache(CacheTtl);
+            _toolService = toolService;
         }
 
         public Task<AssistantSession> CreateSessionAsync()
@@ -252,25 +260,52 @@ namespace BlueBrick.Agent
                 };
             }
 
-            try
+        try
+        {
+            var extraMessages = new JArray();
+            var round = 0;
+            string body;
+
+            while (true)
             {
-                var body = await SendChatCompletionAsync(BuildChatRequestBody(session), keyInfo.ApiKey, profile).ConfigureAwait(false);
-                var assistantMessage = new AssistantMessage
+                body = await SendChatCompletionAsync(BuildChatRequestBody(session, false, extraMessages.Count > 0 ? extraMessages : null), keyInfo.ApiKey, profile).ConfigureAwait(false);
+                var responseJson = JObject.Parse(body);
+                var toolCalls = ExtractToolCalls(responseJson);
+
+                if (toolCalls == null || toolCalls.Count == 0) break;
+
+                round++;
+                if (round > MaxToolRounds) break;
+
+                var assistantText = ExtractAssistantText(body);
+                var callMessages = BuildAssistantToolCallMessages(toolCalls, assistantText);
+                foreach (var m in callMessages) extraMessages.Add(m);
+
+                var traceId = Guid.NewGuid().ToString("N").Substring(0, 8);
+                var toolResults = await ExecuteToolCallRoundAsync(toolCalls, traceId).ConfigureAwait(false);
+                var toolResultMessages = toolResults["messages"] as JArray;
+                if (toolResultMessages != null)
                 {
-                    Role = "assistant",
-                    Text = ExtractAssistantText(body),
-                    CreatedUtc = DateTime.UtcNow
-                };
-                session.Messages.Add(assistantMessage);
-                TrimHistory(session);
-                _store.Save(session);
-                return new AssistantSessionResponse
-                {
-                    SessionId = session.SessionId,
-                    AssistantAvailable = true,
-                    Message = assistantMessage
-                };
+                    foreach (var m in toolResultMessages) extraMessages.Add(m);
+                }
             }
+
+            var assistantMessage = new AssistantMessage
+            {
+                Role = "assistant",
+                Text = ExtractAssistantText(body),
+                CreatedUtc = DateTime.UtcNow
+            };
+            session.Messages.Add(assistantMessage);
+            TrimHistory(session);
+            _store.Save(session);
+            return new AssistantSessionResponse
+            {
+                SessionId = session.SessionId,
+                AssistantAvailable = true,
+                Message = assistantMessage
+            };
+        }
         catch (Exception ex)
         {
             var classified = AssistantErrorClassifier.FromException(ex);
@@ -340,11 +375,50 @@ namespace BlueBrick.Agent
         var fullText = new StringBuilder();
         try
         {
-            await StreamChatCompletionAsync(BuildChatRequestBody(session, true), keyInfo.ApiKey, profile, chunk =>
+            var extraMessages = new JArray();
+            var round = 0;
+
+            while (round < MaxToolRounds)
             {
-                fullText.Append(chunk);
-                onChunk(AssistantStreamChunk.TextDelta(chunk));
-            }, cancellationToken).ConfigureAwait(false);
+            var pendingToolCalls = new List<LlmToolCall>();
+            var roundText = new StringBuilder();
+            var hasToolCalls = false;
+
+                await StreamChatCompletionAsync(BuildChatRequestBody(session, true, extraMessages.Count > 0 ? extraMessages : null), keyInfo.ApiKey, profile, chunk =>
+                {
+                    roundText.Append(chunk);
+                    onChunk(AssistantStreamChunk.TextDelta(chunk));
+                }, cancellationToken, (name, id, args) =>
+                {
+                    hasToolCalls = true;
+                    var tc = new LlmToolCall { Id = id, Name = name, Arguments = args };
+                    pendingToolCalls.Add(tc);
+                    onChunk(AssistantStreamChunk.ToolCall(name, id, args));
+                }).ConfigureAwait(false);
+
+                fullText.Append(roundText);
+
+                if (!hasToolCalls) break;
+
+                round++;
+                var assistantText = roundText.ToString();
+                var callMessages = BuildAssistantToolCallMessages(pendingToolCalls, assistantText);
+                foreach (var m in callMessages) extraMessages.Add(m);
+
+                var traceId = Guid.NewGuid().ToString("N").Substring(0, 8);
+                var toolResults = await ExecuteToolCallRoundAsync(pendingToolCalls, traceId).ConfigureAwait(false);
+                var toolResultMessages = toolResults["messages"] as JArray;
+                if (toolResultMessages != null)
+                {
+                    foreach (var tm in toolResultMessages)
+                    {
+                        extraMessages.Add(tm);
+                        var callId = tm.Value<string>("tool_call_id") ?? "";
+                        var content = tm.Value<string>("content") ?? "";
+                        onChunk(AssistantStreamChunk.ToolResult(callId, content));
+                    }
+                }
+            }
 
             var assistantMessage = new AssistantMessage
             {
@@ -440,37 +514,75 @@ namespace BlueBrick.Agent
             };
         }
 
-        private string BuildChatRequestBody(AssistantSession session, bool streaming = false)
+        private string BuildChatRequestBody(AssistantSession session, bool streaming = false, JArray extraMessages = null)
         {
+            var profile = ResolveProfile();
             var messages = new JArray();
             messages.Add(new JObject
             {
                 ["role"] = "system",
                 ["content"] = _config.Assistant.SystemPrompt + Environment.NewLine +
-                              "Build profile: " + AppIdentity.ProductName + Environment.NewLine +
-                              "Local vault root: " + _config.Vault.Root + Environment.NewLine +
-                              "Working folder: " + AppIdentity.DefaultWorkingFolder + Environment.NewLine +
-                              "Policy: advisory only, no CAD edits, no PDM actions, no external publishing."
+                "Build profile: " + AppIdentity.ProductName + Environment.NewLine +
+                "Local vault root: " + _config.Vault.Root + Environment.NewLine +
+                "Working folder: " + AppIdentity.DefaultWorkingFolder + Environment.NewLine +
+                "Policy: advisory only, no CAD edits, no PDM actions, no external publishing."
             });
 
             foreach (var msg in session.Messages)
             {
-                var content = new JArray
+                var content = BuildMessageContent(msg, session.SessionId);
+                messages.Add(new JObject
                 {
-                    new JObject
-                    {
-                        ["type"] = "text",
-                        ["text"] = msg.Text ?? string.Empty
-                    }
-                };
+                    ["role"] = msg.Role,
+                    ["content"] = content
+                });
+            }
 
-            if (_config.Assistant.EnableUploads)
+            if (extraMessages != null)
+            {
+                foreach (var extra in extraMessages)
+                {
+                    messages.Add(extra);
+                }
+            }
+
+            var requestObj = new JObject
+            {
+                ["model"] = profile.Model,
+                ["messages"] = messages,
+                ["stream"] = streaming
+            };
+
+            if (profile.SupportsTools)
+            {
+                var tools = GetToolSchemas();
+                if (tools.Count > 0)
+                {
+                    requestObj["tools"] = tools;
+                }
+            }
+
+            return requestObj.ToString(Formatting.None);
+        }
+
+        private JToken BuildMessageContent(AssistantMessage msg, string sessionId)
+        {
+            var content = new JArray
+            {
+                new JObject
+                {
+                    ["type"] = "text",
+                    ["text"] = msg.Text ?? string.Empty
+                }
+            };
+
+            if (_config.Assistant.EnableUploads && msg.Role == "user")
             {
                 long totalBytes = 0;
                 var maxBytes = _config.Assistant.MaxTotalAttachmentBytes;
                 var enforceCap = maxBytes > 0;
                 foreach (var attachmentPath in msg.AttachmentPaths.Select(path =>
-                    AssistantImageTools.PrepareAttachment(session.SessionId, path,
+                    AssistantImageTools.PrepareAttachment(sessionId, path,
                         _config.Assistant.MaxImageDimension, _config.Assistant.JpegQuality))
                     .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path)))
                 {
@@ -479,32 +591,183 @@ namespace BlueBrick.Agent
                     totalBytes += fi.Length;
 
                     var base64 = Convert.ToBase64String(File.ReadAllBytes(attachmentPath));
-                        content.Add(new JObject
+                    content.Add(new JObject
+                    {
+                        ["type"] = "image_url",
+                        ["image_url"] = new JObject
                         {
-                            ["type"] = "image_url",
-                            ["image_url"] = new JObject
-                            {
-                                ["url"] = "data:image/jpeg;base64," + base64,
-                                ["detail"] = _config.Assistant.Detail
-                            }
-                        });
-                    }
+                            ["url"] = "data:image/jpeg;base64," + base64,
+                            ["detail"] = _config.Assistant.Detail
+                        }
+                    });
                 }
+            }
 
-                messages.Add(new JObject
+            return content.Count == 1 ? (JToken)content[0]["text"] : content;
+        }
+
+        private JArray GetToolSchemas()
+        {
+            var cached = _toolSchemasCache;
+            if (cached != null) return cached;
+
+            var catalog = _toolService.GetCatalog();
+            var tools = new JArray();
+            foreach (var tool in catalog)
+            {
+                if (!tool.Enabled) continue;
+                tools.Add(new JObject
                 {
-                    ["role"] = msg.Role,
-                    ["content"] = content.Count == 1 ? (JToken)content[0]["text"] : content
+                    ["type"] = "function",
+                    ["function"] = new JObject
+                    {
+                        ["name"] = tool.Name,
+                        ["description"] = tool.Description ?? string.Empty,
+                        ["parameters"] = BuildToolParameters(tool)
+                    }
                 });
             }
 
-        var requestObj = new JObject
+            _toolSchemasCache = tools;
+            return tools;
+        }
+
+        private static JObject BuildToolParameters(AssistantToolDescriptor tool)
         {
-            ["model"] = ResolveProfile().Model,
-            ["messages"] = messages,
-            ["stream"] = streaming
-        };
-        return requestObj.ToString(Formatting.None);
+            var props = new JObject();
+            var required = new JArray();
+
+            if (tool.Name == "search_local_vault")
+            {
+                props["query"] = new JObject { ["type"] = "string", ["description"] = "Search query for the local vault index." };
+                props["limit"] = new JObject { ["type"] = "integer", ["description"] = "Maximum number of results to return (1-25)." };
+                required.Add("query");
+            }
+            else if (tool.Name == "search_pdm")
+            {
+                props["query"] = new JObject { ["type"] = "string", ["description"] = "Search query for PDM vault files." };
+                props["limit"] = new JObject { ["type"] = "integer", ["description"] = "Maximum number of results to return." };
+                required.Add("query");
+            }
+            else if (tool.Name == "search_epicor")
+            {
+                props["query"] = new JObject { ["type"] = "string", ["description"] = "Search query for Epicor ERP parts." };
+                props["limit"] = new JObject { ["type"] = "integer", ["description"] = "Maximum number of results to return." };
+                required.Add("query");
+            }
+            else if (tool.Name == "capture_screenshot")
+            {
+                props["sessionId"] = new JObject { ["type"] = "string", ["description"] = "Optional session ID for the screenshot capture." };
+            }
+
+            var schema = new JObject
+            {
+                ["type"] = "object",
+                ["properties"] = props
+            };
+            if (required.Count > 0) schema["required"] = required;
+            return schema;
+        }
+
+        internal class LlmToolCall
+        {
+            internal string Id { get; set; }
+            internal string Name { get; set; }
+            internal string Arguments { get; set; }
+        }
+
+        private List<LlmToolCall> ExtractToolCalls(JObject response)
+        {
+            var choices = response["choices"] as JArray;
+            if (choices == null || choices.Count == 0) return null;
+            var message = choices[0]["message"];
+            var toolCalls = message?["tool_calls"] as JArray;
+            if (toolCalls == null || toolCalls.Count == 0) return null;
+
+            var result = new List<LlmToolCall>();
+            foreach (var tc in toolCalls)
+            {
+                var id = tc.Value<string>("id") ?? Guid.NewGuid().ToString("N");
+                var fn = tc["function"];
+                var name = fn?.Value<string>("name") ?? string.Empty;
+                var args = fn?.Value<string>("arguments") ?? "{}";
+                result.Add(new LlmToolCall { Id = id, Name = name, Arguments = args });
+            }
+            return result;
+        }
+
+        private async Task<JObject> ExecuteToolCallRoundAsync(List<LlmToolCall> toolCalls, string traceId)
+        {
+            var toolMessages = new JArray();
+            foreach (var tc in toolCalls)
+            {
+                Dictionary<string, string> parameters;
+                try
+                {
+                    var argsObj = JObject.Parse(tc.Arguments);
+                    parameters = argsObj.Properties().ToDictionary(p => p.Name, p => p.Value.ToString());
+                }
+                catch
+                {
+                    parameters = new Dictionary<string, string>();
+                }
+
+                string query;
+                parameters.TryGetValue("query", out query);
+                int limit;
+                int.TryParse(parameters.TryGetValue("limit", out var limitStr) ? limitStr : null, out limit);
+
+                var request = new AssistantToolRequest
+                {
+                    ToolName = tc.Name,
+                    Query = query,
+                    Limit = limit,
+                    Parameters = parameters
+                };
+
+                var result = await _toolService.ExecuteAsync(request, traceId).ConfigureAwait(false);
+                var resultJson = JsonConvert.SerializeObject(new
+                {
+                    status = result.Status,
+                    message = result.Message,
+                    items = result.Items.Select(i => new { i.Id, i.Title, i.Subtitle, i.Path, i.Source })
+                }, Formatting.None);
+
+                toolMessages.Add(new JObject
+                {
+                    ["role"] = "tool",
+                    ["tool_call_id"] = tc.Id,
+                    ["content"] = resultJson
+                });
+            }
+            return new JObject { ["messages"] = toolMessages };
+        }
+
+        private JArray BuildAssistantToolCallMessages(List<LlmToolCall> toolCalls, string assistantText)
+        {
+            var tcArray = new JArray();
+            foreach (var tc in toolCalls)
+            {
+                tcArray.Add(new JObject
+                {
+                    ["id"] = tc.Id,
+                    ["type"] = "function",
+                    ["function"] = new JObject
+                    {
+                        ["name"] = tc.Name,
+                        ["arguments"] = tc.Arguments
+                    }
+                });
+            }
+
+            var assistantMsg = new JObject
+            {
+                ["role"] = "assistant",
+                ["content"] = assistantText ?? string.Empty,
+                ["tool_calls"] = tcArray
+            };
+
+            return new JArray { assistantMsg };
         }
 
     private async Task<string> SendChatCompletionAsync(string requestBody, string apiKey, AssistantModelProfile profile)
@@ -528,86 +791,147 @@ namespace BlueBrick.Agent
         }
     }
 
-    private async Task StreamChatCompletionAsync(string requestBody, string apiKey,
-        AssistantModelProfile profile, Action<string> onChunk, CancellationToken cancellationToken)
-    {
-        using (var request = new HttpRequestMessage(HttpMethod.Post,
-            profile.ApiBaseUrl.TrimEnd('/') + "/chat/completions"))
+        private async Task StreamChatCompletionAsync(string requestBody, string apiKey,
+            AssistantModelProfile profile, Action<string> onChunk, CancellationToken cancellationToken,
+            Action<string, string, string> onToolCall = null)
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            request.Headers.Add("User-Agent", "BlueBrick-AI-Assistant/1.0");
-            request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
-
-            using (var response = await StreamClient.SendAsync(request,
-                HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false))
+            using (var request = new HttpRequestMessage(HttpMethod.Post,
+                profile.ApiBaseUrl.TrimEnd('/') + "/chat/completions"))
             {
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    var classified = AssistantErrorClassifier.FromProviderFailure(errorBody);
-                    throw new InvalidOperationException(classified.Message);
-                }
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                request.Headers.Add("User-Agent", "BlueBrick-AI-Assistant/1.0");
+                request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
 
-                using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
-                using (var reader = new StreamReader(stream, Encoding.UTF8))
+                using (var response = await StreamClient.SendAsync(request,
+                    HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false))
                 {
-                    var lineBuffer = new StringBuilder();
-                    var buffer = new char[4096];
-
-                    while (!cancellationToken.IsCancellationRequested)
+                    if (!response.IsSuccessStatusCode)
                     {
-                        var readTask = reader.ReadAsync(buffer, 0, buffer.Length);
-                        var completed = await Task.WhenAny(readTask,
-                            Task.Delay(TimeSpan.FromSeconds(90), cancellationToken)).ConfigureAwait(false);
+                        var errorBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        var classified = AssistantErrorClassifier.FromProviderFailure(errorBody);
+                        throw new InvalidOperationException(classified.Message);
+                    }
 
-                        if (completed != readTask)
+                    using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                    using (var reader = new StreamReader(stream, Encoding.UTF8))
+                    {
+                        var lineBuffer = new StringBuilder();
+                        var buffer = new char[4096];
+                        var toolCallAccumulators = new Dictionary<int, ToolCallAccumulator>();
+
+                        while (!cancellationToken.IsCancellationRequested)
                         {
-                            cancellationToken.ThrowIfCancellationRequested();
-                            throw new TimeoutException("Streaming response timed out waiting for data.");
-                        }
+                            var readTask = reader.ReadAsync(buffer, 0, buffer.Length);
+                            var completed = await Task.WhenAny(readTask,
+                                Task.Delay(TimeSpan.FromSeconds(90), cancellationToken)).ConfigureAwait(false);
 
-                        var count = await readTask.ConfigureAwait(false);
-                        if (count == 0) break;
-
-                        lineBuffer.Append(buffer, 0, count);
-                        var content = lineBuffer.ToString();
-                        var lastNewline = content.LastIndexOf('\n');
-                        if (lastNewline < 0) continue;
-
-                        var completeLines = content.Substring(0, lastNewline + 1);
-                        lineBuffer.Clear();
-                        lineBuffer.Append(content.Substring(lastNewline + 1));
-
-                        foreach (var line in completeLines.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries))
-                        {
-                            var trimmed = line.Trim();
-                            if (!trimmed.StartsWith("data:")) continue;
-                            var data = trimmed.Substring(5).Trim();
-                            if (data == "[DONE]") return;
-
-                            try
+                            if (completed != readTask)
                             {
-                                var chunk = JObject.Parse(data);
-                                var choices = chunk["choices"] as JArray;
-                                if (choices == null || choices.Count == 0) continue;
-                                var delta = choices[0]["delta"];
-                                if (delta == null) continue;
-                                var text = delta.Value<string>("content");
-                                if (!string.IsNullOrEmpty(text))
+                                cancellationToken.ThrowIfCancellationRequested();
+                                throw new TimeoutException("Streaming response timed out waiting for data.");
+                            }
+
+                            var count = await readTask.ConfigureAwait(false);
+                            if (count == 0) break;
+
+                            lineBuffer.Append(buffer, 0, count);
+                            var content = lineBuffer.ToString();
+                            var lastNewline = content.LastIndexOf('\n');
+                            if (lastNewline < 0) continue;
+
+                            var completeLines = content.Substring(0, lastNewline + 1);
+                            lineBuffer.Clear();
+                            lineBuffer.Append(content.Substring(lastNewline + 1));
+
+                            foreach (var line in completeLines.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                            {
+                                var trimmed = line.Trim();
+                                if (!trimmed.StartsWith("data:")) continue;
+                                var data = trimmed.Substring(5).Trim();
+                                if (data == "[DONE]")
                                 {
-                                    onChunk(text);
+                                    FlushToolCalls(toolCallAccumulators, onToolCall);
+                                    return;
+                                }
+
+                                try
+                                {
+                                    var chunk = JObject.Parse(data);
+                                    var choices = chunk["choices"] as JArray;
+                                    if (choices == null || choices.Count == 0) continue;
+                                    var delta = choices[0]["delta"];
+                                    if (delta == null) continue;
+
+                                    var text = delta.Value<string>("content");
+                                    if (!string.IsNullOrEmpty(text))
+                                    {
+                                        onChunk(text);
+                                    }
+
+                                    var deltaToolCalls = delta["tool_calls"] as JArray;
+                                    if (deltaToolCalls != null && onToolCall != null)
+                                    {
+                                        foreach (var tc in deltaToolCalls)
+                                        {
+                                            var idx = tc.Value<int?>("index") ?? 0;
+                                            ToolCallAccumulator acc;
+                                            if (!toolCallAccumulators.TryGetValue(idx, out acc))
+                                            {
+                                                acc = new ToolCallAccumulator();
+                                                toolCallAccumulators[idx] = acc;
+                                            }
+                                            var tcId = tc.Value<string>("id");
+                                            if (!string.IsNullOrEmpty(tcId)) acc.Id = tcId;
+                                            var fn = tc["function"];
+                                            if (fn != null)
+                                            {
+                                                var fName = fn.Value<string>("name");
+                                                if (!string.IsNullOrEmpty(fName)) acc.Name = fName;
+                                                var fArgs = fn.Value<string>("arguments");
+                                                if (!string.IsNullOrEmpty(fArgs)) acc.Arguments.Append(fArgs);
+                                            }
+                                        }
+                                    }
+
+                                    var finishReason = choices[0].Value<string>("finish_reason");
+                                    if (finishReason == "tool_calls")
+                                    {
+                                        FlushToolCalls(toolCallAccumulators, onToolCall);
+                                    }
+                                }
+                                catch
+                                {
+                                    continue;
                                 }
                             }
-                            catch
-                            {
-                                continue;
-                            }
                         }
+
+                        FlushToolCalls(toolCallAccumulators, onToolCall);
                     }
                 }
             }
         }
-    }
+
+        private static void FlushToolCalls(Dictionary<int, ToolCallAccumulator> accumulators, Action<string, string, string> onToolCall)
+        {
+            if (onToolCall == null || accumulators == null) return;
+            foreach (var kvp in accumulators)
+            {
+                var acc = kvp.Value;
+                if (string.IsNullOrEmpty(acc.Name)) continue;
+                var args = acc.Arguments.ToString();
+                if (string.IsNullOrWhiteSpace(args)) args = "{}";
+                onToolCall(acc.Name, acc.Id ?? Guid.NewGuid().ToString("N"), args);
+            }
+            accumulators.Clear();
+        }
+
+        internal class ToolCallAccumulator
+        {
+            internal string Id;
+            internal string Name;
+            internal StringBuilder Arguments = new StringBuilder();
+        }
 
         private static string ExtractAssistantText(string body)
         {
