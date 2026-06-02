@@ -1,0 +1,16 @@
+.assistant-shell {
+  min-height: 100vh;
+  background: #f4f7fb;
+  color: #111827;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.assistant-header {
+  border-bottom: 1px solid #d7dde7;
+  background: #fff;
+  padding: 10px;
+}
+
+.assistant-thread {
+  padding: 10px;
+}

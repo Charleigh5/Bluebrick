@@ -39,7 +39,8 @@ namespace BlueBrick.Agent
 
             var width = Math.Max(1, rect.Right - rect.Left);
             var height = Math.Max(1, rect.Bottom - rect.Top);
-            var output = BuildTempPath(request.SessionId, "capture", ".png");
+            var artifactId = AssistantScreenshotArtifactStore.NewArtifactId();
+            var output = AssistantScreenshotArtifactStore.BuildCapturePath(artifactId, ".png");
 
             using (var bitmap = new Bitmap(width, height))
             using (var graphics = Graphics.FromImage(bitmap))
@@ -50,6 +51,9 @@ namespace BlueBrick.Agent
 
             var artifact = new AssistantScreenshotArtifact
             {
+                SchemaVersion = AssistantApiEnvelope.CurrentSchemaVersion,
+                ScreenshotId = artifactId,
+                ArtifactId = artifactId,
                 SessionId = request.SessionId,
                 Path = output,
                 CapturedUtc = DateTime.UtcNow,
@@ -60,7 +64,7 @@ namespace BlueBrick.Agent
                 CaptureSource = captureSource
             };
             AssistantScreenshotAnalyzer.EnsurePrivacyMetadata(artifact, null, false);
-            WriteArtifactMetadata(artifact);
+            AssistantScreenshotArtifactStore.CompleteArtifact(artifact);
             return artifact;
         }
 
@@ -187,13 +191,6 @@ namespace BlueBrick.Agent
             var root = Path.Combine(AppIdentity.AssistantHistoryRoot, "attachments", sessionId ?? "global");
             Directory.CreateDirectory(root);
             return Path.Combine(root, prefix + "-" + Guid.NewGuid().ToString("N") + extension);
-        }
-
-        private static void WriteArtifactMetadata(AssistantScreenshotArtifact artifact)
-        {
-            if (artifact == null || string.IsNullOrWhiteSpace(artifact.Path)) return;
-            var metadataPath = artifact.Path + ".metadata.json";
-            File.WriteAllText(metadataPath, JsonConvert.SerializeObject(artifact, Formatting.Indented));
         }
 
         private static string GetWindowTitle(IntPtr handle)

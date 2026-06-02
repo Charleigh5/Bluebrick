@@ -510,6 +510,9 @@ namespace BlueBrick.Agent
                 AgentTokenConfigured = tokenConfigured,
                 EnableUploads = _config.Assistant.EnableUploads,
                 RequireExplicitUploadConsent = _config.Assistant.RequireExplicitUploadConsent,
+                ActiveModelDescriptor = AssistantModelDescriptor.FromProfile(profile, keyInfo.Configured),
+                Scopes = AssistantScopeRegistry.Build(_config, _toolService.GetCatalog()).ToArray(),
+                AssistantWebViewStatus = _config.Assistant.UseReactWebView ? "react-enabled" : "fallback-shell",
                 Checklist = checklist.ToArray()
             };
         }

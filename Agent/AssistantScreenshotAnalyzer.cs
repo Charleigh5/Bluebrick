@@ -105,13 +105,22 @@ namespace BlueBrick.Agent
             artifact.Annotations.Add(new AssistantScreenshotAnnotation
             {
                 Id = "mock-review-region",
+                ScreenshotId = artifact.ScreenshotId ?? artifact.ArtifactId,
                 Label = "Primary review region",
                 Severity = "info",
+                Type = "rectangle",
                 X = artifact.Width > width ? (artifact.Width - width) / 2 : 0,
                 Y = artifact.Height > height ? (artifact.Height - height) / 2 : 0,
                 Width = width,
                 Height = height,
-                Source = "mock-metadata"
+                NormalizedX = artifact.Width > 0 ? (double)(artifact.Width > width ? (artifact.Width - width) / 2 : 0) / artifact.Width : 0,
+                NormalizedY = artifact.Height > 0 ? (double)(artifact.Height > height ? (artifact.Height - height) / 2 : 0) / artifact.Height : 0,
+                NormalizedWidth = artifact.Width > 0 ? (double)width / artifact.Width : 0,
+                NormalizedHeight = artifact.Height > 0 ? (double)height / artifact.Height : 0,
+                Source = "ai_proposed",
+                Confidence = 0.65,
+                ReviewStatus = "pending",
+                ReviewNote = "AI-proposed region requires human review before export."
             });
         }
 
@@ -150,7 +159,7 @@ namespace BlueBrick.Agent
             {
                 var dir = Path.GetDirectoryName(artifact.Path);
                 if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
-                File.WriteAllText(artifact.Path + ".metadata.json", Newtonsoft.Json.JsonConvert.SerializeObject(artifact, Newtonsoft.Json.Formatting.Indented));
+                AssistantScreenshotArtifactStore.CompleteArtifact(artifact);
             }
             catch
             {

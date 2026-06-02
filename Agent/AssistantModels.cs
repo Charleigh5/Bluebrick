@@ -20,9 +20,15 @@ namespace BlueBrick.Agent
 
     internal class AssistantScreenshotArtifact
     {
+        public string SchemaVersion { get; set; }
+        public string ScreenshotId { get; set; }
         public string ArtifactId { get; set; }
         public string SessionId { get; set; }
         public string Path { get; set; }
+        public string MetadataPath { get; set; }
+        public string ThumbnailPath { get; set; }
+        public string AnnotationsPath { get; set; }
+        public string AnnotatedPath { get; set; }
         public DateTime CapturedUtc { get; set; }
         public int Width { get; set; }
         public int Height { get; set; }
@@ -37,6 +43,7 @@ namespace BlueBrick.Agent
         public string ModelProfileId { get; set; }
         public List<AssistantScreenshotAnnotation> Annotations { get; set; } = new List<AssistantScreenshotAnnotation>();
         public List<AssistantExtractedContact> ExtractedContacts { get; set; } = new List<AssistantExtractedContact>();
+        public AssistantScreenshotReceipt Receipt { get; set; }
     }
 
     internal class AssistantScreenshotCaptureRequest
@@ -48,13 +55,58 @@ namespace BlueBrick.Agent
     internal class AssistantScreenshotAnnotation
     {
         public string Id { get; set; }
+        public string ScreenshotId { get; set; }
         public string Label { get; set; }
         public string Severity { get; set; }
+        public string Type { get; set; } = "rectangle";
         public int X { get; set; }
         public int Y { get; set; }
         public int Width { get; set; }
         public int Height { get; set; }
+        public double NormalizedX { get; set; }
+        public double NormalizedY { get; set; }
+        public double NormalizedWidth { get; set; }
+        public double NormalizedHeight { get; set; }
+        public List<AssistantAnnotationPoint> Points { get; set; } = new List<AssistantAnnotationPoint>();
         public string Source { get; set; }
+        public double Confidence { get; set; }
+        public string ReviewStatus { get; set; } = "pending";
+        public DateTime? ReviewedUtc { get; set; }
+        public string ReviewedBy { get; set; }
+        public string ReviewNote { get; set; }
+    }
+
+    internal class AssistantAnnotationPoint
+    {
+        public double X { get; set; }
+        public double Y { get; set; }
+    }
+
+    internal class AssistantScreenshotAnnotationDocument
+    {
+        public string SchemaVersion { get; set; }
+        public string ScreenshotId { get; set; }
+        public int ImageWidth { get; set; }
+        public int ImageHeight { get; set; }
+        public List<AssistantScreenshotAnnotation> Annotations { get; set; } = new List<AssistantScreenshotAnnotation>();
+    }
+
+    internal class AssistantScreenshotReceipt
+    {
+        public string ScreenshotId { get; set; }
+        public string ArtifactId { get; set; }
+        public DateTime CapturedUtc { get; set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public string SourceWindowTitle { get; set; }
+        public string SolidWorksDocumentTitle { get; set; }
+        public string ImagePath { get; set; }
+        public string MetadataPath { get; set; }
+        public string ThumbnailPath { get; set; }
+        public bool LocalOnly { get; set; }
+        public bool SentToModel { get; set; }
+        public string RetentionPolicy { get; set; }
+        public string ReviewStatus { get; set; }
     }
 
     internal class AssistantExtractedContact
@@ -127,8 +179,61 @@ namespace BlueBrick.Agent
         public string RelayBaseUrl { get; set; }
         public string ChatWorkspaceUrl { get; set; }
         public AssistantModelCapabilitySummary ActiveModel { get; set; }
+        public AssistantModelDescriptor ActiveModelDescriptor { get; set; }
         public AssistantToolAvailabilitySummary ToolAvailability { get; set; }
+        public AssistantScopeDescriptor[] Scopes { get; set; } = Array.Empty<AssistantScopeDescriptor>();
+        public string AssistantWebViewStatus { get; set; }
+        public string AssistantWebViewError { get; set; }
         public string[] Checklist { get; set; } = Array.Empty<string>();
+    }
+
+    internal class AssistantModelDescriptor
+    {
+        public string Id { get; set; }
+        public string ProviderId { get; set; }
+        public string DisplayName { get; set; }
+        public bool SupportsText { get; set; } = true;
+        public bool SupportsVision { get; set; }
+        public bool SupportsToolCalling { get; set; }
+        public bool SupportsStructuredOutput { get; set; }
+        public bool IsLocal { get; set; }
+        public bool IsAvailable { get; set; }
+        public string UnavailableReason { get; set; }
+
+        internal static AssistantModelDescriptor FromProfile(AssistantModelProfile profile, bool keyConfigured)
+        {
+            if (profile == null) return null;
+            var cloud = !string.Equals(profile.ProviderKind, "local", StringComparison.OrdinalIgnoreCase);
+            return new AssistantModelDescriptor
+            {
+                Id = profile.Id,
+                ProviderId = profile.ProviderKind,
+                DisplayName = profile.Provider + " · " + profile.Name,
+                SupportsText = true,
+                SupportsVision = profile.SupportsVision,
+                SupportsToolCalling = profile.SupportsTools,
+                SupportsStructuredOutput = profile.SupportsJsonMode,
+                IsLocal = !cloud,
+                IsAvailable = profile.Enabled && (!cloud || keyConfigured),
+                UnavailableReason = profile.Enabled
+                    ? (cloud && !keyConfigured ? "API key is not configured for this model." : string.Empty)
+                    : "Model profile is disabled."
+            };
+        }
+    }
+
+    internal class AssistantScopeDescriptor
+    {
+        public string Id { get; set; }
+        public string Label { get; set; }
+        public string Description { get; set; }
+        public bool Enabled { get; set; }
+        public string UnavailableReason { get; set; }
+        public string[] ToolNames { get; set; } = Array.Empty<string>();
+        public string[] ReadOnlyToolNames { get; set; } = Array.Empty<string>();
+        public bool RequiresCredential { get; set; }
+        public bool AllowsMutation { get; set; }
+        public string RiskLevel { get; set; }
     }
 
     internal class AssistantModelCapabilitySummary
@@ -252,6 +357,14 @@ namespace BlueBrick.Agent
         public string UnavailableReason { get; set; }
         public string RiskLevel { get; set; }
         public bool AuditRequired { get; set; }
+        public bool AllowedInChat { get; set; } = true;
+        public bool ManualOnly { get; set; }
+        public bool Mutating { get; set; }
+        public bool MutatesCad { get; set; }
+        public bool MutatesPdm { get; set; }
+        public bool MutatesEpicor { get; set; }
+        public bool SendsExternalData { get; set; }
+        public bool RequiresCredential { get; set; }
     }
 
     internal class AssistantToolRequest
@@ -259,6 +372,7 @@ namespace BlueBrick.Agent
         public string ToolName { get; set; }
         public string Query { get; set; }
         public int Limit { get; set; }
+        public string ScopeId { get; set; }
         public AssistantToolAuthorization Authorization { get; set; } = AssistantToolAuthorization.None();
         public Dictionary<string, string> Parameters { get; set; } = new Dictionary<string, string>();
     }

@@ -33,6 +33,7 @@ namespace BlueBrick
         private readonly object _initLock = new object();
         private readonly object _errorLogLock = new object();
         private CancellationTokenSource _streamCts;
+        private AssistantWebViewHost _webHost;
 
         public AssistantPanel()
         {
@@ -59,29 +60,12 @@ namespace BlueBrick
 
             try
             {
-                var env = await CoreWebView2Environment.CreateAsync(userDataFolder: Path.GetTempPath());
-                await _webView.EnsureCoreWebView2Async(env);
-
-                _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-                _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
-                _webView.CoreWebView2.Settings.AreHostObjectsAllowed = false;
-                _webView.CoreWebView2.Settings.IsWebMessageEnabled = false;
-                _webView.CoreWebView2.Settings.IsScriptEnabled = true;
-
-                _webView.CoreWebView2.NavigationStarting += (s, e) =>
+                _webHost = new AssistantWebViewHost(_webView, AgentConfig.Load());
+                var webViewReady = await _webHost.InitializeAsync(BuildShellHtml);
+                if (!webViewReady)
                 {
-                    if (!AssistantWebViewSecurity.IsNavigationAllowed(e.Uri))
-                    {
-                        e.Cancel = true;
-                    }
-                };
-                _webView.CoreWebView2.NewWindowRequested += (s, e) =>
-                {
-                    e.Handled = true;
-                };
-                _webView.CoreWebView2.NavigationCompleted += (s, e) => _pageReady.TrySetResult(true);
-                _webView.NavigateToString(BuildShellHtml());
-                await _pageReady.Task;
+                    throw new InvalidOperationException(_webHost.LastLoadError ?? "WebView2 unavailable");
+                }
 
                 _webView.Visible = true;
                 lblChatStatus.Visible = false;
@@ -360,8 +344,10 @@ namespace BlueBrick
             _pendingAttachment = result.Data.Value<string>("path");
             var artifact = result.Data["artifact"] as JObject;
             var analyzed = await AnalyzeScreenshotArtifactAsync(artifact);
-            await AppendScreenshotArtifactAsync(analyzed ?? artifact);
-            lblChatStatus.Text = "Screenshot attached";
+            var finalArtifact = analyzed ?? artifact;
+            await AppendScreenshotArtifactAsync(finalArtifact);
+            await CreateScreenshotReviewReportAsync(finalArtifact);
+            lblChatStatus.Text = "Screenshot attached; review report created";
             lblChatStatus.Visible = false;
         }
 
@@ -583,6 +569,48 @@ namespace BlueBrick
             await _webView.ExecuteScriptAsync("if(window.bbAppendScreenshotArtifact)window.bbAppendScreenshotArtifact(" + payload.ToString(Formatting.None) + ");");
         }
 
+        private async Task CreateScreenshotReviewReportAsync(JObject artifact)
+        {
+            if (artifact == null) return;
+            var descriptor = GetToolDescriptor("create_screenshot_review_report");
+            var enabled = descriptor?.Value<bool?>("Enabled") ?? descriptor?.Value<bool?>("enabled") ?? false;
+            if (!enabled) return;
+
+            var payload = BuildScreenshotReviewReportToolParameters(artifact);
+            var artifactPath = payload.Value<string>("artifactPath") ?? string.Empty;
+            var result = await AgentPanelClient.ExecuteToolAsync("create_screenshot_review_report", artifactPath, 1, payload);
+            if (!result.Ok)
+            {
+                await AppendMessageAsync("assistant", "Screenshot review report failed: " + result.Error, null);
+                return;
+            }
+
+            var status = result.Data.Value<string>("Status") ?? result.Data.Value<string>("status") ?? "unknown";
+            var message = result.Data.Value<string>("Message") ?? result.Data.Value<string>("message") ?? "Screenshot review report completed.";
+            var items = result.Data["Items"] as JArray ?? result.Data["items"] as JArray ?? new JArray();
+            var receipt = result.Data["Receipt"] as JObject ?? result.Data["receipt"] as JObject;
+            await AppendToolResultAsync("Screenshot Review Report", artifactPath, status, message, items, receipt);
+            await LoadToolAuditAsync();
+        }
+
+        internal static JObject BuildScreenshotReviewReportToolParameters(JObject artifact)
+        {
+            artifact = artifact ?? new JObject();
+            var path = artifact.Value<string>("Path") ?? artifact.Value<string>("path") ?? string.Empty;
+            var metadataPath =
+                artifact.Value<string>("MetadataPath") ??
+                artifact.Value<string>("metadataPath") ??
+                (string.IsNullOrWhiteSpace(path)
+                    ? string.Empty
+                    : Path.Combine(Path.GetDirectoryName(path) ?? string.Empty, Path.GetFileNameWithoutExtension(path) + ".metadata.json"));
+            return new JObject
+            {
+                ["artifactPath"] = path,
+                ["metadataPath"] = metadataPath,
+                ["artifactJson"] = artifact.ToString(Formatting.None)
+            };
+        }
+
         private async Task<JObject> AnalyzeScreenshotArtifactAsync(JObject artifact)
         {
             if (artifact == null) return null;
@@ -669,22 +697,35 @@ namespace BlueBrick
             var captureSource = artifact.Value<string>("CaptureSource") ?? artifact.Value<string>("captureSource") ?? string.Empty;
             var retentionPolicy = artifact.Value<string>("RetentionPolicy") ?? artifact.Value<string>("retentionPolicy") ?? string.Empty;
             var modelProfileId = artifact.Value<string>("ModelProfileId") ?? artifact.Value<string>("modelProfileId") ?? string.Empty;
+            var screenshotId = artifact.Value<string>("ScreenshotId") ?? artifact.Value<string>("screenshotId") ?? artifactId;
+            var capturedUtc = artifact.Value<string>("CapturedUtc") ?? artifact.Value<string>("capturedUtc") ?? string.Empty;
+            var metadataPath = artifact.Value<string>("MetadataPath") ?? artifact.Value<string>("metadataPath") ?? string.Empty;
+            var thumbnailPath = artifact.Value<string>("ThumbnailPath") ?? artifact.Value<string>("thumbnailPath") ?? string.Empty;
+            var annotationsPath = artifact.Value<string>("AnnotationsPath") ?? artifact.Value<string>("annotationsPath") ?? string.Empty;
+            var localOnlyCloudState = artifact.Value<string>("LocalOnlyCloudState") ?? artifact.Value<string>("localOnlyCloudState") ?? string.Empty;
             var redactionApplied = artifact.Value<bool?>("RedactionApplied") ?? artifact.Value<bool?>("redactionApplied") ?? false;
             var sentToModel = artifact.Value<bool?>("SentToModel") ?? artifact.Value<bool?>("sentToModel") ?? false;
             var annotations = artifact["Annotations"] as JArray ?? artifact["annotations"] as JArray ?? new JArray();
             var contacts = artifact["ExtractedContacts"] as JArray ?? artifact["extractedContacts"] as JArray ?? new JArray();
+            var receipt = artifact["Receipt"] as JObject ?? artifact["receipt"] as JObject;
 
             return new JObject
             {
                 ["artifactId"] = artifactId,
+                ["screenshotId"] = screenshotId,
                 ["path"] = path,
                 ["fileName"] = string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetFileName(path),
+                ["capturedUtc"] = capturedUtc,
+                ["metadataPath"] = metadataPath,
+                ["thumbnailPath"] = thumbnailPath,
+                ["annotationsPath"] = annotationsPath,
                 ["sourceWindowTitle"] = title,
                 ["solidWorksDocumentTitle"] = solidWorksDocumentTitle,
                 ["solidWorksDocumentPathHash"] = solidWorksDocumentPathHash,
                 ["captureTarget"] = captureTarget,
                 ["captureSource"] = captureSource,
                 ["retentionPolicy"] = retentionPolicy,
+                ["localOnlyCloudState"] = localOnlyCloudState,
                 ["modelProfileId"] = modelProfileId,
                 ["redactionApplied"] = redactionApplied,
                 ["sentToModel"] = sentToModel,
@@ -693,7 +734,8 @@ namespace BlueBrick
                 ["annotationCount"] = annotations.Count,
                 ["contactCount"] = contacts.Count,
                 ["annotations"] = annotations,
-                ["contacts"] = contacts
+                ["contacts"] = contacts,
+                ["receipt"] = receipt ?? new JObject()
             };
         }
 
@@ -1073,35 +1115,37 @@ namespace BlueBrick
 <style>
 *{box-sizing:border-box;}
 html,body{min-height:100%;margin:0;}
-body{font-family:Segoe UI,Arial,sans-serif;background:#f5f7fa;color:#18212c;font-size:12px;}
-#shell{min-height:100vh;display:flex;flex-direction:column;background:#f5f7fa;}
-#header{position:sticky;top:0;z-index:2;background:#111827;color:#f8fafc;padding:10px 12px 9px;border-bottom:3px solid #d9ff5a;}
-#headerTop{display:flex;align-items:center;justify-content:space-between;gap:8px;}
-#header .title{font-size:13px;font-weight:700;letter-spacing:0;color:#f8fafc;line-height:1.15;}
-#header .subtitle{margin-top:3px;color:#b6c2cf;font-size:10px;line-height:1.25;}
-#header .model{font-size:10px;color:#e5e7eb;display:flex;align-items:center;gap:5px;min-width:0;max-width:52%;justify-content:flex-end;}
+body{font-family:Segoe UI,Arial,sans-serif;background:#eef3f7;color:#18212c;font-size:12px;}
+#shell{min-height:100vh;display:flex;flex-direction:column;background:#eef3f7;}
+#header{position:sticky;top:0;z-index:2;background:#ffffff;color:#111827;padding:9px 10px 8px;border-bottom:1px solid #cbd6e2;border-left:4px solid #3ba7a4;}
+#headerTop{display:grid;grid-template-columns:minmax(0,1fr) minmax(78px,44%);align-items:center;gap:8px;}
+#header .title{font-size:13px;font-weight:700;letter-spacing:0;color:#111827;line-height:1.15;}
+#header .subtitle{margin-top:2px;color:#526171;font-size:10px;line-height:1.25;}
+#header .model{font-size:10px;color:#263244;display:flex;align-items:center;gap:5px;min-width:0;justify-content:flex-end;}
 #modelName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 #header .model-dot{width:8px;height:8px;border-radius:50%;background:#3ba7a4;flex:0 0 auto;}
-.model-capability{border:1px solid #334155;background:#1f2937;color:#d9ff5a;border-radius:999px;padding:1px 5px;font-size:9px;white-space:nowrap;flex:0 0 auto;}
-#statusRail{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:8px;}
-.pill{background:#1f2937;border:1px solid #334155;color:#d1d5db;border-radius:6px;padding:4px 6px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.pill strong{color:#d9ff5a;font-weight:650;}
-#toolRail{display:flex;gap:5px;overflow-x:auto;padding:7px 10px;background:#e9eef5;border-bottom:1px solid #d6dee8;}
-.toolchip{border:1px solid #c7d2e0;background:#fff;color:#273449;border-radius:7px;padding:4px 7px;font-size:10px;white-space:nowrap;max-width:126px;overflow:hidden;text-overflow:ellipsis;}
-.toolchip.enabled{border-color:#3ba7a4;background:#eefdfb;color:#114541;}
-.toolchip.disabled{border-color:#d8dee8;background:#f6f8fb;color:#7a8696;}
-#safetyRail{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:8px 10px;background:#ffffff;border-bottom:1px solid #d6dee8;}
-.safety-item{border:1px solid #dfe7f1;background:#f8fafc;border-radius:7px;padding:6px;min-width:0;}
+.model-capability{border:1px solid #b9c8d7;background:#eef6f5;color:#114541;border-radius:999px;padding:1px 5px;font-size:9px;white-space:nowrap;flex:0 0 auto;}
+#statusRail{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:7px;}
+.pill{background:#f3f6f9;border:1px solid #d5dee8;color:#334155;border-radius:6px;padding:4px 6px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.pill strong{color:#0f514c;font-weight:650;}
+#toolRail{display:flex;gap:5px;overflow-x:auto;padding:6px 9px;background:#eef3f7;border-bottom:1px solid #d6dee8;}
+.toolchip{border:1px solid #c7d2e0;background:#ffffff;color:#273449;border-radius:6px;padding:3px 7px;font-size:10px;white-space:nowrap;max-width:126px;overflow:hidden;text-overflow:ellipsis;}
+.toolchip.enabled{border-color:#3ba7a4;background:#edf9f7;color:#114541;}
+.toolchip.disabled{border-color:#d8dee8;background:#f7f9fb;color:#7a8696;}
+#workflowStrip{display:flex;gap:5px;overflow-x:auto;padding:6px 9px;background:#ffffff;border-bottom:1px solid #d6dee8;}
+#workflowStrip span{flex:0 0 auto;border:1px solid #d5dee8;background:#f8fafc;color:#334155;border-radius:999px;padding:3px 7px;font-size:9px;white-space:nowrap;}
+#safetyRail{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;padding:6px 9px;background:#ffffff;border-bottom:1px solid #d6dee8;}
+.safety-item{border:1px solid #dfe7f1;background:#f8fafc;border-radius:6px;padding:5px;min-width:0;}
 .safety-item strong{display:block;color:#111827;font-size:10px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .safety-item span{display:block;color:#64748b;font-size:9px;line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .safety-item.ready{border-left:3px solid #3ba7a4;}
 .safety-item.preview{border-left:3px solid #f59e0b;}
 .safety-item.blocked{border-left:3px solid #ef4444;}
-#contextPanel{display:grid;grid-template-columns:1fr;gap:7px;padding:8px 10px;background:#f8fafc;border-bottom:1px solid #d6dee8;}
-.context-section{border:1px solid #dfe7f1;background:#ffffff;border-radius:8px;padding:7px;}
-.context-title{font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:5px;letter-spacing:.02em;}
-.context-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;}
-.context-card{border:1px solid #e2e8f0;background:#f8fafc;border-radius:7px;padding:6px;min-width:0;}
+#contextPanel{display:flex;gap:6px;overflow-x:auto;padding:7px 9px;background:#f8fafc;border-bottom:1px solid #d6dee8;}
+.context-section{border:1px solid #dfe7f1;background:#ffffff;border-radius:7px;padding:6px;flex:0 0 156px;min-width:0;}
+.context-title{font-size:9px;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:5px;letter-spacing:0;}
+.context-grid{display:grid;grid-template-columns:1fr;gap:4px;}
+.context-card{border:1px solid #e2e8f0;background:#f8fafc;border-radius:6px;padding:5px;min-width:0;}
 .context-card strong{display:block;color:#111827;font-size:10px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .context-card span{display:block;color:#64748b;font-size:9px;line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .context-card.planned{border-left:3px solid #f59e0b;}
@@ -1114,12 +1158,12 @@ body{font-family:Segoe UI,Arial,sans-serif;background:#f5f7fa;color:#18212c;font
 .receipt-badge{font-size:9px;border-radius:999px;padding:2px 6px;background:#eef2f7;color:#475569;white-space:nowrap;}
 .receipt-badge.ok{background:#e6fbf8;color:#0f514c;}
 .receipt-badge.denied{background:#fff1f2;color:#9f1239;}
-#log{flex:1;display:flex;flex-direction:column;gap:9px;padding:10px;min-height:90px;overflow-wrap:anywhere;}
-.empty{margin:auto 6px;color:#64748b;line-height:1.4;text-align:left;border:1px dashed #cbd5e1;border-radius:8px;padding:12px;background:#ffffff;}
-.msg{padding:9px 10px;border-radius:8px;max-width:96%;white-space:pre-wrap;line-height:1.38;word-break:break-word;font-size:12px;box-shadow:0 1px 2px rgba(15,23,42,.08);}
+#log{flex:1;display:flex;flex-direction:column;gap:8px;padding:9px;min-height:120px;overflow-wrap:anywhere;}
+.empty{margin:auto 4px;color:#526171;line-height:1.4;text-align:left;border:1px dashed #cbd5e1;border-radius:7px;padding:10px;background:#ffffff;}
+.msg{padding:8px 9px;border-radius:7px;max-width:96%;white-space:pre-wrap;line-height:1.38;word-break:break-word;font-size:12px;}
 .user{align-self:flex-end;background:#d9ff5a;color:#101410;border:1px solid #bddf43;}
 .assistant{align-self:flex-start;background:#ffffff;color:#1f2937;border:1px solid #d9e0e8;}
-.tool-result{align-self:stretch;max-width:100%;background:#ffffff;border:1px solid #ccd8e5;border-left:4px solid #3ba7a4;border-radius:8px;padding:9px 10px;box-shadow:0 1px 2px rgba(15,23,42,.08);}
+.tool-result{align-self:stretch;max-width:100%;background:#ffffff;border:1px solid #ccd8e5;border-left:4px solid #3ba7a4;border-radius:7px;padding:8px 9px;}
 .tool-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px;}
 .tool-title{font-weight:700;color:#111827;}
 .tool-status{font-size:9px;color:#475569;background:#eef2f7;border-radius:999px;padding:2px 6px;white-space:nowrap;}
@@ -1132,21 +1176,23 @@ body{font-family:Segoe UI,Arial,sans-serif;background:#f5f7fa;color:#18212c;font
 .result-title{font-weight:650;color:#111827;font-size:11px;line-height:1.25;}
 .result-subtitle{font-size:10px;color:#475569;margin-top:2px;line-height:1.25;}
 .result-path{font-family:Consolas,'Courier New',monospace;font-size:9px;color:#64748b;margin-top:5px;word-break:break-all;}
-.screenshot-card{align-self:stretch;max-width:100%;background:#101827;color:#f8fafc;border:1px solid #263244;border-left:4px solid #d9ff5a;border-radius:8px;padding:9px 10px;box-shadow:0 1px 2px rgba(15,23,42,.12);}
+.screenshot-card{align-self:stretch;max-width:100%;background:#ffffff;color:#18212c;border:1px solid #cbd6e2;border-left:4px solid #d9ff5a;border-radius:7px;padding:8px 9px;}
 .screenshot-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px;}
-.screenshot-title{font-weight:700;color:#f8fafc;}
+.screenshot-title{font-weight:700;color:#111827;}
 .screenshot-chip{font-size:9px;color:#111827;background:#d9ff5a;border-radius:999px;padding:2px 6px;white-space:nowrap;}
-.screenshot-meta{font-size:10px;color:#cbd5e1;line-height:1.35;margin-top:3px;word-break:break-word;}
+.screenshot-meta{font-size:10px;color:#526171;line-height:1.35;margin-top:3px;word-break:break-word;}
 .contact-list{display:flex;flex-direction:column;gap:5px;margin-top:8px;}
-.contact-row{border:1px solid #334155;background:#182235;border-radius:7px;padding:6px;font-size:10px;color:#dbe5f2;}
-.contact-row strong{color:#ffffff;}
-.contact-status{display:inline-block;border-radius:999px;padding:1px 6px;margin-left:4px;background:#263244;color:#d9ff5a;font-size:9px;}
-.contact-note{color:#aebbd0;font-size:9px;line-height:1.25;margin-top:2px;}
+.contact-row{border:1px solid #d5dee8;background:#f8fafc;border-radius:6px;padding:6px;font-size:10px;color:#273449;}
+.contact-row strong{color:#111827;}
+.contact-status{display:inline-block;border-radius:999px;padding:1px 6px;margin-left:4px;background:#eef6f5;color:#0f514c;font-size:9px;}
+.contact-note{color:#64748b;font-size:9px;line-height:1.25;margin-top:2px;}
 .annotation-list{display:flex;flex-direction:column;gap:5px;margin-top:8px;}
-.annotation-row{border:1px solid #3b485a;background:#131e31;border-radius:7px;padding:6px;font-size:10px;color:#dbe5f2;}
-.annotation-row strong{display:block;color:#ffffff;font-size:10px;line-height:1.2;}
-.annotation-row span{display:block;color:#aebbd0;font-size:9px;line-height:1.25;margin-top:2px;}
-.annotation-badge{display:inline-block;border-radius:999px;padding:1px 6px;margin-left:4px;background:#263244;color:#d9ff5a;font-size:9px;}
+.annotation-row{border:1px solid #d5dee8;background:#f8fafc;border-radius:6px;padding:6px;font-size:10px;color:#273449;}
+.annotation-row strong{display:block;color:#111827;font-size:10px;line-height:1.2;}
+.annotation-row span{display:block;color:#64748b;font-size:9px;line-height:1.25;margin-top:2px;}
+.annotation-badge{display:inline-block;border-radius:999px;padding:1px 6px;margin-left:4px;background:#eef6f5;color:#0f514c;font-size:9px;}
+.screenshot-action{margin-top:8px;border:1px solid #c6d886;background:#fbffe9;color:#3f4d16;border-radius:6px;padding:6px;font-size:10px;line-height:1.3;}
+.screenshot-action strong{display:block;color:#465915;font-size:10px;}
 .assistant-footer{display:flex;align-items:center;gap:5px;font-size:9px;color:#64748b;margin-top:6px;padding-top:5px;border-top:1px solid #eef2f7;}
 .assistant-footer .dot{width:6px;height:6px;border-radius:50%;background:#3ba7a4;flex:0 0 auto;}
 .meta{display:block;font-size:10px;color:#475569;background:#eef6ff;border:1px solid #cfe8ff;border-radius:6px;padding:3px 5px;margin-top:6px;}
@@ -1169,6 +1215,11 @@ code{font-family:Consolas,'Courier New',monospace;font-size:11px;color:#e5e7eb;}
 <div id='statusRail'><div id='bridgePill' class='pill'><strong>Bridge</strong> local</div><div id='modePill' class='pill'><strong>Mode</strong> ready</div><div id='toolsPill' class='pill'><strong>Tools</strong> loading</div></div>
 </div>
 <div id='toolRail'><span class='toolchip disabled'>Loading tools</span></div>
+<div id='workflowStrip'>
+<span>Screenshot -> annotation -> review report</span>
+<span>Vault/PDM/Epicor read-only</span>
+<span>CAD mutation blocked</span>
+</div>
 <div id='safetyRail'>
 <div class='safety-item ready'><strong>Read Only</strong><span>chat, search, screenshots</span></div>
 <div class='safety-item preview'><strong>Preview First</strong><span>diffs before CAD actions</span></div>
@@ -1455,6 +1506,7 @@ html+='</div>';
 });
 html+='</div>';
 }
+html+='<div class=""screenshot-action""><strong>Review report</strong>Creating a local evidence report with annotations, contacts, privacy state, and receipt.</div>';
 node.innerHTML=html;
 document.getElementById('log').appendChild(node);
 window.scrollTo(0,document.body.scrollHeight);

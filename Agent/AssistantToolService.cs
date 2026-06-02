@@ -51,7 +51,9 @@ namespace BlueBrick.Agent
                     RequiresConfirmation = false,
                     Enabled = true,
                     RiskLevel = "low",
-                    AuditRequired = true
+                    AuditRequired = true,
+                    AllowedInChat = true,
+                    RequiresCredential = false
                 },
                 new AssistantToolDescriptor
                 {
@@ -64,6 +66,8 @@ namespace BlueBrick.Agent
                     Enabled = pdmEnabled,
                     RiskLevel = "medium",
                     AuditRequired = true,
+                    AllowedInChat = true,
+                    RequiresCredential = true,
                     UnavailableReason = pdmEnabled
                         ? string.Empty
                         : "PDM search is disabled until AssistantTools.EnablePdmSearch is explicitly enabled for this machine."
@@ -79,6 +83,8 @@ namespace BlueBrick.Agent
                     Enabled = epicorEnabled,
                     RiskLevel = "medium",
                     AuditRequired = true,
+                    AllowedInChat = true,
+                    RequiresCredential = true,
                     UnavailableReason = epicorEnabled
                         ? string.Empty
                         : "Epicor search is disabled until AssistantTools.EnableEpicorSearch is true and the configured connection-string environment variable is present."
@@ -93,7 +99,24 @@ namespace BlueBrick.Agent
                     RequiresConfirmation = false,
                     Enabled = true,
                     RiskLevel = "medium",
-                    AuditRequired = true
+                    AuditRequired = true,
+                    AllowedInChat = false,
+                    ManualOnly = true,
+                    SendsExternalData = false
+                },
+                new AssistantToolDescriptor
+                {
+                    Name = "create_screenshot_review_report",
+                    DisplayName = "Create Screenshot Review Report",
+                    Category = "assistant-evidence",
+                    Description = "Creates a local Markdown review report from screenshot artifact metadata.",
+                    ReadOnly = true,
+                    RequiresConfirmation = false,
+                    Enabled = true,
+                    RiskLevel = "low",
+                    AuditRequired = true,
+                    AllowedInChat = false,
+                    ManualOnly = true
                 }
             };
         }
@@ -108,77 +131,195 @@ namespace BlueBrick.Agent
             return _auditLog.TailPersisted(limit);
         }
 
-        internal Task<AssistantToolResult> ExecuteAsync(AssistantToolRequest request, string traceId)
+        internal async Task<AssistantToolResult> ExecuteAsync(AssistantToolRequest request, string traceId)
         {
             request = request ?? new AssistantToolRequest();
             var toolName = Normalize(request.ToolName);
             if (string.IsNullOrWhiteSpace(toolName))
             {
-                return Task.FromResult(Fail(toolName, "invalid", "toolName required", traceId));
+                return Fail(toolName, "invalid", "toolName required", traceId);
             }
 
             var policy = _policy.EvaluateToolName(toolName);
             if (!policy.Allowed)
             {
-                return Task.FromResult(WithReceipt(
+                return WithReceipt(
                     Fail(toolName, policy.Code, policy.Message, traceId),
                     request,
                     policy,
                     null,
-                    traceId));
+                    traceId);
             }
 
-            var descriptor = GetCatalog().FirstOrDefault(t => string.Equals(t.Name, toolName, StringComparison.OrdinalIgnoreCase));
+            var catalog = GetCatalog();
+            var descriptor = catalog.FirstOrDefault(t => string.Equals(t.Name, toolName, StringComparison.OrdinalIgnoreCase));
             if (descriptor == null)
             {
-                return Task.FromResult(WithReceipt(
+                return WithReceipt(
                     Fail(toolName, "unknown", "Unknown assistant tool.", traceId),
                     request,
                     AssistantToolPolicyDecision.Deny("unknown", "Unknown assistant tool.", true),
                     null,
-                    traceId));
+                    traceId);
+            }
+
+            var explicitScope = !string.IsNullOrWhiteSpace(request.ScopeId);
+            var scope = AssistantScopeRegistry.Resolve(_config, catalog, request.ScopeId);
+            request.ScopeId = scope.Id;
+            if (IsSearchTool(toolName))
+            {
+                if (scope.Id == AssistantScopeRegistry.All)
+                {
+                    var allResult = await SearchAllScopesAsync(request, catalog, traceId).ConfigureAwait(false);
+                    return WithReceipt(allResult, request, policy, descriptor, traceId);
+                }
+
+                if (explicitScope && !scope.Enabled)
+                {
+                    return WithReceipt(
+                        Fail(toolName, "scope_unavailable", scope.UnavailableReason ?? "Selected assistant scope is unavailable.", traceId),
+                        request,
+                        AssistantToolPolicyDecision.Deny("scope_unavailable", scope.UnavailableReason ?? "Selected assistant scope is unavailable.", false),
+                        descriptor,
+                        traceId);
+                }
+
+                if (explicitScope && !scope.ReadOnlyToolNames.Any(t => string.Equals(t, toolName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return WithReceipt(
+                        Fail(toolName, "scope_mismatch", $"Tool '{toolName}' is not available in the selected scope '{scope.Label}'.", traceId),
+                        request,
+                        AssistantToolPolicyDecision.Deny("scope_mismatch", "Selected scope does not allow this tool.", false),
+                        descriptor,
+                        traceId);
+                }
             }
 
             if (!descriptor.Enabled)
             {
-                return Task.FromResult(WithReceipt(
+                return WithReceipt(
                     Fail(toolName, "disabled", descriptor.UnavailableReason ?? "Tool is not enabled.", traceId),
                     request,
                     AssistantToolPolicyDecision.Deny("disabled", descriptor.UnavailableReason ?? "Tool is not enabled.", false),
                     descriptor,
-                    traceId));
+                    traceId);
             }
 
             AssistantToolResult result;
             if (toolName == "search_local_vault")
             {
                 result = SearchLocalVault(request, traceId);
-                return Task.FromResult(WithReceipt(result, request, policy, descriptor, traceId));
+                return WithReceipt(result, request, policy, descriptor, traceId);
             }
 
             if (toolName == "search_pdm")
             {
                 result = SearchPdmReadOnly(request, traceId);
-                return Task.FromResult(WithReceipt(result, request, policy, descriptor, traceId));
+                return WithReceipt(result, request, policy, descriptor, traceId);
             }
 
         if (toolName == "search_epicor")
         {
-            return ExecuteEpicorWithReceiptAsync(request, policy, descriptor, traceId);
+            return await ExecuteEpicorWithReceiptAsync(request, policy, descriptor, traceId).ConfigureAwait(false);
         }
 
         if (toolName == "capture_screenshot")
         {
-            return ExecuteCaptureScreenshotAsync(request, policy, descriptor, traceId);
+            return await ExecuteCaptureScreenshotAsync(request, policy, descriptor, traceId).ConfigureAwait(false);
         }
 
-        return Task.FromResult(WithReceipt(
+        if (toolName == "create_screenshot_review_report")
+        {
+            result = CreateScreenshotReviewReport(request, traceId);
+            return WithReceipt(result, request, policy, descriptor, traceId);
+        }
+
+        return WithReceipt(
                 Fail(toolName, "unsupported", "Tool execution is not implemented yet.", traceId),
                 request,
                 AssistantToolPolicyDecision.Deny("unsupported", "Tool execution is not implemented yet.", false),
                 descriptor,
-                traceId));
+                traceId);
         }
+
+    private async Task<AssistantToolResult> SearchAllScopesAsync(
+        AssistantToolRequest request,
+        IReadOnlyList<AssistantToolDescriptor> catalog,
+        string traceId)
+    {
+        var items = new List<AssistantToolResultItem>();
+        var messages = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var toolName in new[] { "search_local_vault", "search_pdm", "search_epicor" })
+        {
+            var descriptor = catalog.FirstOrDefault(t => string.Equals(t.Name, toolName, StringComparison.OrdinalIgnoreCase));
+            if (descriptor == null)
+            {
+                continue;
+            }
+
+            if (!descriptor.Enabled)
+            {
+                messages.Add(descriptor.DisplayName + " unavailable");
+                items.Add(new AssistantToolResultItem
+                {
+                    Id = descriptor.Name + ":unavailable",
+                    Title = descriptor.DisplayName + " unavailable",
+                    Subtitle = descriptor.UnavailableReason ?? "Source is unavailable.",
+                    Source = descriptor.Category ?? descriptor.Name,
+                    Metadata =
+                    {
+                        ["status"] = "unavailable",
+                        ["reason"] = descriptor.UnavailableReason ?? string.Empty
+                    }
+                });
+                continue;
+            }
+
+            var scopedRequest = new AssistantToolRequest
+            {
+                ToolName = toolName,
+                Query = request.Query,
+                Limit = request.Limit,
+                ScopeId = toolName == "search_pdm"
+                    ? AssistantScopeRegistry.Pdm
+                    : toolName == "search_epicor"
+                        ? AssistantScopeRegistry.Epicor
+                        : AssistantScopeRegistry.LocalVault,
+                Authorization = request.Authorization,
+                Parameters = request.Parameters == null
+                    ? new Dictionary<string, string>()
+                    : new Dictionary<string, string>(request.Parameters)
+            };
+
+            var result = toolName == "search_local_vault"
+                ? SearchLocalVault(scopedRequest, traceId)
+                : toolName == "search_pdm"
+                    ? SearchPdmReadOnly(scopedRequest, traceId)
+                    : await SearchEpicorPartsReadOnlyAsync(scopedRequest, traceId).ConfigureAwait(false);
+
+            messages.Add(result.Message ?? descriptor.DisplayName);
+            foreach (var item in result.Items ?? new List<AssistantToolResultItem>())
+            {
+                var stable = (item.Source ?? string.Empty) + "|" + (item.Id ?? item.Path ?? item.Title ?? string.Empty);
+                if (seen.Add(stable))
+                {
+                    items.Add(item);
+                }
+            }
+        }
+
+        return new AssistantToolResult
+        {
+            ToolName = "search_all",
+            Status = items.Any(i => i.Metadata.TryGetValue("status", out var status) && status == "unavailable") ? "partial" : "ok",
+            Message = string.Join(" ", messages.Where(m => !string.IsNullOrWhiteSpace(m)).ToArray()),
+            ReadOnly = true,
+            TraceId = traceId,
+            Items = items
+        };
+    }
 
     private async Task<AssistantToolResult> ExecuteEpicorWithReceiptAsync(
         AssistantToolRequest request,
@@ -233,6 +374,35 @@ namespace BlueBrick.Agent
                 Fail("capture_screenshot", "error", "Screenshot capture failed: " + ex.Message, traceId),
                 request, policy, descriptor, traceId);
         }
+    }
+
+    private AssistantToolResult CreateScreenshotReviewReport(AssistantToolRequest request, string traceId)
+    {
+        var artifactJson = GetParameter(request, "artifactJson");
+        if (!string.IsNullOrWhiteSpace(artifactJson))
+        {
+            try
+            {
+                var artifact = Newtonsoft.Json.JsonConvert.DeserializeObject<AssistantScreenshotArtifact>(artifactJson);
+                return AssistantScreenshotReportGenerator.GenerateReviewReport(artifact, traceId);
+            }
+            catch
+            {
+                return Fail("create_screenshot_review_report", "invalid", "Screenshot artifact payload could not be parsed.", traceId);
+            }
+        }
+
+        var artifactPath = GetParameter(request, "artifactPath");
+        if (string.IsNullOrWhiteSpace(artifactPath))
+        {
+            artifactPath = GetParameter(request, "metadataPath");
+        }
+        if (string.IsNullOrWhiteSpace(artifactPath))
+        {
+            artifactPath = GetQuery(request);
+        }
+
+        return AssistantScreenshotReportGenerator.GenerateReviewReport(artifactPath, traceId);
     }
 
         private AssistantToolResult WithReceipt(
@@ -497,10 +667,21 @@ ORDER BY [Part].[PartNum];";
             return query;
         }
 
+        private static string GetParameter(AssistantToolRequest request, string key)
+        {
+            if (request?.Parameters == null || string.IsNullOrWhiteSpace(key)) return string.Empty;
+            return request.Parameters.TryGetValue(key, out var value) ? Normalize(value) : string.Empty;
+        }
+
         private static int BoundLimit(int requested, int max)
         {
             var limit = requested <= 0 ? DefaultLimit : requested;
             return Math.Max(1, Math.Min(limit, Math.Max(1, Math.Min(max, MaxLimit))));
+        }
+
+        private static bool IsSearchTool(string toolName)
+        {
+            return Normalize(toolName).StartsWith("search_", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

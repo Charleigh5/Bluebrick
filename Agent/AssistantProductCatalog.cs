@@ -137,6 +137,71 @@ namespace BlueBrick.Agent
                 },
                 new AssistantDocumentDescriptor
                 {
+                    Id = "screenshot-review-report",
+                    Name = "Screenshot Review Report",
+                    Category = "assistant-evidence",
+                    Purpose = "Human-readable review of screenshot annotations, extracted contacts, confidence, and review status.",
+                    SourceSubsystem = "AssistantScreenshotAnalyzer / AssistantScreenshotReportGenerator / AssistantToolService",
+                    OutputFormats = new[] { "Markdown", "JSON" },
+                    Implemented = true,
+                    RequiresSolidWorks = false,
+                    RequiresPdmApproval = false,
+                    AssistantUses = new[] { "summarize visual findings", "review pending contacts", "attach evidence to handoff" }
+                },
+                new AssistantDocumentDescriptor
+                {
+                    Id = "manufacturing-release-checklist",
+                    Name = "Manufacturing Release Checklist",
+                    Category = "release-gate",
+                    Purpose = "Checklist that ties drawing PDF, packet PDF, STEP, DXF, PDM status, and Epicor context together before handoff.",
+                    SourceSubsystem = "Planned assistant document generator",
+                    OutputFormats = new[] { "Markdown", "PDF", "JSON" },
+                    Implemented = false,
+                    RequiresSolidWorks = true,
+                    RequiresPdmApproval = true,
+                    AssistantUses = new[] { "validate generated outputs", "explain blocked gates", "prepare release handoff" }
+                },
+                new AssistantDocumentDescriptor
+                {
+                    Id = "local-vault-search-summary",
+                    Name = "Local Vault Search Summary",
+                    Category = "assistant-handoff",
+                    Purpose = "Concise summary of local vault search results with source paths, result counts, and trace receipt.",
+                    SourceSubsystem = "AssistantToolService / LocalVaultWorkspace",
+                    OutputFormats = new[] { "Markdown", "JSON" },
+                    Implemented = false,
+                    RequiresSolidWorks = false,
+                    RequiresPdmApproval = false,
+                    AssistantUses = new[] { "handoff search context", "compare generated artifacts", "prepare ChatGPT relay context" }
+                },
+                new AssistantDocumentDescriptor
+                {
+                    Id = "pdm-metadata-brief",
+                    Name = "PDM Metadata Brief",
+                    Category = "vault-brief",
+                    Purpose = "Read-only PDM file, state, variable, and reference summary for the selected CAD/document context.",
+                    SourceSubsystem = "Planned PDM read-only wrappers",
+                    OutputFormats = new[] { "Markdown", "JSON" },
+                    Implemented = false,
+                    RequiresSolidWorks = false,
+                    RequiresPdmApproval = false,
+                    AssistantUses = new[] { "explain vault state", "prepare release checklist", "compare local vs vault metadata" }
+                },
+                new AssistantDocumentDescriptor
+                {
+                    Id = "epicor-part-quote-brief",
+                    Name = "Epicor Part And Quote Brief",
+                    Category = "erp-brief",
+                    Purpose = "Read-only Epicor part, quote, task, and opportunity context for the assistant workflow.",
+                    SourceSubsystem = "Planned Epicor read-only wrappers",
+                    OutputFormats = new[] { "Markdown", "JSON" },
+                    Implemented = false,
+                    RequiresSolidWorks = false,
+                    RequiresPdmApproval = false,
+                    AssistantUses = new[] { "part lookup context", "customer/job preparation", "release handoff planning" }
+                },
+                new AssistantDocumentDescriptor
+                {
                     Id = "salesforce-opportunity-brief",
                     Name = "Salesforce Opportunity Brief",
                     Category = "crm-brief",

@@ -231,6 +231,18 @@ namespace BlueBrick.Agent
             return PostJsonAsync("/assistant/tool", payload);
         }
 
+        internal static Task<ApiResult<JObject>> ExecuteToolAsync(string toolName, string query, int limit, JObject parameters)
+        {
+            var payload = new JObject
+            {
+                ["toolName"] = toolName,
+                ["query"] = query ?? string.Empty,
+                ["limit"] = limit,
+                ["parameters"] = parameters ?? new JObject()
+            };
+            return PostJsonAsync("/assistant/tool", payload);
+        }
+
         private static HttpRequestMessage CreateRequest(HttpMethod method, string url)
         {
             var request = new HttpRequestMessage(method, url);
@@ -272,7 +284,36 @@ namespace BlueBrick.Agent
 
             try
             {
-                return JObject.Parse(body);
+                var parsed = JObject.Parse(body);
+                if (parsed["ok"] != null && parsed["data"] != null)
+                {
+                    var ok = parsed.Value<bool?>("ok") ?? false;
+                    if (ok)
+                    {
+                        var dataObject = parsed["data"] as JObject;
+                        if (dataObject != null)
+                        {
+                            dataObject["ok"] = true;
+                            dataObject["correlationId"] = parsed.Value<string>("correlationId") ?? parsed.Value<string>("CorrelationId") ?? string.Empty;
+                            dataObject["schemaVersion"] = parsed.Value<string>("schemaVersion") ?? parsed.Value<string>("SchemaVersion") ?? string.Empty;
+                            return dataObject;
+                        }
+
+                        return parsed;
+                    }
+
+                    var error = parsed["error"] as JObject;
+                    return new JObject
+                    {
+                        ["ok"] = false,
+                        ["errorCode"] = error?.Value<string>("code") ?? error?.Value<string>("Code") ?? "request_failed",
+                        ["error"] = error?.Value<string>("message") ?? error?.Value<string>("Message") ?? "Assistant request failed.",
+                        ["correlationId"] = parsed.Value<string>("correlationId") ?? parsed.Value<string>("CorrelationId") ?? string.Empty,
+                        ["schemaVersion"] = parsed.Value<string>("schemaVersion") ?? parsed.Value<string>("SchemaVersion") ?? string.Empty
+                    };
+                }
+
+                return parsed;
             }
             catch
             {

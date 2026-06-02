@@ -52,7 +52,7 @@ namespace BlueBrick
             this.tlpChatMain.Location = new System.Drawing.Point(0, 0);
             this.tlpChatMain.Name = "tlpChatMain";
             this.tlpChatMain.RowCount = 3;
-            this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 142F));
+            this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 118F));
             this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 48F));
             this.tlpChatMain.Size = new System.Drawing.Size(211, 360);
@@ -83,13 +83,13 @@ namespace BlueBrick
             this.tlpChatButtons.Location = new System.Drawing.Point(2, 2);
             this.tlpChatButtons.Name = "tlpChatButtons";
             this.tlpChatButtons.RowCount = 6;
-            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 24F));
-            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 24F));
+            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 22F));
+            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 22F));
             this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
             this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
             this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
             this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.tlpChatButtons.Size = new System.Drawing.Size(207, 138);
+            this.tlpChatButtons.Size = new System.Drawing.Size(207, 114);
             this.tlpChatButtons.TabIndex = 1;
             //
             // cmbModel
@@ -113,7 +113,7 @@ namespace BlueBrick
             this.cmbSearchTool.FlatStyle = System.Windows.Forms.FlatStyle.System;
             this.cmbSearchTool.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
             this.cmbSearchTool.FormattingEnabled = true;
-            this.cmbSearchTool.Location = new System.Drawing.Point(1, 25);
+            this.cmbSearchTool.Location = new System.Drawing.Point(1, 23);
             this.cmbSearchTool.Margin = new System.Windows.Forms.Padding(1);
             this.cmbSearchTool.Name = "cmbSearchTool";
             this.cmbSearchTool.Size = new System.Drawing.Size(205, 20);
@@ -126,7 +126,7 @@ namespace BlueBrick
             this.btnNewSession.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(247)))), ((int)(((byte)(250)))));
             this.btnNewSession.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnNewSession.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnNewSession.Location = new System.Drawing.Point(1, 49);
+            this.btnNewSession.Location = new System.Drawing.Point(1, 45);
             this.btnNewSession.Name = "btnNewSession";
             this.btnNewSession.Size = new System.Drawing.Size(62, 18);
             this.btnNewSession.TabIndex = 0;
@@ -140,7 +140,7 @@ namespace BlueBrick
             this.btnCapture.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(217)))), ((int)(((byte)(255)))), ((int)(((byte)(90)))));
             this.btnCapture.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnCapture.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnCapture.Location = new System.Drawing.Point(69, 49);
+            this.btnCapture.Location = new System.Drawing.Point(69, 45);
             this.btnCapture.Name = "btnCapture";
             this.btnCapture.Size = new System.Drawing.Size(68, 18);
             this.btnCapture.TabIndex = 1;
@@ -154,7 +154,7 @@ namespace BlueBrick
             this.btnAttach.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(247)))), ((int)(((byte)(250)))));
             this.btnAttach.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnAttach.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnAttach.Location = new System.Drawing.Point(143, 49);
+            this.btnAttach.Location = new System.Drawing.Point(143, 45);
             this.btnAttach.Name = "btnAttach";
             this.btnAttach.Size = new System.Drawing.Size(63, 18);
             this.btnAttach.TabIndex = 2;
@@ -168,7 +168,7 @@ namespace BlueBrick
             this.btnSearchVault.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(235)))), ((int)(((byte)(248)))), ((int)(((byte)(255)))));
             this.btnSearchVault.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnSearchVault.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnSearchVault.Location = new System.Drawing.Point(1, 72);
+            this.btnSearchVault.Location = new System.Drawing.Point(1, 66);
             this.btnSearchVault.Name = "btnSearchVault";
             this.btnSearchVault.Size = new System.Drawing.Size(62, 16);
             this.btnSearchVault.TabIndex = 10;
@@ -182,7 +182,7 @@ namespace BlueBrick
             this.btnReindex.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(247)))), ((int)(((byte)(250)))));
             this.btnReindex.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnReindex.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnReindex.Location = new System.Drawing.Point(69, 72);
+            this.btnReindex.Location = new System.Drawing.Point(69, 66);
             this.btnReindex.Name = "btnReindex";
             this.btnReindex.Size = new System.Drawing.Size(68, 16);
             this.btnReindex.TabIndex = 3;
@@ -196,7 +196,7 @@ namespace BlueBrick
             this.btnResetVault.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(255)))), ((int)(((byte)(229)))), ((int)(((byte)(229)))));
             this.btnResetVault.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnResetVault.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnResetVault.Location = new System.Drawing.Point(1, 118);
+            this.btnResetVault.Location = new System.Drawing.Point(1, 101);
             this.btnResetVault.Name = "btnResetVault";
             this.btnResetVault.Size = new System.Drawing.Size(205, 18);
             this.btnResetVault.TabIndex = 4;
@@ -210,7 +210,7 @@ namespace BlueBrick
             this.btnOpenWorking.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(247)))), ((int)(((byte)(250)))));
             this.btnOpenWorking.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnOpenWorking.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnOpenWorking.Location = new System.Drawing.Point(143, 72);
+            this.btnOpenWorking.Location = new System.Drawing.Point(143, 66);
             this.btnOpenWorking.Name = "btnOpenWorking";
             this.btnOpenWorking.Size = new System.Drawing.Size(63, 16);
             this.btnOpenWorking.TabIndex = 5;
@@ -224,7 +224,7 @@ namespace BlueBrick
             this.btnOpenChatGpt.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(229)))), ((int)(((byte)(231)))), ((int)(((byte)(255)))));
             this.btnOpenChatGpt.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnOpenChatGpt.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnOpenChatGpt.Location = new System.Drawing.Point(1, 95);
+            this.btnOpenChatGpt.Location = new System.Drawing.Point(1, 83);
             this.btnOpenChatGpt.Name = "btnOpenChatGpt";
             this.btnOpenChatGpt.Size = new System.Drawing.Size(62, 15);
             this.btnOpenChatGpt.TabIndex = 6;
@@ -238,7 +238,7 @@ namespace BlueBrick
             this.btnTestConnection.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(247)))), ((int)(((byte)(250)))));
             this.btnTestConnection.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnTestConnection.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnTestConnection.Location = new System.Drawing.Point(69, 95);
+            this.btnTestConnection.Location = new System.Drawing.Point(69, 83);
             this.btnTestConnection.Name = "btnTestConnection";
             this.btnTestConnection.Size = new System.Drawing.Size(68, 15);
             this.btnTestConnection.TabIndex = 7;
@@ -252,7 +252,7 @@ namespace BlueBrick
             this.btnToggleMode.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(235)))), ((int)(((byte)(248)))), ((int)(((byte)(255)))));
             this.btnToggleMode.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnToggleMode.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnToggleMode.Location = new System.Drawing.Point(143, 95);
+            this.btnToggleMode.Location = new System.Drawing.Point(143, 83);
             this.btnToggleMode.Name = "btnToggleMode";
             this.btnToggleMode.Size = new System.Drawing.Size(63, 15);
             this.btnToggleMode.TabIndex = 8;
@@ -266,9 +266,9 @@ namespace BlueBrick
             this._webView.CreationProperties = null;
             this._webView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(18)))), ((int)(((byte)(22)))));
             this._webView.Dock = System.Windows.Forms.DockStyle.Fill;
-            this._webView.Location = new System.Drawing.Point(2, 142);
+            this._webView.Location = new System.Drawing.Point(2, 118);
             this._webView.Name = "_webView";
-            this._webView.Size = new System.Drawing.Size(207, 168);
+            this._webView.Size = new System.Drawing.Size(207, 192);
             this._webView.TabIndex = 2;
             this._webView.ZoomFactor = 1D;
             //

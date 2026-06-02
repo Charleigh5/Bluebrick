@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -513,6 +514,115 @@ namespace BlueBrick.UI.Tests
         }
 
         [TestMethod]
+        public void AssistantPanel_Builds_Screenshot_Report_Tool_Payload_From_Analyzed_Artifact()
+        {
+            var artifact = JObject.FromObject(new AssistantScreenshotArtifact
+            {
+                ArtifactId = "artifact-ui-report",
+                SessionId = "session-1",
+                Path = @"C:\temp\capture-ui-report.png",
+                SourceWindowTitle = "SOLIDWORKS Professional 2024",
+                Annotations =
+                {
+                    new AssistantScreenshotAnnotation
+                    {
+                        Id = "ann-1",
+                        Label = "Title block",
+                        Severity = "info",
+                        Source = "mock"
+                    }
+                },
+                ExtractedContacts =
+                {
+                    new AssistantExtractedContact
+                    {
+                        Name = "Jane Example",
+                        Email = "jane@example.com",
+                        ReviewStatus = "pending"
+                    }
+                }
+            });
+
+            var payload = AssistantPanel.BuildScreenshotReviewReportToolParameters(artifact);
+
+            Assert.AreEqual(@"C:\temp\capture-ui-report.png", payload.Value<string>("artifactPath"));
+            Assert.AreEqual(@"C:\temp\capture-ui-report.metadata.json", payload.Value<string>("metadataPath"));
+            StringAssert.Contains(payload.Value<string>("artifactJson"), "Jane Example");
+            StringAssert.Contains(payload.Value<string>("artifactJson"), "Title block");
+        }
+
+        [TestMethod]
+        public void AssistantScreenshotReportGenerator_Resolves_Modern_Metadata_Path_When_Present()
+        {
+            var tempRoot = Path.Combine(Path.GetTempPath(), "bb-metadata-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            var imagePath = Path.Combine(tempRoot, "capture_artifact.png");
+            var metadataPath = Path.Combine(tempRoot, "capture_artifact.metadata.json");
+            File.WriteAllText(imagePath, "not-used");
+            File.WriteAllText(metadataPath, "{}");
+
+            try
+            {
+                Assert.AreEqual(metadataPath, AssistantScreenshotReportGenerator.ResolveMetadataPath(imagePath));
+            }
+            finally
+            {
+                Directory.Delete(tempRoot, true);
+            }
+        }
+
+        [TestMethod]
+        public void AssistantScreenshotArtifactStore_Completes_Artifact_With_Receipt_Metadata_And_Thumbnail()
+        {
+            var id = "test" + Guid.NewGuid().ToString("N");
+            var imagePath = AssistantScreenshotArtifactStore.BuildCapturePath(id, ".png");
+            using (var bitmap = new Bitmap(48, 32))
+            {
+                bitmap.Save(imagePath, System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            var artifact = new AssistantScreenshotArtifact
+            {
+                ArtifactId = id,
+                SessionId = "session-artifact",
+                Path = imagePath,
+                CapturedUtc = DateTime.UtcNow,
+                Width = 48,
+                Height = 32,
+                SourceWindowTitle = "SOLIDWORKS Professional 2024",
+                SolidWorksDocumentTitle = "80233136.SLDASM",
+                RetentionPolicy = "delete_on_session_end",
+                SentToModel = false
+            };
+
+            var receipt = AssistantScreenshotArtifactStore.CompleteArtifact(artifact);
+
+            try
+            {
+                Assert.IsNotNull(receipt);
+                Assert.AreEqual(id, receipt.ScreenshotId);
+                Assert.IsTrue(receipt.LocalOnly);
+                Assert.IsTrue(File.Exists(artifact.MetadataPath));
+                Assert.IsTrue(File.Exists(artifact.ThumbnailPath));
+                Assert.IsTrue(File.Exists(artifact.AnnotationsPath));
+
+                var loaded = AssistantScreenshotArtifactStore.FindArtifact(id);
+                Assert.IsNotNull(loaded);
+                Assert.AreEqual(id, loaded.ScreenshotId);
+                Assert.AreEqual(48, loaded.Width);
+                Assert.AreEqual(32, loaded.Height);
+            }
+            finally
+            {
+                SafeDelete(imagePath);
+                SafeDelete(artifact.MetadataPath);
+                SafeDelete(artifact.ThumbnailPath);
+                SafeDelete(artifact.AnnotationsPath);
+                SafeDelete(artifact.AnnotatedPath);
+            }
+        }
+
+        [TestMethod]
         public void AssistantScreenshotAnalyzer_Mock_Adds_Annotation_And_Metadata_Contact()
         {
             var result = AssistantScreenshotAnalyzer.AnalyzeMock(new AssistantScreenshotAnalysisRequest
@@ -540,18 +650,141 @@ namespace BlueBrick.UI.Tests
         }
 
         [TestMethod]
+        public async Task AssistantToolService_Creates_Screenshot_Review_Report_From_Metadata()
+        {
+            var artifact = new AssistantScreenshotArtifact
+            {
+                ArtifactId = "artifact-test-report",
+                SessionId = "session-1",
+                Path = Path.Combine(Path.GetTempPath(), "artifact-test-report.png"),
+                CapturedUtc = DateTime.UtcNow,
+                SourceWindowTitle = "SOLIDWORKS Professional 2024 - [80233136.SLDASM]",
+                CaptureSource = "solidworks",
+                CaptureTarget = "solidworks_or_foreground",
+                RetentionPolicy = "delete_on_session_end",
+                ModelProfileId = "openai-vision"
+            };
+            artifact.Annotations.Add(new AssistantScreenshotAnnotation
+            {
+                Id = "ann-1",
+                Label = "Title block",
+                Severity = "info",
+                X = 1,
+                Y = 2,
+                Width = 300,
+                Height = 80,
+                Source = "mock"
+            });
+            artifact.ExtractedContacts.Add(new AssistantExtractedContact
+            {
+                Id = "contact-1",
+                Name = "Jane Example",
+                Email = "jane@example.com",
+                Confidence = 0.91,
+                SourceAnnotationId = "ann-1",
+                ReviewStatus = "pending"
+            });
+
+            var metadataPath = artifact.Path + ".metadata.json";
+            File.WriteAllText(metadataPath, Newtonsoft.Json.JsonConvert.SerializeObject(artifact));
+
+            try
+            {
+                var service = new AssistantToolService(new AgentConfig());
+                var result = await service.ExecuteAsync(new AssistantToolRequest
+                {
+                    ToolName = "create_screenshot_review_report",
+                    Query = metadataPath
+                }, "trace-report");
+
+                Assert.AreEqual("ok", result.Status);
+                Assert.AreEqual(1, result.Items.Count);
+                Assert.IsTrue(File.Exists(result.Items[0].Path));
+                var report = File.ReadAllText(result.Items[0].Path);
+                StringAssert.Contains(report, "Screenshot Review Report");
+                StringAssert.Contains(report, "Jane Example");
+                StringAssert.Contains(report, "review=pending");
+                Assert.IsNotNull(result.Receipt);
+                Assert.IsTrue(result.Receipt.Allowed);
+            }
+            finally
+            {
+                if (File.Exists(metadataPath))
+                {
+                    File.Delete(metadataPath);
+                }
+            }
+        }
+
+        [TestMethod]
+        public async Task AssistantToolService_Creates_Screenshot_Review_Report_From_Artifact_Payload()
+        {
+            var artifact = new AssistantScreenshotArtifact
+            {
+                ArtifactId = "artifact-payload-report",
+                SessionId = "session-1",
+                Path = Path.Combine(Path.GetTempPath(), "artifact-payload-report.png"),
+                CapturedUtc = DateTime.UtcNow,
+                SourceWindowTitle = "SOLIDWORKS Professional 2024 - [80233136.SLDASM]",
+                CaptureSource = "solidworks",
+                CaptureTarget = "solidworks_or_foreground",
+                RetentionPolicy = "delete_on_session_end"
+            };
+            artifact.Annotations.Add(new AssistantScreenshotAnnotation
+            {
+                Id = "ann-1",
+                Label = "Title block",
+                Severity = "info",
+                Source = "mock"
+            });
+            artifact.ExtractedContacts.Add(new AssistantExtractedContact
+            {
+                Name = "Jane Example",
+                Email = "jane@example.com",
+                Confidence = 0.91,
+                ReviewStatus = "pending",
+                ReviewNote = "Confirm before Salesforce or Epicor use."
+            });
+
+            var service = new AssistantToolService(new AgentConfig());
+            var result = await service.ExecuteAsync(new AssistantToolRequest
+            {
+                ToolName = "create_screenshot_review_report",
+                Query = artifact.Path,
+                Parameters =
+                {
+                    ["artifactJson"] = Newtonsoft.Json.JsonConvert.SerializeObject(artifact)
+                }
+            }, "trace-report-payload");
+
+            Assert.AreEqual("ok", result.Status);
+            Assert.AreEqual(1, result.Items.Count);
+            var report = File.ReadAllText(result.Items[0].Path);
+            StringAssert.Contains(report, "Jane Example");
+            StringAssert.Contains(report, "Title block");
+            StringAssert.Contains(report, "review=pending");
+            Assert.IsNotNull(result.Receipt);
+            Assert.IsTrue(result.Receipt.Allowed);
+        }
+
+        [TestMethod]
         public async Task AssistantToolService_Catalog_Separates_Local_Search_From_Risky_Connectors()
         {
             var service = new AssistantToolService(new AgentConfig());
             var catalog = service.GetCatalog();
 
             var localVault = catalog.Single(t => t.Name == "search_local_vault");
+            var report = catalog.Single(t => t.Name == "create_screenshot_review_report");
             var pdm = catalog.Single(t => t.Name == "search_pdm");
             var epicor = catalog.Single(t => t.Name == "search_epicor");
 
             Assert.IsTrue(localVault.Enabled);
             Assert.IsTrue(localVault.ReadOnly);
             Assert.IsFalse(localVault.RequiresConfirmation);
+
+            Assert.IsTrue(report.Enabled);
+            Assert.IsTrue(report.ReadOnly);
+            Assert.IsFalse(report.RequiresConfirmation);
 
             Assert.IsFalse(pdm.Enabled);
             Assert.IsTrue(pdm.ReadOnly);
@@ -845,6 +1078,8 @@ namespace BlueBrick.UI.Tests
             StringAssert.Contains(shellHtml, "CAD-safe copilot");
             StringAssert.Contains(shellHtml, "id='modelCaps'");
             StringAssert.Contains(shellHtml, "id='safetyRail'");
+            StringAssert.Contains(shellHtml, "id='workflowStrip'");
+            StringAssert.Contains(shellHtml, "Screenshot -> annotation -> review report");
             StringAssert.Contains(shellHtml, "Read Only");
             StringAssert.Contains(shellHtml, "Preview First");
             StringAssert.Contains(shellHtml, "Mutation Blocked");
@@ -854,6 +1089,8 @@ namespace BlueBrick.UI.Tests
             StringAssert.Contains(shellHtml, "Confidence ");
             StringAssert.Contains(shellHtml, "contact-status");
             StringAssert.Contains(shellHtml, "contact-note");
+            StringAssert.Contains(shellHtml, "screenshot-action");
+            StringAssert.Contains(shellHtml, "Review report");
             StringAssert.Contains(shellHtml, "id='receiptGrid'");
             StringAssert.Contains(shellHtml, "id='integrationGrid'");
             StringAssert.Contains(shellHtml, "id='documentGrid'");
@@ -874,6 +1111,11 @@ namespace BlueBrick.UI.Tests
             Assert.IsTrue(documents.Any(x => x.Id == "drawing-pdf" && x.Implemented));
             Assert.IsTrue(documents.Any(x => x.Id == "packet-pdf" && x.RequiresPdmApproval));
             Assert.IsTrue(documents.Any(x => x.Id == "salesforce-opportunity-brief" && !x.Implemented));
+            Assert.IsTrue(documents.Any(x => x.Id == "screenshot-review-report" && x.AssistantUses.Contains("review pending contacts")));
+            Assert.IsTrue(documents.Any(x => x.Id == "manufacturing-release-checklist" && x.RequiresSolidWorks && x.RequiresPdmApproval));
+            Assert.IsTrue(documents.Any(x => x.Id == "local-vault-search-summary" && x.SourceSubsystem.Contains("LocalVaultWorkspace")));
+            Assert.IsTrue(documents.Any(x => x.Id == "pdm-metadata-brief" && x.Category == "vault-brief"));
+            Assert.IsTrue(documents.Any(x => x.Id == "epicor-part-quote-brief" && x.Category == "erp-brief"));
         }
 
         [TestMethod]
@@ -1381,6 +1623,11 @@ namespace BlueBrick.UI.Tests
         [TestMethod]
         public async Task OpenAiAssistantService_RealConnectionTest_WithNvidiaKey()
         {
+            if (!string.Equals(Environment.GetEnvironmentVariable("BLUEBRICK_RUN_REAL_AI_TESTS"), "1", StringComparison.Ordinal))
+            {
+                Assert.Inconclusive("Set BLUEBRICK_RUN_REAL_AI_TESTS=1 to run live provider connection tests.");
+            }
+
             var prevApiKey = Registry.GetValue(AppIdentity.RegistryRoot, "AssistantApiKey", null)?.ToString();
             if (string.IsNullOrEmpty(prevApiKey))
             {
@@ -1866,6 +2113,89 @@ namespace BlueBrick.UI.Tests
             Assert.IsNotNull(streamingResult.Receipt);
             Assert.IsFalse(nonStreamingResult.Receipt.Allowed == false && nonStreamingResult.Status != "disabled" && nonStreamingResult.Status != "unknown" && nonStreamingResult.Status != "invalid",
                 "search_local_vault should not be denied by policy unless vault is missing");
+        }
+
+        [TestMethod]
+        public void AssistantScopeRegistry_Exposes_Local_Pdm_Epicor_And_All_With_Unavailable_Reasons()
+        {
+            var service = new AssistantToolService(new AgentConfig());
+            var scopes = AssistantScopeRegistry.Build(new AgentConfig(), service.GetCatalog()).ToArray();
+
+            Assert.AreEqual(4, scopes.Length);
+            Assert.IsTrue(scopes.Single(s => s.Id == AssistantScopeRegistry.LocalVault).Enabled);
+            Assert.IsFalse(scopes.Single(s => s.Id == AssistantScopeRegistry.Pdm).Enabled);
+            Assert.IsFalse(scopes.Single(s => s.Id == AssistantScopeRegistry.Epicor).Enabled);
+            Assert.IsTrue(scopes.Single(s => s.Id == AssistantScopeRegistry.All).Enabled);
+            Assert.IsFalse(string.IsNullOrWhiteSpace(scopes.Single(s => s.Id == AssistantScopeRegistry.Pdm).UnavailableReason));
+            Assert.IsFalse(scopes.Single(s => s.Id == AssistantScopeRegistry.All).AllowsMutation);
+        }
+
+        [TestMethod]
+        public async Task AssistantToolService_ScopeMismatch_Blocks_Search_Wrapper_Without_Pdm_Call()
+        {
+            var service = new AssistantToolService(new AgentConfig());
+
+            var result = await service.ExecuteAsync(new AssistantToolRequest
+            {
+                ToolName = "search_local_vault",
+                Query = "bracket",
+                ScopeId = AssistantScopeRegistry.Pdm
+            }, "scope-mismatch");
+
+            Assert.AreEqual("scope_unavailable", result.Status);
+            Assert.IsNotNull(result.Receipt);
+            Assert.IsFalse(result.Receipt.Allowed);
+        }
+
+        [TestMethod]
+        public async Task AssistantToolService_AllScope_Reports_Disabled_Connectors_As_Partial_Without_Executing_Them()
+        {
+            var service = new AssistantToolService(new AgentConfig());
+
+            var result = await service.ExecuteAsync(new AssistantToolRequest
+            {
+                ToolName = "search_local_vault",
+                Query = "bracket",
+                ScopeId = AssistantScopeRegistry.All
+            }, "all-scope");
+
+            Assert.AreEqual("partial", result.Status);
+            Assert.IsTrue(result.ReadOnly);
+            Assert.IsTrue(result.Items.Any(i => i.Id == "search_pdm:unavailable"));
+            Assert.IsTrue(result.Items.Any(i => i.Id == "search_epicor:unavailable"));
+            Assert.IsNotNull(result.Receipt);
+            Assert.IsTrue(result.Receipt.Allowed);
+        }
+
+        [TestMethod]
+        public void AgentPanelClient_ParseJson_Unwraps_Assistant_Api_Envelope()
+        {
+            var method = typeof(AgentPanelClient).GetMethod(
+                "ParseJson",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            Assert.IsNotNull(method);
+
+            var parsed = (JObject)method.Invoke(null, new object[]
+            {
+                "{\"ok\":true,\"correlationId\":\"trace-1\",\"schemaVersion\":\"2026-06-01.v1\",\"data\":{\"models\":[{\"id\":\"aionui\"}]}}"
+            });
+
+            Assert.IsTrue(parsed.Value<bool>("ok"));
+            Assert.AreEqual("trace-1", parsed.Value<string>("correlationId"));
+            Assert.IsInstanceOfType(parsed["models"], typeof(JArray));
+        }
+
+        private static void SafeDelete(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch
+            {
+                // Test cleanup only.
+            }
         }
     }
 }

@@ -1,6 +1,6 @@
 # Bluebrick AI Assistant Implementation And Verification Plan
 
-Last updated: 2026-05-28
+Last updated: 2026-06-01
 
 ## Scope Alignment Against Rebuilt Master Plan
 
@@ -20,6 +20,8 @@ The downloaded master plan adds these required refinements to the full scope:
 - define a read-only SolidWorks snapshot adapter before any approved mutation workflow.
 - treat React/Vercel AI SDK/AI Elements as a later packaged WebView2 panel milestone, not something to force into inline C# HTML now.
 - maintain 2024 SP5 as the first SolidWorks target and treat 2026 support as a separate compatibility track.
+
+Review delta captured on 2026-06-01: this plan already contained most of the rebuilt master plan, but the scope is now tightened around enforceable status labels, route ownership, broker/secret boundaries, SOLIDWORKS read-only adapter sequencing, document artifact generation, and verification gates. Any future implementation task should cite this plan plus the route manifest/ADRs rather than reusing the downloaded plan as a separate source of truth.
 
 ## Full-Scope Refinements From Master Plan Review
 
@@ -80,6 +82,21 @@ Use these labels in docs, tests, route manifests, and UI status text:
 | `MISSING` | expected component absent |
 | `BLOCKED_BY_POLICY` | intentionally denied until approval/security gates exist |
 | `UNKNOWN` | not inspected or not enough evidence |
+
+### Current Scope Delta From Rebuilt Master Plan
+
+| Area | Master Plan Requirement | Current Plan Status | Refinement Added |
+|---|---|---|---|
+| Source authority | prove active workspace before claims | PARTIAL | keep `Bluebrick` as the active implementation workspace and treat `VIRA BLUEBRICK` as read-only reference only |
+| Cancellation | second chat must not poison later requests | PARTIAL | keep cancellation ownership tests plus add live second-chat validation before Phase 0 exit |
+| Model authority | AionUI can be provider authority without secret scraping | PARTIAL | profile IDs and capability metadata may persist; provider keys must resolve at runtime only |
+| Browser/WebView boundary | token and host bridge must not leak into DOM | PARTIAL | static tests exist; live WebView DOM/navigation validation is still required |
+| Bridge/tool policy | every route/tool classified and audited | PARTIAL | route manifest, deny policy, receipts, audit log, and UI receipt surfacing are in scope |
+| SOLIDWORKS adapter | read-only snapshot before mutation | MISSING | Phase 1 is explicitly the read-only snapshot adapter; mutation remains blocked |
+| PDM/Epicor/Salesforce | read-only wrappers first | PARTIAL | PDM/Epicor searches stay config/env gated; Salesforce is OAuth-only and docs/planned |
+| Screenshot evidence | artifacts must be reviewable and privacy-scoped | PARTIAL | screenshot report generation is now in code and covered by the focused UI test suite; panel UI surfacing is still pending |
+| React/Vercel panel | later packaged WebView2 milestone | DOCS_ONLY | keep current inline WebView2 shell until contracts/security stabilize |
+| 2026 compatibility | separate compatibility track | DOCS_ONLY | keep 2024 SP5 as first target until official docs/interop/version checks are recorded |
 
 ## P0 Gates Added From Master Plan
 
@@ -531,6 +548,23 @@ Build the Bluebrick AI Assistant into a functional SolidWorks task-pane copilot 
 6. Present a usable, professional assistant panel instead of a cramped button grid.
 7. Validate every bridge, relay, assistant, and risky CAD/PDM workflow with repeatable tests.
 
+The product target is intentionally not an unrestricted model executor. The assistant is a governed copilot that can observe, summarize, search, prepare evidence, and propose preview plans before any human-approved CAD/PDM mutation is considered.
+
+Expanded capability contract:
+
+| Capability | Current Status | Scope Refinement |
+|---|---|---|
+| Chat and model routing | PARTIAL | keep NVIDIA-compatible default, support OpenAI-compatible and AionUI-routed profiles through runtime secret resolution |
+| Screenshot capture | PARTIAL | target SOLIDWORKS/task-pane first, fall back only when explicitly allowed, preserve privacy metadata |
+| Screenshot review report | PARTIAL | `create_screenshot_review_report` creates local Markdown from screenshot metadata and passes focused UI tests; panel UI entry point must still surface it |
+| Local vault search | PARTIAL | read-only search remains enabled; result opening/actions require preview and path safety checks |
+| PDM search/metadata | PARTIAL | filename search is gated; metadata/history/references wrappers remain missing |
+| Epicor search | PARTIAL | read-only part search is gated by config/env secret; no writeback |
+| Salesforce | DOCS_ONLY | OAuth read-only client is planned; archived legacy class remains non-runtime |
+| SOLIDWORKS context | MISSING | read-only snapshot adapter is the next product milestone after P0 |
+| Preview planner | DOCS_ONLY | can propose diffs only; no COM mutation |
+| Approved mutation | BLOCKED_BY_POLICY | first candidate is a test-file custom-property update after all earlier gates pass |
+
 ## SDK Direction
 
 ### Vercel AI SDK / AI Elements
@@ -626,6 +660,16 @@ docs/BLUEBRICK_ASSISTANT_ROUTE_MANIFEST.md
 docs/BLUEBRICK_AIONUI_MODEL_AUTHORITY_ADR.md
 docs/BLUEBRICK_SECURITY.md
 ```
+
+Work package order:
+
+1. Capture source-of-truth proof and keep it current while local WIP remains unbaselined.
+2. Finish cancellation regression coverage for sequential send, cancel/retry, timeout, bridge offline, provider failure, and JSON parse failure.
+3. Keep the AionUI model authority ADR aligned with the provider profile contract and runtime-only secret resolver rule.
+4. Keep `docs/BLUEBRICK_ASSISTANT_ROUTE_MANIFEST.md` synchronized with `Agent/AgentHttpServer.cs` whenever routes are added.
+5. Enforce route-shaped deny rules for `/sw/*`, native `/pdm/*`, `/lab/vault/reset`, and unknown mutation aliases in assistant tool execution.
+6. Prove WebView2 token hygiene with static shell scans first, then live DOM/navigation validation.
+7. Keep every assistant tool result eligible for a redacted receipt before new read-only integrations are surfaced in the UI.
 
 Done criteria:
 
@@ -931,15 +975,30 @@ Current state:
   - STEP Export
   - DXF Export
   - Assistant Screenshot Artifact
-- planned descriptor:
+  - Screenshot Review Report
+- planned descriptors:
+  - Manufacturing Release Checklist
+  - Local Vault Search Summary
+  - PDM Metadata Brief
+  - Epicor Part And Quote Brief
   - Salesforce Opportunity Brief
+
+Current screenshot report implementation:
+
+- `Agent/AssistantScreenshotReportGenerator.cs` creates a local Markdown report from screenshot artifact metadata.
+- `Agent/AssistantToolService.cs` exposes the read-only `create_screenshot_review_report` tool.
+- the report includes artifact identity, capture/source metadata, privacy/retention status, annotations, extracted contacts, confidence, pending review state, and next review actions.
+- `BlueBrick.UI.Tests/LabWorkspaceTests.cs` contains a focused test for creating the report from `.metadata.json`.
+
+Verification status: PARTIAL. The implementation is present in local WIP, the Lab/UI test projects compile, and the focused `LabWorkspaceTests` suite passes when run with the MSTest adapter available outside the filesystem sandbox. The report is not yet exposed as a first-class button or card action in the assistant panel.
 
 Recommended next documents:
 
 - Opportunity/customer context brief from Salesforce/Epicor/PDM metadata.
 - Manufacturing release checklist that references generated PDF, STEP, DXF, and packet status.
-- Screenshot review report with annotations, accepted/rejected contacts, and trace id.
 - Local vault search result summary for handoff into ChatGPT/Relay.
+- PDM metadata brief for read-only vault state, variables, versions, and references.
+- Epicor part/quote brief for read-only part, customer, task, quote, and opportunity context.
 
 ## Phase 6 - Relay / ChatGPT / MCP Verification
 
@@ -1137,6 +1196,19 @@ docs/BLUEBRICK_DECISIONS.md
 docs/BLUEBRICK_MANUAL_SOLIDWORKS_SMOKE.md
 ```
 
+Detailed documentation refinements now in scope:
+
+| Document | Purpose | Required Detail |
+|---|---|---|
+| `docs/BLUEBRICK_ARCHITECTURE.md` | stable architecture map | panel, bridge, assistant runtime, tool policy, relay, adapters, external systems |
+| `docs/BLUEBRICK_SECURITY.md` | security controls | local auth, token hygiene, WebView2 restrictions, route risk levels, secret storage, screenshot privacy |
+| `docs/BLUEBRICK_AGENT_TOOL_REGISTRY.md` | tool catalog contract | tool name, class, enabled state, confirmation/secret requirements, max payload/results, receipts, tests |
+| `docs/BLUEBRICK_SOLIDWORKS_API_GOVERNANCE.md` | CAD API policy | 2024 SP5 target, 2026 compatibility track, COM threading, read-only adapter, mutation gates |
+| `docs/BLUEBRICK_PDM_INTEGRATION_PLAN.md` | PDM safety | read-only tools, blocked actions, config, result redaction, live validation checklist |
+| `docs/BLUEBRICK_TEST_GATE.md` | acceptance gates | build/test commands, relay-safe checks, browser/WebView checks, manual SolidWorks smoke |
+| `docs/BLUEBRICK_DECISIONS.md` | decision log | source authority, model authority, React timing, mutation policy, first approved mutation candidate |
+| `docs/BLUEBRICK_MANUAL_SOLIDWORKS_SMOKE.md` | operator smoke runbook | exact steps, forbidden actions, expected evidence, stop conditions |
+
 ## Open Research Queue
 
 Official docs to attach or verify:
@@ -1169,7 +1241,7 @@ Open-source references to inspect:
 
 - No React/Vercel AI Elements panel exists yet.
 - No local Node/TypeScript assistant frontend package exists yet.
-- Screenshot annotation and contact extraction contracts exist, but no model-driven extraction or review UI exists yet.
+- Screenshot annotation and contact extraction contracts exist, and a local screenshot review report tool is staged, but no model-driven extraction or accept/reject review UI exists yet.
 - Salesforce integration is intentionally not implemented.
 - Epicor and PDM search are legacy/static-code paths and now have disabled assistant-facing catalog entries pending safe wrappers.
 - Full manual SolidWorks smoke test has not been rerun after this plan update.
@@ -1181,3 +1253,5 @@ Open-source references to inspect:
 - WebView2 static shell-token and navigation guard tests exist, but live DOM/navigation validation is still missing.
 - Initial tool policy, authorization contract, JSONL audit persistence, execution receipts, `/assistant/tool-audit`, and basic UI receipt surfacing exist; live route-level validation and approval workflow UI are still missing.
 - Read-only SolidWorks snapshot adapter has not yet been implemented.
+- `create_screenshot_review_report` is present in local WIP and passes focused UI tests, but panel UI surfacing is still pending.
+- SOLIDWORKS 2024 SP5 remains the first target; 2026 support is unverified until official docs, interop versions, and contract tests are recorded.

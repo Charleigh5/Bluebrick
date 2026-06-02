@@ -269,18 +269,39 @@ namespace BlueBrick.Agent
             status.RelayBaseUrl = _config.Relay?.BaseUrl;
             status.ChatWorkspaceUrl = _config.Relay?.ChatWorkspaceUrl;
             status.ToolAvailability = AssistantToolAvailabilitySummary.FromCatalog(tools);
-            await WriteJson(context, status).ConfigureAwait(false);
+            await WriteAssistantJson(context, status, traceId).ConfigureAwait(false);
             return;
         }
         if (path == "/assistant/models" && method == "GET")
         {
             var models = await _assistantService.GetModelsAsync().ConfigureAwait(false);
-            await WriteJson(context, new { models, traceId }).ConfigureAwait(false);
+            await WriteAssistantJson(context, new { models, traceId }, traceId).ConfigureAwait(false);
+            return;
+        }
+        if (path == "/assistant/model" && method == "GET")
+        {
+            var status = await _assistantService.GetStatusAsync().ConfigureAwait(false);
+            await WriteAssistantJson(context, new
+            {
+                model = status.Model,
+                activeModel = status.ActiveModel,
+                activeModelDescriptor = status.ActiveModelDescriptor,
+                apiBaseUrl = status.ApiBaseUrl,
+                configured = status.Configured,
+                keySource = status.KeySource,
+                traceId
+            }, traceId).ConfigureAwait(false);
+            return;
+        }
+        if (path == "/assistant/scopes" && method == "GET")
+        {
+            var scopes = AssistantScopeRegistry.Build(_config, _assistantTools.GetCatalog());
+            await WriteAssistantJson(context, new { scopes, traceId }, traceId).ConfigureAwait(false);
             return;
         }
         if (path == "/assistant/tools" && method == "GET")
         {
-            await WriteJson(context, new { tools = _assistantTools.GetCatalog(), traceId }).ConfigureAwait(false);
+            await WriteAssistantJson(context, new { tools = _assistantTools.GetCatalog(), traceId }, traceId).ConfigureAwait(false);
             return;
         }
         if (path == "/assistant/tool-audit" && method == "GET")
@@ -296,17 +317,22 @@ namespace BlueBrick.Agent
             {
                 receipts = _assistantTools.GetAuditTail(limit);
             }
-            await WriteJson(context, new { receipts, traceId }).ConfigureAwait(false);
+            await WriteAssistantJson(context, new { receipts, traceId }, traceId).ConfigureAwait(false);
             return;
         }
         if (path == "/assistant/integrations" && method == "GET")
         {
-            await WriteJson(context, new { integrations = AssistantProductCatalog.GetIntegrations(), traceId }).ConfigureAwait(false);
+            await WriteAssistantJson(context, new { integrations = AssistantProductCatalog.GetIntegrations(), traceId }, traceId).ConfigureAwait(false);
             return;
         }
         if (path == "/assistant/document-catalog" && method == "GET")
         {
-            await WriteJson(context, new { documents = AssistantProductCatalog.GetDocuments(), traceId }).ConfigureAwait(false);
+            await WriteAssistantJson(context, new { documents = AssistantProductCatalog.GetDocuments(), traceId }, traceId).ConfigureAwait(false);
+            return;
+        }
+        if (path.StartsWith("/assistant/screenshot/", StringComparison.OrdinalIgnoreCase) && method == "GET")
+        {
+            await HandleAssistantScreenshotGet(context, path, traceId).ConfigureAwait(false);
             return;
         }
 
@@ -318,7 +344,14 @@ namespace BlueBrick.Agent
         catch (InvalidOperationException)
         {
             context.Response.StatusCode = 413;
-            await WriteJson(context, new { error = "Request body too large", maxBytes = MaxRequestBodyBytes, traceId });
+            if (path.StartsWith("/assistant/", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteAssistantError(context, "body_too_large", "Request body too large", traceId);
+            }
+            else
+            {
+                await WriteJson(context, new { error = "Request body too large", maxBytes = MaxRequestBodyBytes, traceId });
+            }
             return;
         }
         JObject json;
@@ -335,7 +368,14 @@ namespace BlueBrick.Agent
                 catch
                 {
                     context.Response.StatusCode = 400;
-                    await WriteJson(context, new { error = "Invalid JSON body", traceId });
+                    if (path.StartsWith("/assistant/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await WriteAssistantError(context, "invalid_json", "Invalid JSON body", traceId);
+                    }
+                    else
+                    {
+                        await WriteJson(context, new { error = "Invalid JSON body", traceId });
+                    }
                     return;
                 }
             }
@@ -417,6 +457,9 @@ case "/pdm/check_out":
                 return;
             case "/assistant/screenshot/analyze":
                 await HandleAssistantScreenshotAnalyze(context, json, traceId);
+                return;
+            case "/assistant/annotations":
+                await HandleAssistantAnnotations(context, json, traceId);
                 return;
             case "/assistant/history":
                 await HandleAssistantHistory(context, traceId);
@@ -992,18 +1035,18 @@ await WriteJson(context, new { status = "ok", traceId });
     private async Task HandleAssistantSession(HttpListenerContext context, string traceId)
         {
             var session = await _assistantService.CreateSessionAsync().ConfigureAwait(false);
-            await WriteJson(context, new
+            await WriteAssistantJson(context, new
             {
                 sessionId = session.SessionId,
                 createdUtc = session.CreatedUtc,
                 traceId
-            }).ConfigureAwait(false);
+            }, traceId).ConfigureAwait(false);
         }
 
         private async Task HandleAssistantTest(HttpListenerContext context, string traceId)
         {
             var result = await _assistantService.TestConnectionAsync().ConfigureAwait(false);
-            await WriteJson(context, new
+            await WriteAssistantJson(context, new
             {
                 success = result.Success,
                 mode = result.Mode,
@@ -1012,7 +1055,7 @@ await WriteJson(context, new { status = "ok", traceId });
                 latencyMs = result.LatencyMs,
                 message = result.Message,
                 traceId
-            }).ConfigureAwait(false);
+            }, traceId).ConfigureAwait(false);
         }
 
         private async Task HandleAssistantMode(HttpListenerContext context, JObject json, string traceId)
@@ -1021,18 +1064,18 @@ await WriteJson(context, new { status = "ok", traceId });
             if (string.IsNullOrWhiteSpace(mode))
             {
                 context.Response.StatusCode = 400;
-                await WriteJson(context, new { error = "mode required", traceId }).ConfigureAwait(false);
+                await WriteAssistantError(context, "invalid", "mode required", traceId).ConfigureAwait(false);
                 return;
             }
 
             var status = await _assistantService.SetModeAsync(mode).ConfigureAwait(false);
-            await WriteJson(context, new
+            await WriteAssistantJson(context, new
             {
                 mode = status.AssistantMode,
                 configured = status.Configured,
                 keySource = status.KeySource,
                 traceId
-            }).ConfigureAwait(false);
+            }, traceId).ConfigureAwait(false);
         }
 
         private async Task HandleAssistantModel(HttpListenerContext context, JObject json, string traceId)
@@ -1041,19 +1084,21 @@ await WriteJson(context, new { status = "ok", traceId });
             if (string.IsNullOrWhiteSpace(modelId))
             {
                 context.Response.StatusCode = 400;
-                await WriteJson(context, new { error = "modelId required", traceId }).ConfigureAwait(false);
+                await WriteAssistantError(context, "invalid", "modelId required", traceId).ConfigureAwait(false);
                 return;
             }
 
             var status = await _assistantService.SetModelAsync(modelId).ConfigureAwait(false);
-            await WriteJson(context, new
+            await WriteAssistantJson(context, new
             {
                 model = status.Model,
+                activeModel = status.ActiveModel,
+                activeModelDescriptor = status.ActiveModelDescriptor,
                 apiBaseUrl = status.ApiBaseUrl,
                 configured = status.Configured,
                 keySource = status.KeySource,
                 traceId
-            }).ConfigureAwait(false);
+            }, traceId).ConfigureAwait(false);
         }
 
         private async Task HandleAssistantTool(HttpListenerContext context, JObject json, string traceId)
@@ -1069,7 +1114,7 @@ await WriteJson(context, new { status = "ok", traceId });
                 context.Response.StatusCode = 404;
             }
 
-            await WriteJson(context, result).ConfigureAwait(false);
+            await WriteAssistantJson(context, result, traceId).ConfigureAwait(false);
         }
 
         private async Task HandleAssistantMessage(HttpListenerContext context, JObject json, string traceId)
@@ -1078,7 +1123,7 @@ await WriteJson(context, new { status = "ok", traceId });
             var message = json.Value<string>("message");
             var attachments = json["attachmentPaths"]?.ToObject<string[]>() ?? new string[0];
             var result = await _assistantService.SendMessageAsync(sessionId, message, attachments).ConfigureAwait(false);
-            await WriteJson(context, new
+            await WriteAssistantJson(context, new
             {
                 sessionId = result.SessionId,
                 assistantAvailable = result.AssistantAvailable,
@@ -1086,7 +1131,7 @@ await WriteJson(context, new { status = "ok", traceId });
                 errorCode = result.ErrorCode,
         message = result.Message,
                 traceId
-            }).ConfigureAwait(false);
+            }, traceId).ConfigureAwait(false);
     }
 
     private async Task HandleAssistantMessageStream(HttpListenerContext context, JObject json, string traceId)
@@ -1159,11 +1204,11 @@ await WriteJson(context, new { status = "ok", traceId });
             if (artifact == null || string.IsNullOrWhiteSpace(artifact.Path))
             {
                 context.Response.StatusCode = 500;
-                await WriteJson(context, new { error = "Failed to capture screenshot.", traceId }).ConfigureAwait(false);
+                await WriteAssistantError(context, "capture_failed", "Failed to capture screenshot.", traceId).ConfigureAwait(false);
                 return;
             }
 
-            await WriteJson(context, new { path = artifact.Path, artifact, traceId }).ConfigureAwait(false);
+            await WriteAssistantJson(context, new { path = artifact.Path, artifact, receipt = artifact.Receipt, traceId }, traceId).ConfigureAwait(false);
         }
 
         private async Task HandleAssistantScreenshotAnalyze(HttpListenerContext context, JObject json, string traceId)
@@ -1173,18 +1218,107 @@ await WriteJson(context, new { status = "ok", traceId });
             if (result == null || result.Artifact == null)
             {
                 context.Response.StatusCode = 500;
-                await WriteJson(context, new { error = "Failed to analyze screenshot.", traceId }).ConfigureAwait(false);
+                await WriteAssistantError(context, "analysis_failed", "Failed to analyze screenshot.", traceId).ConfigureAwait(false);
                 return;
             }
 
-            await WriteJson(context, new
+            await WriteAssistantJson(context, new
             {
                 status = result.Status,
                 message = result.Message,
                 mockMode = result.MockMode,
                 artifact = result.Artifact,
                 traceId
-            }).ConfigureAwait(false);
+            }, traceId).ConfigureAwait(false);
+        }
+
+        private async Task HandleAssistantScreenshotGet(HttpListenerContext context, string path, string traceId)
+        {
+            var parts = path.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 3)
+            {
+                context.Response.StatusCode = 400;
+                await WriteAssistantError(context, "invalid", "screenshot id required", traceId).ConfigureAwait(false);
+                return;
+            }
+
+            var screenshotId = parts[2];
+            var artifact = AssistantScreenshotArtifactStore.FindArtifact(screenshotId);
+            if (artifact == null)
+            {
+                context.Response.StatusCode = 404;
+                await WriteAssistantError(context, "not_found", "screenshot artifact not found", traceId).ConfigureAwait(false);
+                return;
+            }
+
+            if (parts.Length >= 4 && string.Equals(parts[3], "thumbnail", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(artifact.ThumbnailPath) || !File.Exists(artifact.ThumbnailPath))
+                {
+                    context.Response.StatusCode = 404;
+                    await WriteAssistantError(context, "not_found", "screenshot thumbnail not found", traceId).ConfigureAwait(false);
+                    return;
+                }
+
+                var bytes = File.ReadAllBytes(artifact.ThumbnailPath);
+                context.Response.ContentType = "image/jpeg";
+                context.Response.ContentLength64 = bytes.Length;
+                await context.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
+                context.Response.OutputStream.Close();
+                return;
+            }
+
+            artifact.Receipt = artifact.Receipt ?? AssistantScreenshotArtifactStore.BuildReceipt(artifact);
+            await WriteAssistantJson(context, new { artifact, receipt = artifact.Receipt, traceId }, traceId).ConfigureAwait(false);
+        }
+
+        private async Task HandleAssistantAnnotations(HttpListenerContext context, JObject json, string traceId)
+        {
+            var document = json.ToObject<AssistantScreenshotAnnotationDocument>() ?? new AssistantScreenshotAnnotationDocument();
+            if (string.IsNullOrWhiteSpace(document.ScreenshotId))
+            {
+                context.Response.StatusCode = 400;
+                await WriteAssistantError(context, "invalid", "screenshotId required", traceId).ConfigureAwait(false);
+                return;
+            }
+
+            var artifact = AssistantScreenshotArtifactStore.FindArtifact(document.ScreenshotId);
+            if (artifact == null)
+            {
+                context.Response.StatusCode = 404;
+                await WriteAssistantError(context, "not_found", "screenshot artifact not found", traceId).ConfigureAwait(false);
+                return;
+            }
+
+            document.SchemaVersion = string.IsNullOrWhiteSpace(document.SchemaVersion)
+                ? AssistantApiEnvelope.CurrentSchemaVersion
+                : document.SchemaVersion;
+            document.ScreenshotId = artifact.ScreenshotId ?? artifact.ArtifactId;
+            document.ImageWidth = document.ImageWidth <= 0 ? artifact.Width : document.ImageWidth;
+            document.ImageHeight = document.ImageHeight <= 0 ? artifact.Height : document.ImageHeight;
+            document.Annotations = document.Annotations ?? new List<AssistantScreenshotAnnotation>();
+
+            foreach (var annotation in document.Annotations)
+            {
+                annotation.ScreenshotId = document.ScreenshotId;
+                annotation.Source = string.IsNullOrWhiteSpace(annotation.Source) ? "human" : annotation.Source;
+                annotation.ReviewStatus = string.IsNullOrWhiteSpace(annotation.ReviewStatus)
+                    ? (string.Equals(annotation.Source, "ai_proposed", StringComparison.OrdinalIgnoreCase) ? "pending" : "approved")
+                    : annotation.ReviewStatus;
+            }
+
+            artifact.Annotations = document.Annotations;
+            AssistantScreenshotArtifactStore.CompleteArtifact(artifact);
+            File.WriteAllText(artifact.AnnotationsPath, JsonConvert.SerializeObject(document, Formatting.Indented));
+
+            await WriteAssistantJson(context, new
+            {
+                screenshotId = document.ScreenshotId,
+                annotationCount = document.Annotations.Count,
+                annotationsPath = artifact.AnnotationsPath,
+                artifact,
+                traceId
+            }, traceId).ConfigureAwait(false);
         }
 
         private async Task HandleAssistantHistory(HttpListenerContext context, string traceId)
@@ -1193,7 +1327,7 @@ await WriteJson(context, new { status = "ok", traceId });
             if (string.IsNullOrWhiteSpace(sessionId))
             {
                 context.Response.StatusCode = 400;
-                await WriteJson(context, new { error = "sessionId required", traceId }).ConfigureAwait(false);
+                await WriteAssistantError(context, "invalid", "sessionId required", traceId).ConfigureAwait(false);
                 return;
             }
 
@@ -1201,17 +1335,17 @@ await WriteJson(context, new { status = "ok", traceId });
             if (session == null)
             {
                 context.Response.StatusCode = 404;
-                await WriteJson(context, new { error = "Session not found", traceId }).ConfigureAwait(false);
+                await WriteAssistantError(context, "not_found", "Session not found", traceId).ConfigureAwait(false);
                 return;
             }
 
-            await WriteJson(context, new
+            await WriteAssistantJson(context, new
             {
                 sessionId = session.SessionId,
                 createdUtc = session.CreatedUtc,
                 messages = session.Messages,
                 traceId
-            }).ConfigureAwait(false);
+            }, traceId).ConfigureAwait(false);
         }
 
         private async Task HandleVaultReindex(HttpListenerContext context, string traceId)
@@ -1500,6 +1634,16 @@ await WriteJson(context, new { status = "ok", traceId });
         {
             var json = JsonConvert.SerializeObject(obj);
             await WriteRaw(context, json);
+        }
+
+        private static Task WriteAssistantJson(HttpListenerContext context, object data, string traceId)
+        {
+            return WriteJson(context, AssistantApiEnvelope.Success(data, traceId));
+        }
+
+        private static Task WriteAssistantError(HttpListenerContext context, string code, string message, string traceId)
+        {
+            return WriteJson(context, AssistantApiEnvelope.Fail(code, message, traceId));
         }
 
         private static async Task WriteRaw(HttpListenerContext context, string body)

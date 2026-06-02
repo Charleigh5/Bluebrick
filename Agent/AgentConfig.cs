@@ -114,6 +114,7 @@ namespace BlueBrick.Agent
             }
             Assistant.MaxHistory = Assistant.MaxHistory <= 0 ? 20 : Assistant.MaxHistory;
         Assistant.MaxTotalAttachmentBytes = Assistant.MaxTotalAttachmentBytes <= 0 ? 10 * 1024 * 1024 : Assistant.MaxTotalAttachmentBytes;
+            Assistant.ReactDevServerUrl = DefaultIfEmpty(Assistant.ReactDevServerUrl, string.Empty);
 
             AssistantTools.PdmMaxResults = AssistantTools.PdmMaxResults <= 0 ? 25 : Math.Min(AssistantTools.PdmMaxResults, 50);
             AssistantTools.EpicorMaxResults = AssistantTools.EpicorMaxResults <= 0 ? 25 : Math.Min(AssistantTools.EpicorMaxResults, 50);
@@ -289,6 +290,9 @@ namespace BlueBrick.Agent
         internal int MaxHistory { get; set; }
         internal long MaxTotalAttachmentBytes { get; set; }
         internal AssistantModelProfile[] ModelProfiles { get; set; }
+        internal bool UseReactWebView { get; set; }
+        internal bool EnableReactDevServer { get; set; }
+        internal string ReactDevServerUrl { get; set; }
     }
 
     internal class AssistantToolSettings

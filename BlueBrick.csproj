@@ -55,10 +55,14 @@
         <Compile Include="Agent\AgentClient.cs" />
         <Compile Include="Agent\AgentConfig.cs" />
         <Compile Include="Agent\AgentFontLoader.cs" />
+        <Compile Include="Agent\AssistantApiEnvelope.cs" />
         <Compile Include="Agent\AssistantErrorClassifier.cs" />
         <Compile Include="Agent\AssistantImageTools.cs" />
         <Compile Include="Agent\AssistantModels.cs" />
         <Compile Include="Agent\AssistantProductCatalog.cs" />
+        <Compile Include="Agent\AssistantScopeRegistry.cs" />
+        <Compile Include="Agent\AssistantScreenshotArtifactStore.cs" />
+        <Compile Include="Agent\AssistantScreenshotReportGenerator.cs" />
         <Compile Include="Agent\AssistantScreenshotAnalyzer.cs" />
         <Compile Include="Agent\AssistantSessionStore.cs" />
         <Compile Include="Agent\AssistantToolAuditLog.cs" />
@@ -67,6 +71,7 @@
         <Compile Include="Agent\AssistantToolPolicy.cs" />
         <Compile Include="Agent\AssistantToolService.cs" />
         <Compile Include="Agent\AssistantWebViewSecurity.cs" />
+        <Compile Include="Agent\AssistantWebViewHost.cs" />
         <Compile Include="Agent\AgentHttpServer.cs" />
         <Compile Include="Agent\ChatGptSessionStore.cs" />
         <Compile Include="Agent\IAssistantService.cs" />
@@ -258,6 +263,12 @@
         </Content>
         <Content Include="DataFiles\qryUnitExport.xml">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </Content>
+        <Content Include="AssistantWeb\dist\index.html">
+          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+        <Content Include="AssistantWeb\dist\assistant-web.js">
+          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
         <Content Include="config\appsettings.lab.json">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
