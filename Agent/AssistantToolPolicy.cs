@@ -12,7 +12,7 @@ namespace BlueBrick.Agent
                 return AssistantToolPolicyDecision.Deny("invalid", "toolName required", false);
             }
 
-            if (normalized.StartsWith("/"))
+            if (normalized.StartsWith("/", StringComparison.Ordinal))
             {
                 return EvaluateRoute(normalized, "POST", AssistantToolInvocationSource.AssistantTool);
             }
@@ -40,7 +40,7 @@ namespace BlueBrick.Agent
                 return AssistantToolPolicyDecision.Deny("invalid", "route required", false);
             }
 
-            if (path.StartsWith("/sw/"))
+            if (path.StartsWith("/sw/", StringComparison.Ordinal))
             {
                 return AssistantToolPolicyDecision.Deny(
                     "blocked_cad_route",
@@ -48,7 +48,7 @@ namespace BlueBrick.Agent
                     true);
             }
 
-            if (path == "/lab/vault/reset")
+            if (string.Equals(path, "/lab/vault/reset", StringComparison.Ordinal))
             {
                 return AssistantToolPolicyDecision.Deny(
                     "blocked_destructive_lab_route",
@@ -56,9 +56,10 @@ namespace BlueBrick.Agent
                     true);
             }
 
-            if (path.StartsWith("/pdm/"))
+            if (path.StartsWith("/pdm/", StringComparison.Ordinal))
             {
-                if (path == "/pdm/search" || path == "/pdm/get_props")
+                if (string.Equals(path, "/pdm/search", StringComparison.Ordinal) ||
+                    string.Equals(path, "/pdm/get_props", StringComparison.Ordinal))
                 {
                     return AssistantToolPolicyDecision.Deny(
                         "blocked_native_pdm_route",
@@ -72,12 +73,12 @@ namespace BlueBrick.Agent
                     true);
             }
 
-            if (path == "/assistant/tool" || path.StartsWith("/assistant/"))
+            if (string.Equals(path, "/assistant/tool", StringComparison.Ordinal) || path.StartsWith("/assistant/", StringComparison.Ordinal))
             {
                 return AssistantToolPolicyDecision.Allow("assistant_route", "Assistant route is allowed by route policy.", false);
             }
 
-            if (path.StartsWith("/agent/telemetry/") || path == "/agent/selfcheck")
+            if (path.StartsWith("/agent/telemetry/", StringComparison.Ordinal) || string.Equals(path, "/agent/selfcheck", StringComparison.Ordinal))
             {
                 return AssistantToolPolicyDecision.Allow("read_only_agent_route", "Read-only agent route is allowed by route policy.", false);
             }

@@ -214,8 +214,8 @@ namespace BlueBrick
                     var swDraw = (DrawingDoc)swModel;
                     var swSheets = (object[])swDraw.GetSheetNames();
                     swDraw.ActivateSheet((string)swSheets[0]);
-                    var swView = (SolidWorks.Interop.sldworks.View)swDraw.GetFirstView();
-                    swView = (SolidWorks.Interop.sldworks.View)swView.GetNextView();
+                    var swView = (global::SolidWorks.Interop.sldworks.View)swDraw.GetFirstView();
+                    swView = (global::SolidWorks.Interop.sldworks.View)swView.GetNextView();
                     var sName = swView.GetReferencedModelName();
                     var iErr = 0;
                     swModel = (ModelDoc2)swApp.ActivateDoc3(sName, false,

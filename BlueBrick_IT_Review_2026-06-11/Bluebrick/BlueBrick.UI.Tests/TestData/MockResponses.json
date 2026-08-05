@@ -1,0 +1,18 @@
+{
+  "health_response": {
+    "status": "healthy",
+    "uptime": "100s"
+  },
+  "plan_response": {
+    "status": "complete",
+    "result": "Mock plan result from JSON"
+  },
+  "memory_response": {
+    "results": [
+      {
+        "text": "Memory item 1",
+        "score": 0.95
+      }
+    ]
+  }
+}

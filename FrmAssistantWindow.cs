@@ -308,7 +308,10 @@ namespace BlueBrick
                         {
                             finalText = fallback.Data["message"]?["Text"]?.ToString()
                         ?? fallback.Data["message"]?["text"]?.ToString()
+                        ?? fallback.Data["message"]?["content"]?.ToString()
+                        ?? fallback.Data.Value<string>("text")
                         ?? fallback.Data.Value<string>("message")
+                        ?? fallback.Data.Value<string>("content")
                         ?? "No response text returned.";
                         }
                     }

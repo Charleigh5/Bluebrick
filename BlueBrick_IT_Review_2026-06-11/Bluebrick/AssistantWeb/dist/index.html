@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BlueBrick Assistant</title>
+  <style>
+    :root{color-scheme:light;--ink:#111827;--muted:#64748b;--line:#d7dde7;--panel:#ffffff;--bg:#f4f7fb;--brand:#2f6fed;--accent:#b8f042;--danger:#b42318;--radius:8px;font-family:"Segoe UI",Arial,sans-serif;}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font:12px/1.45 "Segoe UI",Arial,sans-serif}
+    button,select{font:inherit}
+    .shell{height:100vh;display:grid;grid-template-rows:auto 1fr auto;min-width:260px}
+    .header{display:grid;gap:8px;padding:10px;border-bottom:1px solid var(--line);background:var(--panel)}
+    .title{display:flex;align-items:center;gap:8px;font-weight:700}
+    .mark{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--brand),#0f172a);box-shadow:inset 0 0 0 1px rgba(255,255,255,.35)}
+    .controls{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+    .select{width:100%;height:30px;border:1px solid var(--line);border-radius:6px;background:white;color:var(--ink);padding:0 8px}
+    .scopes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+    .scope{border:1px solid var(--line);background:#eef3f9;color:#334155;border-radius:999px;padding:5px 4px;display:flex;align-items:center;justify-content:center;gap:4px;min-width:0}
+    .scope span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .scope:before{content:"";width:10px;height:10px;border-radius:50%;border:1px solid #94a3b8;background:transparent;flex:0 0 auto}
+    .scope.selected{background:#122238;color:white;border-color:#122238}
+    .scope.selected:before{background:white;border-color:white;box-shadow:inset 0 0 0 2px #122238}
+    .scope:disabled{opacity:.55}
+    .chips{display:flex;gap:4px;flex-wrap:wrap}
+    .chip{border:1px solid var(--line);background:#f8fafc;border-radius:999px;color:var(--muted);padding:2px 6px}
+    .thread{overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+    .msg{background:white;border:1px solid var(--line);border-radius:8px;padding:8px;box-shadow:0 1px 1px rgba(15,23,42,.04)}
+    .msg.user{background:#eef6ff;border-color:#bdd7ff}
+    .role{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;margin-bottom:3px}
+    .text{white-space:pre-wrap;word-break:break-word}
+    .shot{display:grid;gap:6px}
+    .shot img{width:100%;max-height:150px;object-fit:contain;border:1px solid var(--line);border-radius:6px;background:#f8fafc;cursor:zoom-in}
+    .meta{display:grid;gap:2px;color:var(--muted)}
+    .footer{border-top:1px solid var(--line);background:var(--panel);padding:8px;display:flex;gap:6px;align-items:center}
+    .input{flex:1;min-height:32px;border:1px solid var(--line);border-radius:8px;padding:7px 8px;background:#f8fafc;color:var(--muted)}
+    .iconbar{display:flex;gap:4px}
+    .icon{width:30px;height:30px;border:1px solid var(--line);border-radius:6px;background:#fff;display:grid;place-items:center;color:#334155}
+    .flyout{position:fixed;inset:0;background:rgba(15,23,42,.74);display:none;align-items:center;justify-content:center;padding:18px;z-index:10}
+    .flyout.open{display:flex}
+    .zoom{max-width:100%;max-height:100%;border-radius:8px;background:white}
+    .close{position:absolute;right:12px;top:12px;width:34px;height:34px;border:0;border-radius:50%;background:white;color:#111827;font-size:20px}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="./assistant-web.js"></script>
+</body>
+</html>

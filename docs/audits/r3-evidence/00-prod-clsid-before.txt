@@ -1,0 +1,12 @@
+
+HKEY_CLASSES_ROOT\CLSID\{C56E0AFF-0BD3-4364-90CB-1A581046CD7D}\InprocServer32
+    (Default)    REG_SZ    mscoree.dll
+    Assembly    REG_SZ    BlueBrick, Version=1.0.13.4, Culture=neutral, PublicKeyToken=null
+    Class    REG_SZ    BlueBrick.SwAddin
+    CodeBase    REG_SZ    file:///C:/BlueBrick/BlueBrick.DLL
+    RuntimeVersion    REG_SZ    v4.0.30319
+    ThreadingModel    REG_SZ    Both
+
+HKEY_CLASSES_ROOT\CLSID\{C56E0AFF-0BD3-4364-90CB-1A581046CD7D}\InprocServer32\1.0.13.4
+HKEY_CLASSES_ROOT\CLSID\{C56E0AFF-0BD3-4364-90CB-1A581046CD7D}\InprocServer32\1.0.8.0
+

@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bluebrick AI Assistant + AionUI Model Connection Layout</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      background: #f3f4f6;
+      color: #111827;
+    }
+
+    body {
+      margin: 0;
+      background: #f3f4f6;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 16px;
+      background: #111827;
+      color: #fff;
+      box-shadow: 0 2px 10px rgb(0 0 0 / 18%);
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    header p {
+      margin: 0;
+      color: #d1d5db;
+      font-size: 12px;
+    }
+
+    main {
+      padding: 18px;
+      overflow: auto;
+    }
+
+    .canvas {
+      display: inline-block;
+      background: #fff;
+      border: 1px solid #d1d5db;
+      box-shadow: 0 8px 30px rgb(0 0 0 / 10%);
+    }
+
+    svg {
+      display: block;
+    }
+
+    .error {
+      max-width: 840px;
+      padding: 16px;
+      background: #fff1f2;
+      border: 1px solid #fecdd3;
+      color: #991b1b;
+      border-radius: 8px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Bluebrick AI Assistant + AionUI Model Connection Layout</h1>
+      <p>Local preview rendered from bluebrick-aionui-assistant-layout.elements.json</p>
+    </div>
+    <p>Editable source: .excalidraw</p>
+  </header>
+  <main>
+    <div id="status">Loading diagram...</div>
+  </main>
+
+  <script>
+    const sourceFile = "bluebrick-aionui-assistant-layout.elements.json";
+
+    function escapeXml(value) {
+      return String(value ?? "").replace(/[&<>"]/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;"
+      }[char]));
+    }
+
+    function splitLines(value) {
+      return String(value ?? "").split("\n");
+    }
+
+    function rectToSvg(element) {
+      const fill = element.backgroundColor || "#ffffff";
+      const stroke = element.strokeColor || "#1e1e1e";
+      const opacity = element.opacity ? element.opacity / 100 : 1;
+      const label = element.label?.text || "";
+      const fontSize = element.label?.fontSize || 16;
+      const lines = splitLines(label);
+      const textStartY = element.y + element.height / 2 - ((lines.length - 1) * fontSize * 0.58);
+      const tspans = lines.map((line, index) =>
+        `<tspan x="${element.x + element.width / 2}" y="${textStartY + index * fontSize * 1.18}">${escapeXml(line)}</tspan>`
+      ).join("");
+
+      return `
+        <rect x="${element.x}" y="${element.y}" width="${element.width}" height="${element.height}" rx="12"
+          fill="${fill}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="2"></rect>
+        ${label ? `<text text-anchor="middle" dominant-baseline="middle" font-family="Inter, Segoe UI, Arial" font-size="${fontSize}" fill="#111827">${tspans}</text>` : ""}
+      `;
+    }
+
+    function arrowToSvg(element) {
+      const points = element.points || [[0, 0], [element.width || 0, element.height || 0]];
+      const path = points.map((point, index) =>
+        `${index === 0 ? "M" : "L"} ${element.x + point[0]} ${element.y + point[1]}`
+      ).join(" ");
+      const middle = points[Math.floor(points.length / 2)] || points[0];
+      const label = element.label?.text || "";
+
+      return `
+        <path d="${path}" fill="none" stroke="#374151" stroke-width="2.2" marker-end="url(#arrowhead)"></path>
+        ${label ? `<text x="${element.x + middle[0] + 8}" y="${element.y + middle[1] - 8}" font-family="Inter, Segoe UI, Arial" font-size="13" fill="#374151">${escapeXml(label)}</text>` : ""}
+      `;
+    }
+
+    function textToSvg(element) {
+      const lines = splitLines(element.text);
+      const fontSize = element.fontSize || 18;
+      const weight = element.id === "title" ? 700 : 400;
+      const tspans = lines.map((line, index) =>
+        `<tspan x="${element.x}" dy="${index === 0 ? 0 : fontSize * 1.25}">${escapeXml(line)}</tspan>`
+      ).join("");
+
+      return `<text x="${element.x}" y="${element.y}" font-family="Inter, Segoe UI, Arial" font-size="${fontSize}" font-weight="${weight}" fill="${element.strokeColor || "#111827"}">${tspans}</text>`;
+    }
+
+    function render(elements) {
+      const drawable = elements.filter((element) => element.type !== "cameraUpdate");
+      const maxX = Math.max(...drawable.map((element) => (element.x ?? 0) + Math.abs(element.width ?? 0) + 80));
+      const maxY = Math.max(...drawable.map((element) => (element.y ?? 0) + Math.abs(element.height ?? 0) + 80));
+      const body = drawable.map((element) => {
+        if (element.type === "rectangle") return rectToSvg(element);
+        if (element.type === "arrow") return arrowToSvg(element);
+        if (element.type === "text") return textToSvg(element);
+        return "";
+      }).join("\n");
+
+      document.querySelector("main").innerHTML = `
+        <div class="canvas">
+          <svg xmlns="http://www.w3.org/2000/svg" width="${maxX + 80}" height="${maxY + 80}" viewBox="0 0 ${maxX + 80} ${maxY + 80}">
+            <defs>
+              <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#374151"></polygon>
+              </marker>
+            </defs>
+            ${body}
+          </svg>
+        </div>
+      `;
+    }
+
+    async function boot() {
+      try {
+        const response = await fetch(sourceFile, { cache: "no-store" });
+        if (!response.ok) throw new Error(`Unable to load ${sourceFile}: ${response.status}`);
+        render(await response.json());
+      } catch (error) {
+        document.querySelector("main").innerHTML = `
+          <div class="error">
+            <strong>Could not load the diagram elements.</strong><br>
+            ${escapeXml(error.message)}<br><br>
+            Serve this folder with a local static server, then open this page again.
+          </div>
+        `;
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

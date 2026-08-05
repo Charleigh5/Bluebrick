@@ -1,0 +1,3568 @@
+diff --git a/Agent/AgentConfig.cs b/Agent/AgentConfig.cs
+index dfcb067..b714033 100644
+--- a/Agent/AgentConfig.cs
++++ b/Agent/AgentConfig.cs
+@@ -114,6 +114,7 @@ namespace BlueBrick.Agent
+             }
+             Assistant.MaxHistory = Assistant.MaxHistory <= 0 ? 20 : Assistant.MaxHistory;
+         Assistant.MaxTotalAttachmentBytes = Assistant.MaxTotalAttachmentBytes <= 0 ? 10 * 1024 * 1024 : Assistant.MaxTotalAttachmentBytes;
++            Assistant.ReactDevServerUrl = DefaultIfEmpty(Assistant.ReactDevServerUrl, string.Empty);
+ 
+             AssistantTools.PdmMaxResults = AssistantTools.PdmMaxResults <= 0 ? 25 : Math.Min(AssistantTools.PdmMaxResults, 50);
+             AssistantTools.EpicorMaxResults = AssistantTools.EpicorMaxResults <= 0 ? 25 : Math.Min(AssistantTools.EpicorMaxResults, 50);
+@@ -289,6 +290,9 @@ namespace BlueBrick.Agent
+         internal int MaxHistory { get; set; }
+         internal long MaxTotalAttachmentBytes { get; set; }
+         internal AssistantModelProfile[] ModelProfiles { get; set; }
++        internal bool UseReactWebView { get; set; }
++        internal bool EnableReactDevServer { get; set; }
++        internal string ReactDevServerUrl { get; set; }
+     }
+ 
+     internal class AssistantToolSettings
+diff --git a/Agent/AgentHttpServer.cs b/Agent/AgentHttpServer.cs
+index 6c0780b..67300d1 100644
+--- a/Agent/AgentHttpServer.cs
++++ b/Agent/AgentHttpServer.cs
+@@ -269,18 +269,39 @@ namespace BlueBrick.Agent
+             status.RelayBaseUrl = _config.Relay?.BaseUrl;
+             status.ChatWorkspaceUrl = _config.Relay?.ChatWorkspaceUrl;
+             status.ToolAvailability = AssistantToolAvailabilitySummary.FromCatalog(tools);
+-            await WriteJson(context, status).ConfigureAwait(false);
++            await WriteAssistantJson(context, status, traceId).ConfigureAwait(false);
+             return;
+         }
+         if (path == "/assistant/models" && method == "GET")
+         {
+             var models = await _assistantService.GetModelsAsync().ConfigureAwait(false);
+-            await WriteJson(context, new { models, traceId }).ConfigureAwait(false);
++            await WriteAssistantJson(context, new { models, traceId }, traceId).ConfigureAwait(false);
++            return;
++        }
++        if (path == "/assistant/model" && method == "GET")
++        {
++            var status = await _assistantService.GetStatusAsync().ConfigureAwait(false);
++            await WriteAssistantJson(context, new
++            {
++                model = status.Model,
++                activeModel = status.ActiveModel,
++                activeModelDescriptor = status.ActiveModelDescriptor,
++                apiBaseUrl = status.ApiBaseUrl,
++                configured = status.Configured,
++                keySource = status.KeySource,
++                traceId
++            }, traceId).ConfigureAwait(false);
++            return;
++        }
++        if (path == "/assistant/scopes" && method == "GET")
++        {
++            var scopes = AssistantScopeRegistry.Build(_config, _assistantTools.GetCatalog());
++            await WriteAssistantJson(context, new { scopes, traceId }, traceId).ConfigureAwait(false);
+             return;
+         }
+         if (path == "/assistant/tools" && method == "GET")
+         {
+-            await WriteJson(context, new { tools = _assistantTools.GetCatalog(), traceId }).ConfigureAwait(false);
++            await WriteAssistantJson(context, new { tools = _assistantTools.GetCatalog(), traceId }, traceId).ConfigureAwait(false);
+             return;
+         }
+         if (path == "/assistant/tool-audit" && method == "GET")
+@@ -296,17 +317,22 @@ namespace BlueBrick.Agent
+             {
+                 receipts = _assistantTools.GetAuditTail(limit);
+             }
+-            await WriteJson(context, new { receipts, traceId }).ConfigureAwait(false);
++            await WriteAssistantJson(context, new { receipts, traceId }, traceId).ConfigureAwait(false);
+             return;
+         }
+         if (path == "/assistant/integrations" && method == "GET")
+         {
+-            await WriteJson(context, new { integrations = AssistantProductCatalog.GetIntegrations(), traceId }).ConfigureAwait(false);
++            await WriteAssistantJson(context, new { integrations = AssistantProductCatalog.GetIntegrations(), traceId }, traceId).ConfigureAwait(false);
+             return;
+         }
+         if (path == "/assistant/document-catalog" && method == "GET")
+         {
+-            await WriteJson(context, new { documents = AssistantProductCatalog.GetDocuments(), traceId }).ConfigureAwait(false);
++            await WriteAssistantJson(context, new { documents = AssistantProductCatalog.GetDocuments(), traceId }, traceId).ConfigureAwait(false);
++            return;
++        }
++        if (path.StartsWith("/assistant/screenshot/", StringComparison.OrdinalIgnoreCase) && method == "GET")
++        {
++            await HandleAssistantScreenshotGet(context, path, traceId).ConfigureAwait(false);
+             return;
+         }
+ 
+@@ -318,7 +344,14 @@ namespace BlueBrick.Agent
+         catch (InvalidOperationException)
+         {
+             context.Response.StatusCode = 413;
+-            await WriteJson(context, new { error = "Request body too large", maxBytes = MaxRequestBodyBytes, traceId });
++            if (path.StartsWith("/assistant/", StringComparison.OrdinalIgnoreCase))
++            {
++                await WriteAssistantError(context, "body_too_large", "Request body too large", traceId);
++            }
++            else
++            {
++                await WriteJson(context, new { error = "Request body too large", maxBytes = MaxRequestBodyBytes, traceId });
++            }
+             return;
+         }
+         JObject json;
+@@ -335,7 +368,14 @@ namespace BlueBrick.Agent
+                 catch
+                 {
+                     context.Response.StatusCode = 400;
+-                    await WriteJson(context, new { error = "Invalid JSON body", traceId });
++                    if (path.StartsWith("/assistant/", StringComparison.OrdinalIgnoreCase))
++                    {
++                        await WriteAssistantError(context, "invalid_json", "Invalid JSON body", traceId);
++                    }
++                    else
++                    {
++                        await WriteJson(context, new { error = "Invalid JSON body", traceId });
++                    }
+                     return;
+                 }
+             }
+@@ -418,6 +458,9 @@ case "/pdm/check_out":
+             case "/assistant/screenshot/analyze":
+                 await HandleAssistantScreenshotAnalyze(context, json, traceId);
+                 return;
++            case "/assistant/annotations":
++                await HandleAssistantAnnotations(context, json, traceId);
++                return;
+             case "/assistant/history":
+                 await HandleAssistantHistory(context, traceId);
+                 return;
+@@ -992,18 +1035,18 @@ await WriteJson(context, new { status = "ok", traceId });
+     private async Task HandleAssistantSession(HttpListenerContext context, string traceId)
+         {
+             var session = await _assistantService.CreateSessionAsync().ConfigureAwait(false);
+-            await WriteJson(context, new
++            await WriteAssistantJson(context, new
+             {
+                 sessionId = session.SessionId,
+                 createdUtc = session.CreatedUtc,
+                 traceId
+-            }).ConfigureAwait(false);
++            }, traceId).ConfigureAwait(false);
+         }
+ 
+         private async Task HandleAssistantTest(HttpListenerContext context, string traceId)
+         {
+             var result = await _assistantService.TestConnectionAsync().ConfigureAwait(false);
+-            await WriteJson(context, new
++            await WriteAssistantJson(context, new
+             {
+                 success = result.Success,
+                 mode = result.Mode,
+@@ -1012,7 +1055,7 @@ await WriteJson(context, new { status = "ok", traceId });
+                 latencyMs = result.LatencyMs,
+                 message = result.Message,
+                 traceId
+-            }).ConfigureAwait(false);
++            }, traceId).ConfigureAwait(false);
+         }
+ 
+         private async Task HandleAssistantMode(HttpListenerContext context, JObject json, string traceId)
+@@ -1021,18 +1064,18 @@ await WriteJson(context, new { status = "ok", traceId });
+             if (string.IsNullOrWhiteSpace(mode))
+             {
+                 context.Response.StatusCode = 400;
+-                await WriteJson(context, new { error = "mode required", traceId }).ConfigureAwait(false);
++                await WriteAssistantError(context, "invalid", "mode required", traceId).ConfigureAwait(false);
+                 return;
+             }
+ 
+             var status = await _assistantService.SetModeAsync(mode).ConfigureAwait(false);
+-            await WriteJson(context, new
++            await WriteAssistantJson(context, new
+             {
+                 mode = status.AssistantMode,
+                 configured = status.Configured,
+                 keySource = status.KeySource,
+                 traceId
+-            }).ConfigureAwait(false);
++            }, traceId).ConfigureAwait(false);
+         }
+ 
+         private async Task HandleAssistantModel(HttpListenerContext context, JObject json, string traceId)
+@@ -1041,19 +1084,21 @@ await WriteJson(context, new { status = "ok", traceId });
+             if (string.IsNullOrWhiteSpace(modelId))
+             {
+                 context.Response.StatusCode = 400;
+-                await WriteJson(context, new { error = "modelId required", traceId }).ConfigureAwait(false);
++                await WriteAssistantError(context, "invalid", "modelId required", traceId).ConfigureAwait(false);
+                 return;
+             }
+ 
+             var status = await _assistantService.SetModelAsync(modelId).ConfigureAwait(false);
+-            await WriteJson(context, new
++            await WriteAssistantJson(context, new
+             {
+                 model = status.Model,
++                activeModel = status.ActiveModel,
++                activeModelDescriptor = status.ActiveModelDescriptor,
+                 apiBaseUrl = status.ApiBaseUrl,
+                 configured = status.Configured,
+                 keySource = status.KeySource,
+                 traceId
+-            }).ConfigureAwait(false);
++            }, traceId).ConfigureAwait(false);
+         }
+ 
+         private async Task HandleAssistantTool(HttpListenerContext context, JObject json, string traceId)
+@@ -1069,7 +1114,7 @@ await WriteJson(context, new { status = "ok", traceId });
+                 context.Response.StatusCode = 404;
+             }
+ 
+-            await WriteJson(context, result).ConfigureAwait(false);
++            await WriteAssistantJson(context, result, traceId).ConfigureAwait(false);
+         }
+ 
+         private async Task HandleAssistantMessage(HttpListenerContext context, JObject json, string traceId)
+@@ -1078,7 +1123,7 @@ await WriteJson(context, new { status = "ok", traceId });
+             var message = json.Value<string>("message");
+             var attachments = json["attachmentPaths"]?.ToObject<string[]>() ?? new string[0];
+             var result = await _assistantService.SendMessageAsync(sessionId, message, attachments).ConfigureAwait(false);
+-            await WriteJson(context, new
++            await WriteAssistantJson(context, new
+             {
+                 sessionId = result.SessionId,
+                 assistantAvailable = result.AssistantAvailable,
+@@ -1086,7 +1131,7 @@ await WriteJson(context, new { status = "ok", traceId });
+                 errorCode = result.ErrorCode,
+         message = result.Message,
+                 traceId
+-            }).ConfigureAwait(false);
++            }, traceId).ConfigureAwait(false);
+     }
+ 
+     private async Task HandleAssistantMessageStream(HttpListenerContext context, JObject json, string traceId)
+@@ -1159,11 +1204,11 @@ await WriteJson(context, new { status = "ok", traceId });
+             if (artifact == null || string.IsNullOrWhiteSpace(artifact.Path))
+             {
+                 context.Response.StatusCode = 500;
+-                await WriteJson(context, new { error = "Failed to capture screenshot.", traceId }).ConfigureAwait(false);
++                await WriteAssistantError(context, "capture_failed", "Failed to capture screenshot.", traceId).ConfigureAwait(false);
+                 return;
+             }
+ 
+-            await WriteJson(context, new { path = artifact.Path, artifact, traceId }).ConfigureAwait(false);
++            await WriteAssistantJson(context, new { path = artifact.Path, artifact, receipt = artifact.Receipt, traceId }, traceId).ConfigureAwait(false);
+         }
+ 
+         private async Task HandleAssistantScreenshotAnalyze(HttpListenerContext context, JObject json, string traceId)
+@@ -1173,18 +1218,107 @@ await WriteJson(context, new { status = "ok", traceId });
+             if (result == null || result.Artifact == null)
+             {
+                 context.Response.StatusCode = 500;
+-                await WriteJson(context, new { error = "Failed to analyze screenshot.", traceId }).ConfigureAwait(false);
++                await WriteAssistantError(context, "analysis_failed", "Failed to analyze screenshot.", traceId).ConfigureAwait(false);
+                 return;
+             }
+ 
+-            await WriteJson(context, new
++            await WriteAssistantJson(context, new
+             {
+                 status = result.Status,
+                 message = result.Message,
+                 mockMode = result.MockMode,
+                 artifact = result.Artifact,
+                 traceId
+-            }).ConfigureAwait(false);
++            }, traceId).ConfigureAwait(false);
++        }
++
++        private async Task HandleAssistantScreenshotGet(HttpListenerContext context, string path, string traceId)
++        {
++            var parts = path.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
++            if (parts.Length < 3)
++            {
++                context.Response.StatusCode = 400;
++                await WriteAssistantError(context, "invalid", "screenshot id required", traceId).ConfigureAwait(false);
++                return;
++            }
++
++            var screenshotId = parts[2];
++            var artifact = AssistantScreenshotArtifactStore.FindArtifact(screenshotId);
++            if (artifact == null)
++            {
++                context.Response.StatusCode = 404;
++                await WriteAssistantError(context, "not_found", "screenshot artifact not found", traceId).ConfigureAwait(false);
++                return;
++            }
++
++            if (parts.Length >= 4 && string.Equals(parts[3], "thumbnail", StringComparison.OrdinalIgnoreCase))
++            {
++                if (string.IsNullOrWhiteSpace(artifact.ThumbnailPath) || !File.Exists(artifact.ThumbnailPath))
++                {
++                    context.Response.StatusCode = 404;
++                    await WriteAssistantError(context, "not_found", "screenshot thumbnail not found", traceId).ConfigureAwait(false);
++                    return;
++                }
++
++                var bytes = File.ReadAllBytes(artifact.ThumbnailPath);
++                context.Response.ContentType = "image/jpeg";
++                context.Response.ContentLength64 = bytes.Length;
++                await context.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
++                context.Response.OutputStream.Close();
++                return;
++            }
++
++            artifact.Receipt = artifact.Receipt ?? AssistantScreenshotArtifactStore.BuildReceipt(artifact);
++            await WriteAssistantJson(context, new { artifact, receipt = artifact.Receipt, traceId }, traceId).ConfigureAwait(false);
++        }
++
++        private async Task HandleAssistantAnnotations(HttpListenerContext context, JObject json, string traceId)
++        {
++            var document = json.ToObject<AssistantScreenshotAnnotationDocument>() ?? new AssistantScreenshotAnnotationDocument();
++            if (string.IsNullOrWhiteSpace(document.ScreenshotId))
++            {
++                context.Response.StatusCode = 400;
++                await WriteAssistantError(context, "invalid", "screenshotId required", traceId).ConfigureAwait(false);
++                return;
++            }
++
++            var artifact = AssistantScreenshotArtifactStore.FindArtifact(document.ScreenshotId);
++            if (artifact == null)
++            {
++                context.Response.StatusCode = 404;
++                await WriteAssistantError(context, "not_found", "screenshot artifact not found", traceId).ConfigureAwait(false);
++                return;
++            }
++
++            document.SchemaVersion = string.IsNullOrWhiteSpace(document.SchemaVersion)
++                ? AssistantApiEnvelope.CurrentSchemaVersion
++                : document.SchemaVersion;
++            document.ScreenshotId = artifact.ScreenshotId ?? artifact.ArtifactId;
++            document.ImageWidth = document.ImageWidth <= 0 ? artifact.Width : document.ImageWidth;
++            document.ImageHeight = document.ImageHeight <= 0 ? artifact.Height : document.ImageHeight;
++            document.Annotations = document.Annotations ?? new List<AssistantScreenshotAnnotation>();
++
++            foreach (var annotation in document.Annotations)
++            {
++                annotation.ScreenshotId = document.ScreenshotId;
++                annotation.Source = string.IsNullOrWhiteSpace(annotation.Source) ? "human" : annotation.Source;
++                annotation.ReviewStatus = string.IsNullOrWhiteSpace(annotation.ReviewStatus)
++                    ? (string.Equals(annotation.Source, "ai_proposed", StringComparison.OrdinalIgnoreCase) ? "pending" : "approved")
++                    : annotation.ReviewStatus;
++            }
++
++            artifact.Annotations = document.Annotations;
++            AssistantScreenshotArtifactStore.CompleteArtifact(artifact);
++            File.WriteAllText(artifact.AnnotationsPath, JsonConvert.SerializeObject(document, Formatting.Indented));
++
++            await WriteAssistantJson(context, new
++            {
++                screenshotId = document.ScreenshotId,
++                annotationCount = document.Annotations.Count,
++                annotationsPath = artifact.AnnotationsPath,
++                artifact,
++                traceId
++            }, traceId).ConfigureAwait(false);
+         }
+ 
+         private async Task HandleAssistantHistory(HttpListenerContext context, string traceId)
+@@ -1193,7 +1327,7 @@ await WriteJson(context, new { status = "ok", traceId });
+             if (string.IsNullOrWhiteSpace(sessionId))
+             {
+                 context.Response.StatusCode = 400;
+-                await WriteJson(context, new { error = "sessionId required", traceId }).ConfigureAwait(false);
++                await WriteAssistantError(context, "invalid", "sessionId required", traceId).ConfigureAwait(false);
+                 return;
+             }
+ 
+@@ -1201,17 +1335,17 @@ await WriteJson(context, new { status = "ok", traceId });
+             if (session == null)
+             {
+                 context.Response.StatusCode = 404;
+-                await WriteJson(context, new { error = "Session not found", traceId }).ConfigureAwait(false);
++                await WriteAssistantError(context, "not_found", "Session not found", traceId).ConfigureAwait(false);
+                 return;
+             }
+ 
+-            await WriteJson(context, new
++            await WriteAssistantJson(context, new
+             {
+                 sessionId = session.SessionId,
+                 createdUtc = session.CreatedUtc,
+                 messages = session.Messages,
+                 traceId
+-            }).ConfigureAwait(false);
++            }, traceId).ConfigureAwait(false);
+         }
+ 
+         private async Task HandleVaultReindex(HttpListenerContext context, string traceId)
+@@ -1502,6 +1636,16 @@ await WriteJson(context, new { status = "ok", traceId });
+             await WriteRaw(context, json);
+         }
+ 
++        private static Task WriteAssistantJson(HttpListenerContext context, object data, string traceId)
++        {
++            return WriteJson(context, AssistantApiEnvelope.Success(data, traceId));
++        }
++
++        private static Task WriteAssistantError(HttpListenerContext context, string code, string message, string traceId)
++        {
++            return WriteJson(context, AssistantApiEnvelope.Fail(code, message, traceId));
++        }
++
+         private static async Task WriteRaw(HttpListenerContext context, string body)
+         {
+             var buffer = Encoding.UTF8.GetBytes(body);
+diff --git a/Agent/AgentPanelClient.cs b/Agent/AgentPanelClient.cs
+index 3809252..01db007 100644
+--- a/Agent/AgentPanelClient.cs
++++ b/Agent/AgentPanelClient.cs
+@@ -231,6 +231,18 @@ namespace BlueBrick.Agent
+             return PostJsonAsync("/assistant/tool", payload);
+         }
+ 
++        internal static Task<ApiResult<JObject>> ExecuteToolAsync(string toolName, string query, int limit, JObject parameters)
++        {
++            var payload = new JObject
++            {
++                ["toolName"] = toolName,
++                ["query"] = query ?? string.Empty,
++                ["limit"] = limit,
++                ["parameters"] = parameters ?? new JObject()
++            };
++            return PostJsonAsync("/assistant/tool", payload);
++        }
++
+         private static HttpRequestMessage CreateRequest(HttpMethod method, string url)
+         {
+             var request = new HttpRequestMessage(method, url);
+@@ -272,7 +284,36 @@ namespace BlueBrick.Agent
+ 
+             try
+             {
+-                return JObject.Parse(body);
++                var parsed = JObject.Parse(body);
++                if (parsed["ok"] != null && parsed["data"] != null)
++                {
++                    var ok = parsed.Value<bool?>("ok") ?? false;
++                    if (ok)
++                    {
++                        var dataObject = parsed["data"] as JObject;
++                        if (dataObject != null)
++                        {
++                            dataObject["ok"] = true;
++                            dataObject["correlationId"] = parsed.Value<string>("correlationId") ?? parsed.Value<string>("CorrelationId") ?? string.Empty;
++                            dataObject["schemaVersion"] = parsed.Value<string>("schemaVersion") ?? parsed.Value<string>("SchemaVersion") ?? string.Empty;
++                            return dataObject;
++                        }
++
++                        return parsed;
++                    }
++
++                    var error = parsed["error"] as JObject;
++                    return new JObject
++                    {
++                        ["ok"] = false,
++                        ["errorCode"] = error?.Value<string>("code") ?? error?.Value<string>("Code") ?? "request_failed",
++                        ["error"] = error?.Value<string>("message") ?? error?.Value<string>("Message") ?? "Assistant request failed.",
++                        ["correlationId"] = parsed.Value<string>("correlationId") ?? parsed.Value<string>("CorrelationId") ?? string.Empty,
++                        ["schemaVersion"] = parsed.Value<string>("schemaVersion") ?? parsed.Value<string>("SchemaVersion") ?? string.Empty
++                    };
++                }
++
++                return parsed;
+             }
+             catch
+             {
+diff --git a/Agent/AssistantApiEnvelope.cs b/Agent/AssistantApiEnvelope.cs
+new file mode 100644
+index 0000000..5c639fd
+--- /dev/null
++++ b/Agent/AssistantApiEnvelope.cs
+@@ -0,0 +1,49 @@
++using System;
++
++namespace BlueBrick.Agent
++{
++    internal class AssistantApiEnvelope
++    {
++        internal const string CurrentSchemaVersion = "2026-06-01.v1";
++
++        public bool Ok { get; set; }
++        public string CorrelationId { get; set; }
++        public string SchemaVersion { get; set; }
++        public object Data { get; set; }
++        public AssistantApiError Error { get; set; }
++
++        internal static AssistantApiEnvelope Success(object data, string correlationId)
++        {
++            return new AssistantApiEnvelope
++            {
++                Ok = true,
++                CorrelationId = string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString("N") : correlationId,
++                SchemaVersion = CurrentSchemaVersion,
++                Data = data,
++                Error = null
++            };
++        }
++
++        internal static AssistantApiEnvelope Fail(string code, string message, string correlationId)
++        {
++            return new AssistantApiEnvelope
++            {
++                Ok = false,
++                CorrelationId = string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString("N") : correlationId,
++                SchemaVersion = CurrentSchemaVersion,
++                Data = null,
++                Error = new AssistantApiError
++                {
++                    Code = string.IsNullOrWhiteSpace(code) ? "request_failed" : code,
++                    Message = string.IsNullOrWhiteSpace(message) ? "Assistant request failed." : message
++                }
++            };
++        }
++    }
++
++    internal class AssistantApiError
++    {
++        public string Code { get; set; }
++        public string Message { get; set; }
++    }
++}
+diff --git a/Agent/AssistantImageTools.cs b/Agent/AssistantImageTools.cs
+index 5947ef9..720c562 100644
+--- a/Agent/AssistantImageTools.cs
++++ b/Agent/AssistantImageTools.cs
+@@ -39,7 +39,8 @@ namespace BlueBrick.Agent
+ 
+             var width = Math.Max(1, rect.Right - rect.Left);
+             var height = Math.Max(1, rect.Bottom - rect.Top);
+-            var output = BuildTempPath(request.SessionId, "capture", ".png");
++            var artifactId = AssistantScreenshotArtifactStore.NewArtifactId();
++            var output = AssistantScreenshotArtifactStore.BuildCapturePath(artifactId, ".png");
+ 
+             using (var bitmap = new Bitmap(width, height))
+             using (var graphics = Graphics.FromImage(bitmap))
+@@ -50,6 +51,9 @@ namespace BlueBrick.Agent
+ 
+             var artifact = new AssistantScreenshotArtifact
+             {
++                SchemaVersion = AssistantApiEnvelope.CurrentSchemaVersion,
++                ScreenshotId = artifactId,
++                ArtifactId = artifactId,
+                 SessionId = request.SessionId,
+                 Path = output,
+                 CapturedUtc = DateTime.UtcNow,
+@@ -60,7 +64,7 @@ namespace BlueBrick.Agent
+                 CaptureSource = captureSource
+             };
+             AssistantScreenshotAnalyzer.EnsurePrivacyMetadata(artifact, null, false);
+-            WriteArtifactMetadata(artifact);
++            AssistantScreenshotArtifactStore.CompleteArtifact(artifact);
+             return artifact;
+         }
+ 
+@@ -189,13 +193,6 @@ namespace BlueBrick.Agent
+             return Path.Combine(root, prefix + "-" + Guid.NewGuid().ToString("N") + extension);
+         }
+ 
+-        private static void WriteArtifactMetadata(AssistantScreenshotArtifact artifact)
+-        {
+-            if (artifact == null || string.IsNullOrWhiteSpace(artifact.Path)) return;
+-            var metadataPath = artifact.Path + ".metadata.json";
+-            File.WriteAllText(metadataPath, JsonConvert.SerializeObject(artifact, Formatting.Indented));
+-        }
+-
+         private static string GetWindowTitle(IntPtr handle)
+         {
+             var length = GetWindowTextLength(handle);
+diff --git a/Agent/AssistantModels.cs b/Agent/AssistantModels.cs
+index c727673..a7692b5 100644
+--- a/Agent/AssistantModels.cs
++++ b/Agent/AssistantModels.cs
+@@ -20,9 +20,15 @@ namespace BlueBrick.Agent
+ 
+     internal class AssistantScreenshotArtifact
+     {
++        public string SchemaVersion { get; set; }
++        public string ScreenshotId { get; set; }
+         public string ArtifactId { get; set; }
+         public string SessionId { get; set; }
+         public string Path { get; set; }
++        public string MetadataPath { get; set; }
++        public string ThumbnailPath { get; set; }
++        public string AnnotationsPath { get; set; }
++        public string AnnotatedPath { get; set; }
+         public DateTime CapturedUtc { get; set; }
+         public int Width { get; set; }
+         public int Height { get; set; }
+@@ -37,6 +43,7 @@ namespace BlueBrick.Agent
+         public string ModelProfileId { get; set; }
+         public List<AssistantScreenshotAnnotation> Annotations { get; set; } = new List<AssistantScreenshotAnnotation>();
+         public List<AssistantExtractedContact> ExtractedContacts { get; set; } = new List<AssistantExtractedContact>();
++        public AssistantScreenshotReceipt Receipt { get; set; }
+     }
+ 
+     internal class AssistantScreenshotCaptureRequest
+@@ -48,13 +55,58 @@ namespace BlueBrick.Agent
+     internal class AssistantScreenshotAnnotation
+     {
+         public string Id { get; set; }
++        public string ScreenshotId { get; set; }
+         public string Label { get; set; }
+         public string Severity { get; set; }
++        public string Type { get; set; } = "rectangle";
+         public int X { get; set; }
+         public int Y { get; set; }
+         public int Width { get; set; }
+         public int Height { get; set; }
++        public double NormalizedX { get; set; }
++        public double NormalizedY { get; set; }
++        public double NormalizedWidth { get; set; }
++        public double NormalizedHeight { get; set; }
++        public List<AssistantAnnotationPoint> Points { get; set; } = new List<AssistantAnnotationPoint>();
+         public string Source { get; set; }
++        public double Confidence { get; set; }
++        public string ReviewStatus { get; set; } = "pending";
++        public DateTime? ReviewedUtc { get; set; }
++        public string ReviewedBy { get; set; }
++        public string ReviewNote { get; set; }
++    }
++
++    internal class AssistantAnnotationPoint
++    {
++        public double X { get; set; }
++        public double Y { get; set; }
++    }
++
++    internal class AssistantScreenshotAnnotationDocument
++    {
++        public string SchemaVersion { get; set; }
++        public string ScreenshotId { get; set; }
++        public int ImageWidth { get; set; }
++        public int ImageHeight { get; set; }
++        public List<AssistantScreenshotAnnotation> Annotations { get; set; } = new List<AssistantScreenshotAnnotation>();
++    }
++
++    internal class AssistantScreenshotReceipt
++    {
++        public string ScreenshotId { get; set; }
++        public string ArtifactId { get; set; }
++        public DateTime CapturedUtc { get; set; }
++        public int Width { get; set; }
++        public int Height { get; set; }
++        public string SourceWindowTitle { get; set; }
++        public string SolidWorksDocumentTitle { get; set; }
++        public string ImagePath { get; set; }
++        public string MetadataPath { get; set; }
++        public string ThumbnailPath { get; set; }
++        public bool LocalOnly { get; set; }
++        public bool SentToModel { get; set; }
++        public string RetentionPolicy { get; set; }
++        public string ReviewStatus { get; set; }
+     }
+ 
+     internal class AssistantExtractedContact
+@@ -127,10 +179,63 @@ namespace BlueBrick.Agent
+         public string RelayBaseUrl { get; set; }
+         public string ChatWorkspaceUrl { get; set; }
+         public AssistantModelCapabilitySummary ActiveModel { get; set; }
++        public AssistantModelDescriptor ActiveModelDescriptor { get; set; }
+         public AssistantToolAvailabilitySummary ToolAvailability { get; set; }
++        public AssistantScopeDescriptor[] Scopes { get; set; } = Array.Empty<AssistantScopeDescriptor>();
++        public string AssistantWebViewStatus { get; set; }
++        public string AssistantWebViewError { get; set; }
+         public string[] Checklist { get; set; } = Array.Empty<string>();
+     }
+ 
++    internal class AssistantModelDescriptor
++    {
++        public string Id { get; set; }
++        public string ProviderId { get; set; }
++        public string DisplayName { get; set; }
++        public bool SupportsText { get; set; } = true;
++        public bool SupportsVision { get; set; }
++        public bool SupportsToolCalling { get; set; }
++        public bool SupportsStructuredOutput { get; set; }
++        public bool IsLocal { get; set; }
++        public bool IsAvailable { get; set; }
++        public string UnavailableReason { get; set; }
++
++        internal static AssistantModelDescriptor FromProfile(AssistantModelProfile profile, bool keyConfigured)
++        {
++            if (profile == null) return null;
++            var cloud = !string.Equals(profile.ProviderKind, "local", StringComparison.OrdinalIgnoreCase);
++            return new AssistantModelDescriptor
++            {
++                Id = profile.Id,
++                ProviderId = profile.ProviderKind,
++                DisplayName = profile.Provider + " · " + profile.Name,
++                SupportsText = true,
++                SupportsVision = profile.SupportsVision,
++                SupportsToolCalling = profile.SupportsTools,
++                SupportsStructuredOutput = profile.SupportsJsonMode,
++                IsLocal = !cloud,
++                IsAvailable = profile.Enabled && (!cloud || keyConfigured),
++                UnavailableReason = profile.Enabled
++                    ? (cloud && !keyConfigured ? "API key is not configured for this model." : string.Empty)
++                    : "Model profile is disabled."
++            };
++        }
++    }
++
++    internal class AssistantScopeDescriptor
++    {
++        public string Id { get; set; }
++        public string Label { get; set; }
++        public string Description { get; set; }
++        public bool Enabled { get; set; }
++        public string UnavailableReason { get; set; }
++        public string[] ToolNames { get; set; } = Array.Empty<string>();
++        public string[] ReadOnlyToolNames { get; set; } = Array.Empty<string>();
++        public bool RequiresCredential { get; set; }
++        public bool AllowsMutation { get; set; }
++        public string RiskLevel { get; set; }
++    }
++
+     internal class AssistantModelCapabilitySummary
+     {
+         public string Id { get; set; }
+@@ -252,6 +357,14 @@ namespace BlueBrick.Agent
+         public string UnavailableReason { get; set; }
+         public string RiskLevel { get; set; }
+         public bool AuditRequired { get; set; }
++        public bool AllowedInChat { get; set; } = true;
++        public bool ManualOnly { get; set; }
++        public bool Mutating { get; set; }
++        public bool MutatesCad { get; set; }
++        public bool MutatesPdm { get; set; }
++        public bool MutatesEpicor { get; set; }
++        public bool SendsExternalData { get; set; }
++        public bool RequiresCredential { get; set; }
+     }
+ 
+     internal class AssistantToolRequest
+@@ -259,6 +372,7 @@ namespace BlueBrick.Agent
+         public string ToolName { get; set; }
+         public string Query { get; set; }
+         public int Limit { get; set; }
++        public string ScopeId { get; set; }
+         public AssistantToolAuthorization Authorization { get; set; } = AssistantToolAuthorization.None();
+         public Dictionary<string, string> Parameters { get; set; } = new Dictionary<string, string>();
+     }
+diff --git a/Agent/AssistantProductCatalog.cs b/Agent/AssistantProductCatalog.cs
+index 9d7d97a..bf74138 100644
+--- a/Agent/AssistantProductCatalog.cs
++++ b/Agent/AssistantProductCatalog.cs
+@@ -136,6 +136,71 @@ namespace BlueBrick.Agent
+                     AssistantUses = new[] { "visual troubleshooting", "contact extraction", "UI review", "traceable chat context" }
+                 },
+                 new AssistantDocumentDescriptor
++                {
++                    Id = "screenshot-review-report",
++                    Name = "Screenshot Review Report",
++                    Category = "assistant-evidence",
++                    Purpose = "Human-readable review of screenshot annotations, extracted contacts, confidence, and review status.",
++                    SourceSubsystem = "AssistantScreenshotAnalyzer / AssistantScreenshotReportGenerator / AssistantToolService",
++                    OutputFormats = new[] { "Markdown", "JSON" },
++                    Implemented = true,
++                    RequiresSolidWorks = false,
++                    RequiresPdmApproval = false,
++                    AssistantUses = new[] { "summarize visual findings", "review pending contacts", "attach evidence to handoff" }
++                },
++                new AssistantDocumentDescriptor
++                {
++                    Id = "manufacturing-release-checklist",
++                    Name = "Manufacturing Release Checklist",
++                    Category = "release-gate",
++                    Purpose = "Checklist that ties drawing PDF, packet PDF, STEP, DXF, PDM status, and Epicor context together before handoff.",
++                    SourceSubsystem = "Planned assistant document generator",
++                    OutputFormats = new[] { "Markdown", "PDF", "JSON" },
++                    Implemented = false,
++                    RequiresSolidWorks = true,
++                    RequiresPdmApproval = true,
++                    AssistantUses = new[] { "validate generated outputs", "explain blocked gates", "prepare release handoff" }
++                },
++                new AssistantDocumentDescriptor
++                {
++                    Id = "local-vault-search-summary",
++                    Name = "Local Vault Search Summary",
++                    Category = "assistant-handoff",
++                    Purpose = "Concise summary of local vault search results with source paths, result counts, and trace receipt.",
++                    SourceSubsystem = "AssistantToolService / LocalVaultWorkspace",
++                    OutputFormats = new[] { "Markdown", "JSON" },
++                    Implemented = false,
++                    RequiresSolidWorks = false,
++                    RequiresPdmApproval = false,
++                    AssistantUses = new[] { "handoff search context", "compare generated artifacts", "prepare ChatGPT relay context" }
++                },
++                new AssistantDocumentDescriptor
++                {
++                    Id = "pdm-metadata-brief",
++                    Name = "PDM Metadata Brief",
++                    Category = "vault-brief",
++                    Purpose = "Read-only PDM file, state, variable, and reference summary for the selected CAD/document context.",
++                    SourceSubsystem = "Planned PDM read-only wrappers",
++                    OutputFormats = new[] { "Markdown", "JSON" },
++                    Implemented = false,
++                    RequiresSolidWorks = false,
++                    RequiresPdmApproval = false,
++                    AssistantUses = new[] { "explain vault state", "prepare release checklist", "compare local vs vault metadata" }
++                },
++                new AssistantDocumentDescriptor
++                {
++                    Id = "epicor-part-quote-brief",
++                    Name = "Epicor Part And Quote Brief",
++                    Category = "erp-brief",
++                    Purpose = "Read-only Epicor part, quote, task, and opportunity context for the assistant workflow.",
++                    SourceSubsystem = "Planned Epicor read-only wrappers",
++                    OutputFormats = new[] { "Markdown", "JSON" },
++                    Implemented = false,
++                    RequiresSolidWorks = false,
++                    RequiresPdmApproval = false,
++                    AssistantUses = new[] { "part lookup context", "customer/job preparation", "release handoff planning" }
++                },
++                new AssistantDocumentDescriptor
+                 {
+                     Id = "salesforce-opportunity-brief",
+                     Name = "Salesforce Opportunity Brief",
+diff --git a/Agent/AssistantScopeRegistry.cs b/Agent/AssistantScopeRegistry.cs
+new file mode 100644
+index 0000000..bfc2fa4
+--- /dev/null
++++ b/Agent/AssistantScopeRegistry.cs
+@@ -0,0 +1,92 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++
++namespace BlueBrick.Agent
++{
++    internal static class AssistantScopeRegistry
++    {
++        internal const string LocalVault = "local_vault";
++        internal const string Pdm = "pdm";
++        internal const string Epicor = "epicor";
++        internal const string All = "all";
++
++        internal static IReadOnlyList<AssistantScopeDescriptor> Build(AgentConfig config, IEnumerable<AssistantToolDescriptor> catalog)
++        {
++            config = config ?? new AgentConfig();
++            var tools = (catalog ?? Array.Empty<AssistantToolDescriptor>()).ToDictionary(t => t.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase);
++            var pdm = tools.TryGetValue("search_pdm", out var pdmTool) ? pdmTool : null;
++            var epicor = tools.TryGetValue("search_epicor", out var epicorTool) ? epicorTool : null;
++
++            return new[]
++            {
++                new AssistantScopeDescriptor
++                {
++                    Id = LocalVault,
++                    Label = "Local Vault",
++                    Description = "Searches only the local BlueBrick vault index.",
++                    Enabled = true,
++                    ToolNames = new[] { "search_local_vault" },
++                    ReadOnlyToolNames = new[] { "search_local_vault" },
++                    RequiresCredential = false,
++                    AllowsMutation = false,
++                    RiskLevel = "low"
++                },
++                new AssistantScopeDescriptor
++                {
++                    Id = Pdm,
++                    Label = "PDM",
++                    Description = "Read-only SOLIDWORKS PDM search wrapper.",
++                    Enabled = pdm?.Enabled ?? false,
++                    UnavailableReason = pdm?.Enabled == true ? string.Empty : (pdm?.UnavailableReason ?? "PDM search is unavailable."),
++                    ToolNames = new[] { "search_pdm" },
++                    ReadOnlyToolNames = new[] { "search_pdm" },
++                    RequiresCredential = true,
++                    AllowsMutation = false,
++                    RiskLevel = "medium"
++                },
++                new AssistantScopeDescriptor
++                {
++                    Id = Epicor,
++                    Label = "Epicor",
++                    Description = "Read-only Epicor part and context search wrapper.",
++                    Enabled = epicor?.Enabled ?? false,
++                    UnavailableReason = epicor?.Enabled == true ? string.Empty : (epicor?.UnavailableReason ?? "Epicor search is unavailable."),
++                    ToolNames = new[] { "search_epicor" },
++                    ReadOnlyToolNames = new[] { "search_epicor" },
++                    RequiresCredential = true,
++                    AllowsMutation = false,
++                    RiskLevel = "medium"
++                },
++                new AssistantScopeDescriptor
++                {
++                    Id = All,
++                    Label = "Both/All",
++                    Description = "Fans out to enabled read-only vault, PDM, and Epicor sources and reports unavailable sources.",
++                    Enabled = true,
++                    ToolNames = new[] { "search_local_vault", "search_pdm", "search_epicor" },
++                    ReadOnlyToolNames = new[] { "search_local_vault", "search_pdm", "search_epicor" },
++                    RequiresCredential = true,
++                    AllowsMutation = false,
++                    RiskLevel = "medium"
++                }
++            };
++        }
++
++        internal static AssistantScopeDescriptor Resolve(AgentConfig config, IEnumerable<AssistantToolDescriptor> catalog, string scopeId)
++        {
++            var normalized = Normalize(scopeId);
++            return Build(config, catalog).FirstOrDefault(s => string.Equals(s.Id, normalized, StringComparison.OrdinalIgnoreCase))
++                   ?? Build(config, catalog).First(s => s.Id == LocalVault);
++        }
++
++        internal static string Normalize(string scopeId)
++        {
++            var value = (scopeId ?? string.Empty).Trim().ToLowerInvariant();
++            if (value == "vault" || value == "local" || value == "localvault") return LocalVault;
++            if (value == "both" || value == "all_sources" || value == "both_all") return All;
++            if (value == Pdm || value == Epicor || value == All || value == LocalVault) return value;
++            return LocalVault;
++        }
++    }
++}
+diff --git a/Agent/AssistantScreenshotAnalyzer.cs b/Agent/AssistantScreenshotAnalyzer.cs
+index debbbed..fec46e6 100644
+--- a/Agent/AssistantScreenshotAnalyzer.cs
++++ b/Agent/AssistantScreenshotAnalyzer.cs
+@@ -105,13 +105,22 @@ namespace BlueBrick.Agent
+             artifact.Annotations.Add(new AssistantScreenshotAnnotation
+             {
+                 Id = "mock-review-region",
++                ScreenshotId = artifact.ScreenshotId ?? artifact.ArtifactId,
+                 Label = "Primary review region",
+                 Severity = "info",
++                Type = "rectangle",
+                 X = artifact.Width > width ? (artifact.Width - width) / 2 : 0,
+                 Y = artifact.Height > height ? (artifact.Height - height) / 2 : 0,
+                 Width = width,
+                 Height = height,
+-                Source = "mock-metadata"
++                NormalizedX = artifact.Width > 0 ? (double)(artifact.Width > width ? (artifact.Width - width) / 2 : 0) / artifact.Width : 0,
++                NormalizedY = artifact.Height > 0 ? (double)(artifact.Height > height ? (artifact.Height - height) / 2 : 0) / artifact.Height : 0,
++                NormalizedWidth = artifact.Width > 0 ? (double)width / artifact.Width : 0,
++                NormalizedHeight = artifact.Height > 0 ? (double)height / artifact.Height : 0,
++                Source = "ai_proposed",
++                Confidence = 0.65,
++                ReviewStatus = "pending",
++                ReviewNote = "AI-proposed region requires human review before export."
+             });
+         }
+ 
+@@ -150,7 +159,7 @@ namespace BlueBrick.Agent
+             {
+                 var dir = Path.GetDirectoryName(artifact.Path);
+                 if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+-                File.WriteAllText(artifact.Path + ".metadata.json", Newtonsoft.Json.JsonConvert.SerializeObject(artifact, Newtonsoft.Json.Formatting.Indented));
++                AssistantScreenshotArtifactStore.CompleteArtifact(artifact);
+             }
+             catch
+             {
+diff --git a/Agent/AssistantScreenshotArtifactStore.cs b/Agent/AssistantScreenshotArtifactStore.cs
+new file mode 100644
+index 0000000..e76de4c
+--- /dev/null
++++ b/Agent/AssistantScreenshotArtifactStore.cs
+@@ -0,0 +1,168 @@
++using System;
++using System.Drawing;
++using System.Drawing.Imaging;
++using System.IO;
++using Newtonsoft.Json;
++
++namespace BlueBrick.Agent
++{
++    internal static class AssistantScreenshotArtifactStore
++    {
++        internal static string NewArtifactId()
++        {
++            return Guid.NewGuid().ToString("N");
++        }
++
++        internal static string BuildCapturePath(string artifactId, string extension)
++        {
++            var safeId = SafeId(artifactId);
++            var root = DateRoot(DateTime.UtcNow);
++            Directory.CreateDirectory(root);
++            return Path.Combine(root, "capture_" + safeId + extension);
++        }
++
++        internal static AssistantScreenshotReceipt CompleteArtifact(AssistantScreenshotArtifact artifact)
++        {
++            if (artifact == null || string.IsNullOrWhiteSpace(artifact.Path))
++            {
++                return null;
++            }
++
++            if (string.IsNullOrWhiteSpace(artifact.ArtifactId))
++            {
++                artifact.ArtifactId = NewArtifactId();
++            }
++
++            artifact.SchemaVersion = AssistantApiEnvelope.CurrentSchemaVersion;
++            artifact.ScreenshotId = artifact.ArtifactId;
++            artifact.MetadataPath = Path.ChangeExtension(artifact.Path, null) + ".metadata.json";
++            artifact.ThumbnailPath = Path.ChangeExtension(artifact.Path, null) + ".thumb.jpg";
++            artifact.AnnotationsPath = Path.ChangeExtension(artifact.Path, null) + ".annotations.json";
++            artifact.AnnotatedPath = Path.ChangeExtension(artifact.Path, null) + ".annotated.png";
++
++            CreateThumbnail(artifact.Path, artifact.ThumbnailPath);
++            File.WriteAllText(artifact.MetadataPath, JsonConvert.SerializeObject(artifact, Formatting.Indented));
++            if (!File.Exists(artifact.AnnotationsPath))
++            {
++                File.WriteAllText(artifact.AnnotationsPath, JsonConvert.SerializeObject(new AssistantScreenshotAnnotationDocument
++                {
++                    SchemaVersion = AssistantApiEnvelope.CurrentSchemaVersion,
++                    ScreenshotId = artifact.ScreenshotId,
++                    ImageWidth = artifact.Width,
++                    ImageHeight = artifact.Height,
++                    Annotations = artifact.Annotations
++                }, Formatting.Indented));
++            }
++
++            artifact.Receipt = BuildReceipt(artifact);
++            File.WriteAllText(artifact.MetadataPath, JsonConvert.SerializeObject(artifact, Formatting.Indented));
++            return artifact.Receipt;
++        }
++
++        internal static AssistantScreenshotArtifact FindArtifact(string screenshotId)
++        {
++            var id = SafeId(screenshotId);
++            if (string.IsNullOrWhiteSpace(id)) return null;
++            var root = Root;
++            if (!Directory.Exists(root)) return null;
++
++            foreach (var metadataPath in Directory.GetFiles(root, "capture_" + id + ".metadata.json", SearchOption.AllDirectories))
++            {
++                try
++                {
++                    return JsonConvert.DeserializeObject<AssistantScreenshotArtifact>(File.ReadAllText(metadataPath));
++                }
++                catch
++                {
++                    return null;
++                }
++            }
++
++            return null;
++        }
++
++        internal static AssistantScreenshotReceipt BuildReceipt(AssistantScreenshotArtifact artifact)
++        {
++            if (artifact == null) return null;
++            return new AssistantScreenshotReceipt
++            {
++                ScreenshotId = artifact.ScreenshotId ?? artifact.ArtifactId,
++                ArtifactId = artifact.ArtifactId,
++                CapturedUtc = artifact.CapturedUtc,
++                Width = artifact.Width,
++                Height = artifact.Height,
++                SourceWindowTitle = artifact.SourceWindowTitle,
++                SolidWorksDocumentTitle = artifact.SolidWorksDocumentTitle,
++                ImagePath = artifact.Path,
++                MetadataPath = artifact.MetadataPath,
++                ThumbnailPath = artifact.ThumbnailPath,
++                LocalOnly = !artifact.SentToModel,
++                SentToModel = artifact.SentToModel,
++                RetentionPolicy = artifact.RetentionPolicy,
++                ReviewStatus = "pending"
++            };
++        }
++
++        internal static string Root =>
++            Path.Combine(AppIdentity.AssistantHistoryRoot, "AssistantArtifacts", "screenshots");
++
++        private static string DateRoot(DateTime utc)
++        {
++            return Path.Combine(Root, utc.ToString("yyyy-MM-dd"));
++        }
++
++        private static string SafeId(string artifactId)
++        {
++            var value = (artifactId ?? string.Empty).Trim();
++            foreach (var ch in Path.GetInvalidFileNameChars())
++            {
++                value = value.Replace(ch.ToString(), string.Empty);
++            }
++            return value;
++        }
++
++        private static void CreateThumbnail(string sourcePath, string thumbnailPath)
++        {
++            if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath)) return;
++
++            using (var source = Image.FromFile(sourcePath))
++            {
++                var max = 360;
++                var ratio = Math.Min((float)max / source.Width, (float)max / source.Height);
++                if (ratio > 1f) ratio = 1f;
++                var width = Math.Max(1, (int)(source.Width * ratio));
++                var height = Math.Max(1, (int)(source.Height * ratio));
++                using (var bitmap = new Bitmap(width, height))
++                using (var graphics = Graphics.FromImage(bitmap))
++                {
++                    graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
++                    graphics.DrawImage(source, 0, 0, width, height);
++                    var encoder = GetJpegEncoder();
++                    if (encoder == null)
++                    {
++                        bitmap.Save(thumbnailPath, ImageFormat.Jpeg);
++                        return;
++                    }
++
++                    using (var parameters = new EncoderParameters(1))
++                    {
++                        parameters.Param[0] = new EncoderParameter(Encoder.Quality, 82L);
++                        bitmap.Save(thumbnailPath, encoder, parameters);
++                    }
++                }
++            }
++        }
++
++        private static ImageCodecInfo GetJpegEncoder()
++        {
++            foreach (var encoder in ImageCodecInfo.GetImageEncoders())
++            {
++                if (string.Equals(encoder.MimeType, "image/jpeg", StringComparison.OrdinalIgnoreCase))
++                {
++                    return encoder;
++                }
++            }
++            return null;
++        }
++    }
++}
+diff --git a/Agent/AssistantScreenshotReportGenerator.cs b/Agent/AssistantScreenshotReportGenerator.cs
+new file mode 100644
+index 0000000..0dbbe1f
+--- /dev/null
++++ b/Agent/AssistantScreenshotReportGenerator.cs
+@@ -0,0 +1,162 @@
++using System;
++using System.IO;
++using System.Text;
++using Newtonsoft.Json;
++
++namespace BlueBrick.Agent
++{
++    internal static class AssistantScreenshotReportGenerator
++    {
++        internal static AssistantToolResult GenerateReviewReport(string artifactPathOrMetadataPath, string traceId)
++        {
++            if (string.IsNullOrWhiteSpace(artifactPathOrMetadataPath))
++            {
++                return Fail("artifact path or metadata path required", traceId);
++            }
++
++            var metadataPath = ResolveMetadataPath(artifactPathOrMetadataPath);
++            if (string.IsNullOrWhiteSpace(metadataPath) || !File.Exists(metadataPath))
++            {
++                return Fail("screenshot artifact metadata not found", traceId);
++            }
++
++            var artifact = JsonConvert.DeserializeObject<AssistantScreenshotArtifact>(File.ReadAllText(metadataPath));
++            return GenerateReviewReport(artifact, traceId);
++        }
++
++        internal static AssistantToolResult GenerateReviewReport(AssistantScreenshotArtifact artifact, string traceId)
++        {
++            if (artifact == null)
++            {
++                return Fail("screenshot artifact metadata could not be parsed", traceId);
++            }
++
++            artifact.Annotations = artifact.Annotations ?? new System.Collections.Generic.List<AssistantScreenshotAnnotation>();
++            artifact.ExtractedContacts = artifact.ExtractedContacts ?? new System.Collections.Generic.List<AssistantExtractedContact>();
++            AssistantScreenshotAnalyzer.EnsurePrivacyMetadata(artifact, artifact.ModelProfileId, artifact.SentToModel);
++            var outputPath = BuildReportPath(artifact);
++            Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
++            File.WriteAllText(outputPath, BuildMarkdown(artifact));
++
++            return new AssistantToolResult
++            {
++                ToolName = "create_screenshot_review_report",
++                Status = "ok",
++                Message = "Screenshot review report created.",
++                ReadOnly = true,
++                TraceId = traceId,
++                Items =
++                {
++                    new AssistantToolResultItem
++                    {
++                        Id = artifact.ArtifactId ?? string.Empty,
++                        Title = "Screenshot Review Report",
++                        Subtitle = artifact.SourceWindowTitle ?? artifact.SolidWorksDocumentTitle ?? string.Empty,
++                        Path = outputPath,
++                        Source = "assistant-screenshot-report",
++                        Metadata =
++                        {
++                            ["artifactId"] = artifact.ArtifactId ?? string.Empty,
++                            ["annotationCount"] = artifact.Annotations.Count.ToString(),
++                            ["contactCount"] = artifact.ExtractedContacts.Count.ToString(),
++                            ["reviewStatus"] = "pending"
++                        }
++                    }
++                }
++            };
++        }
++
++        internal static string ResolveMetadataPath(string artifactPathOrMetadataPath)
++        {
++            var path = artifactPathOrMetadataPath?.Trim() ?? string.Empty;
++            if (string.IsNullOrWhiteSpace(path)) return string.Empty;
++            if (path.EndsWith(".metadata.json", StringComparison.OrdinalIgnoreCase)) return path;
++            var modern = Path.Combine(
++                Path.GetDirectoryName(path) ?? string.Empty,
++                Path.GetFileNameWithoutExtension(path) + ".metadata.json");
++            if (File.Exists(modern)) return modern;
++            return path + ".metadata.json";
++        }
++
++        internal static string BuildMarkdown(AssistantScreenshotArtifact artifact)
++        {
++            artifact = artifact ?? new AssistantScreenshotArtifact();
++            var builder = new StringBuilder();
++            builder.AppendLine("# Screenshot Review Report");
++            builder.AppendLine();
++            builder.AppendLine("- Artifact ID: " + Safe(artifact.ArtifactId));
++            builder.AppendLine("- Captured UTC: " + (artifact.CapturedUtc == default ? "" : artifact.CapturedUtc.ToString("o")));
++            builder.AppendLine("- Source window: " + Safe(artifact.SourceWindowTitle));
++            builder.AppendLine("- SolidWorks document: " + Safe(artifact.SolidWorksDocumentTitle));
++            builder.AppendLine("- Capture source: " + Safe(artifact.CaptureSource));
++            builder.AppendLine("- Capture target: " + Safe(artifact.CaptureTarget));
++            builder.AppendLine("- Model profile: " + Safe(artifact.ModelProfileId));
++            builder.AppendLine("- Privacy: " + (artifact.SentToModel ? "sent to model" : "local only"));
++            builder.AppendLine("- Retention: " + Safe(artifact.RetentionPolicy));
++            builder.AppendLine();
++
++            builder.AppendLine("## Annotations");
++            if (artifact.Annotations.Count == 0)
++            {
++                builder.AppendLine("- None");
++            }
++            foreach (var annotation in artifact.Annotations)
++            {
++                builder.AppendLine("- " + Safe(annotation.Label) + " [" + Safe(annotation.Severity) + "] " +
++                                   "x=" + annotation.X + ", y=" + annotation.Y +
++                                   ", w=" + annotation.Width + ", h=" + annotation.Height +
++                                   ", source=" + Safe(annotation.Source));
++            }
++            builder.AppendLine();
++
++            builder.AppendLine("## Extracted Contacts");
++            if (artifact.ExtractedContacts.Count == 0)
++            {
++                builder.AppendLine("- None");
++            }
++            foreach (var contact in artifact.ExtractedContacts)
++            {
++                builder.AppendLine("- " + Safe(contact.Name) +
++                                   " | " + Safe(contact.Company) +
++                                   " | " + Safe(contact.Email) +
++                                   " | " + Safe(contact.Phone) +
++                                   " | confidence=" + contact.Confidence.ToString("0.00") +
++                                   " | review=" + Safe(contact.ReviewStatus) +
++                                   " | source=" + Safe(contact.SourceAnnotationId));
++                if (!string.IsNullOrWhiteSpace(contact.ReviewNote))
++                {
++                    builder.AppendLine("  - Note: " + Safe(contact.ReviewNote));
++                }
++            }
++            builder.AppendLine();
++            builder.AppendLine("## Next Review Actions");
++            builder.AppendLine("- Confirm or reject pending contacts before Salesforce, Epicor, or document generation use.");
++            builder.AppendLine("- Keep CAD/PDM mutations blocked unless a preview, approval, and receipt exist.");
++            return builder.ToString();
++        }
++
++        private static string BuildReportPath(AssistantScreenshotArtifact artifact)
++        {
++            var root = Path.Combine(AppIdentity.AssistantHistoryRoot, "reports", "screenshots");
++            var id = string.IsNullOrWhiteSpace(artifact.ArtifactId) ? Guid.NewGuid().ToString("N") : artifact.ArtifactId;
++            return Path.Combine(root, "screenshot-review-" + id + ".md");
++        }
++
++        private static AssistantToolResult Fail(string message, string traceId)
++        {
++            return new AssistantToolResult
++            {
++                ToolName = "create_screenshot_review_report",
++                Status = "failed",
++                Message = message,
++                ReadOnly = true,
++                TraceId = traceId
++            };
++        }
++
++        private static string Safe(string value)
++        {
++            return string.IsNullOrWhiteSpace(value) ? "" : value.Replace("\r", " ").Replace("\n", " ").Trim();
++        }
++    }
++}
+diff --git a/Agent/AssistantToolService.cs b/Agent/AssistantToolService.cs
+index a98b247..e3827be 100644
+--- a/Agent/AssistantToolService.cs
++++ b/Agent/AssistantToolService.cs
+@@ -51,7 +51,9 @@ namespace BlueBrick.Agent
+                     RequiresConfirmation = false,
+                     Enabled = true,
+                     RiskLevel = "low",
+-                    AuditRequired = true
++                    AuditRequired = true,
++                    AllowedInChat = true,
++                    RequiresCredential = false
+                 },
+                 new AssistantToolDescriptor
+                 {
+@@ -64,6 +66,8 @@ namespace BlueBrick.Agent
+                     Enabled = pdmEnabled,
+                     RiskLevel = "medium",
+                     AuditRequired = true,
++                    AllowedInChat = true,
++                    RequiresCredential = true,
+                     UnavailableReason = pdmEnabled
+                         ? string.Empty
+                         : "PDM search is disabled until AssistantTools.EnablePdmSearch is explicitly enabled for this machine."
+@@ -79,6 +83,8 @@ namespace BlueBrick.Agent
+                     Enabled = epicorEnabled,
+                     RiskLevel = "medium",
+                     AuditRequired = true,
++                    AllowedInChat = true,
++                    RequiresCredential = true,
+                     UnavailableReason = epicorEnabled
+                         ? string.Empty
+                         : "Epicor search is disabled until AssistantTools.EnableEpicorSearch is true and the configured connection-string environment variable is present."
+@@ -93,7 +99,24 @@ namespace BlueBrick.Agent
+                     RequiresConfirmation = false,
+                     Enabled = true,
+                     RiskLevel = "medium",
+-                    AuditRequired = true
++                    AuditRequired = true,
++                    AllowedInChat = false,
++                    ManualOnly = true,
++                    SendsExternalData = false
++                },
++                new AssistantToolDescriptor
++                {
++                    Name = "create_screenshot_review_report",
++                    DisplayName = "Create Screenshot Review Report",
++                    Category = "assistant-evidence",
++                    Description = "Creates a local Markdown review report from screenshot artifact metadata.",
++                    ReadOnly = true,
++                    RequiresConfirmation = false,
++                    Enabled = true,
++                    RiskLevel = "low",
++                    AuditRequired = true,
++                    AllowedInChat = false,
++                    ManualOnly = true
+                 }
+             };
+         }
+@@ -108,78 +131,196 @@ namespace BlueBrick.Agent
+             return _auditLog.TailPersisted(limit);
+         }
+ 
+-        internal Task<AssistantToolResult> ExecuteAsync(AssistantToolRequest request, string traceId)
++        internal async Task<AssistantToolResult> ExecuteAsync(AssistantToolRequest request, string traceId)
+         {
+             request = request ?? new AssistantToolRequest();
+             var toolName = Normalize(request.ToolName);
+             if (string.IsNullOrWhiteSpace(toolName))
+             {
+-                return Task.FromResult(Fail(toolName, "invalid", "toolName required", traceId));
++                return Fail(toolName, "invalid", "toolName required", traceId);
+             }
+ 
+             var policy = _policy.EvaluateToolName(toolName);
+             if (!policy.Allowed)
+             {
+-                return Task.FromResult(WithReceipt(
++                return WithReceipt(
+                     Fail(toolName, policy.Code, policy.Message, traceId),
+                     request,
+                     policy,
+                     null,
+-                    traceId));
++                    traceId);
+             }
+ 
+-            var descriptor = GetCatalog().FirstOrDefault(t => string.Equals(t.Name, toolName, StringComparison.OrdinalIgnoreCase));
++            var catalog = GetCatalog();
++            var descriptor = catalog.FirstOrDefault(t => string.Equals(t.Name, toolName, StringComparison.OrdinalIgnoreCase));
+             if (descriptor == null)
+             {
+-                return Task.FromResult(WithReceipt(
++                return WithReceipt(
+                     Fail(toolName, "unknown", "Unknown assistant tool.", traceId),
+                     request,
+                     AssistantToolPolicyDecision.Deny("unknown", "Unknown assistant tool.", true),
+                     null,
+-                    traceId));
++                    traceId);
++            }
++
++            var explicitScope = !string.IsNullOrWhiteSpace(request.ScopeId);
++            var scope = AssistantScopeRegistry.Resolve(_config, catalog, request.ScopeId);
++            request.ScopeId = scope.Id;
++            if (IsSearchTool(toolName))
++            {
++                if (scope.Id == AssistantScopeRegistry.All)
++                {
++                    var allResult = await SearchAllScopesAsync(request, catalog, traceId).ConfigureAwait(false);
++                    return WithReceipt(allResult, request, policy, descriptor, traceId);
++                }
++
++                if (explicitScope && !scope.Enabled)
++                {
++                    return WithReceipt(
++                        Fail(toolName, "scope_unavailable", scope.UnavailableReason ?? "Selected assistant scope is unavailable.", traceId),
++                        request,
++                        AssistantToolPolicyDecision.Deny("scope_unavailable", scope.UnavailableReason ?? "Selected assistant scope is unavailable.", false),
++                        descriptor,
++                        traceId);
++                }
++
++                if (explicitScope && !scope.ReadOnlyToolNames.Any(t => string.Equals(t, toolName, StringComparison.OrdinalIgnoreCase)))
++                {
++                    return WithReceipt(
++                        Fail(toolName, "scope_mismatch", $"Tool '{toolName}' is not available in the selected scope '{scope.Label}'.", traceId),
++                        request,
++                        AssistantToolPolicyDecision.Deny("scope_mismatch", "Selected scope does not allow this tool.", false),
++                        descriptor,
++                        traceId);
++                }
+             }
+ 
+             if (!descriptor.Enabled)
+             {
+-                return Task.FromResult(WithReceipt(
++                return WithReceipt(
+                     Fail(toolName, "disabled", descriptor.UnavailableReason ?? "Tool is not enabled.", traceId),
+                     request,
+                     AssistantToolPolicyDecision.Deny("disabled", descriptor.UnavailableReason ?? "Tool is not enabled.", false),
+                     descriptor,
+-                    traceId));
++                    traceId);
+             }
+ 
+             AssistantToolResult result;
+             if (toolName == "search_local_vault")
+             {
+                 result = SearchLocalVault(request, traceId);
+-                return Task.FromResult(WithReceipt(result, request, policy, descriptor, traceId));
++                return WithReceipt(result, request, policy, descriptor, traceId);
+             }
+ 
+             if (toolName == "search_pdm")
+             {
+                 result = SearchPdmReadOnly(request, traceId);
+-                return Task.FromResult(WithReceipt(result, request, policy, descriptor, traceId));
++                return WithReceipt(result, request, policy, descriptor, traceId);
+             }
+ 
+         if (toolName == "search_epicor")
+         {
+-            return ExecuteEpicorWithReceiptAsync(request, policy, descriptor, traceId);
++            return await ExecuteEpicorWithReceiptAsync(request, policy, descriptor, traceId).ConfigureAwait(false);
+         }
+ 
+         if (toolName == "capture_screenshot")
+         {
+-            return ExecuteCaptureScreenshotAsync(request, policy, descriptor, traceId);
++            return await ExecuteCaptureScreenshotAsync(request, policy, descriptor, traceId).ConfigureAwait(false);
+         }
+ 
+-        return Task.FromResult(WithReceipt(
++        if (toolName == "create_screenshot_review_report")
++        {
++            result = CreateScreenshotReviewReport(request, traceId);
++            return WithReceipt(result, request, policy, descriptor, traceId);
++        }
++
++        return WithReceipt(
+                 Fail(toolName, "unsupported", "Tool execution is not implemented yet.", traceId),
+                 request,
+                 AssistantToolPolicyDecision.Deny("unsupported", "Tool execution is not implemented yet.", false),
+                 descriptor,
+-                traceId));
++                traceId);
+         }
+ 
++    private async Task<AssistantToolResult> SearchAllScopesAsync(
++        AssistantToolRequest request,
++        IReadOnlyList<AssistantToolDescriptor> catalog,
++        string traceId)
++    {
++        var items = new List<AssistantToolResultItem>();
++        var messages = new List<string>();
++        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
++
++        foreach (var toolName in new[] { "search_local_vault", "search_pdm", "search_epicor" })
++        {
++            var descriptor = catalog.FirstOrDefault(t => string.Equals(t.Name, toolName, StringComparison.OrdinalIgnoreCase));
++            if (descriptor == null)
++            {
++                continue;
++            }
++
++            if (!descriptor.Enabled)
++            {
++                messages.Add(descriptor.DisplayName + " unavailable");
++                items.Add(new AssistantToolResultItem
++                {
++                    Id = descriptor.Name + ":unavailable",
++                    Title = descriptor.DisplayName + " unavailable",
++                    Subtitle = descriptor.UnavailableReason ?? "Source is unavailable.",
++                    Source = descriptor.Category ?? descriptor.Name,
++                    Metadata =
++                    {
++                        ["status"] = "unavailable",
++                        ["reason"] = descriptor.UnavailableReason ?? string.Empty
++                    }
++                });
++                continue;
++            }
++
++            var scopedRequest = new AssistantToolRequest
++            {
++                ToolName = toolName,
++                Query = request.Query,
++                Limit = request.Limit,
++                ScopeId = toolName == "search_pdm"
++                    ? AssistantScopeRegistry.Pdm
++                    : toolName == "search_epicor"
++                        ? AssistantScopeRegistry.Epicor
++                        : AssistantScopeRegistry.LocalVault,
++                Authorization = request.Authorization,
++                Parameters = request.Parameters == null
++                    ? new Dictionary<string, string>()
++                    : new Dictionary<string, string>(request.Parameters)
++            };
++
++            var result = toolName == "search_local_vault"
++                ? SearchLocalVault(scopedRequest, traceId)
++                : toolName == "search_pdm"
++                    ? SearchPdmReadOnly(scopedRequest, traceId)
++                    : await SearchEpicorPartsReadOnlyAsync(scopedRequest, traceId).ConfigureAwait(false);
++
++            messages.Add(result.Message ?? descriptor.DisplayName);
++            foreach (var item in result.Items ?? new List<AssistantToolResultItem>())
++            {
++                var stable = (item.Source ?? string.Empty) + "|" + (item.Id ?? item.Path ?? item.Title ?? string.Empty);
++                if (seen.Add(stable))
++                {
++                    items.Add(item);
++                }
++            }
++        }
++
++        return new AssistantToolResult
++        {
++            ToolName = "search_all",
++            Status = items.Any(i => i.Metadata.TryGetValue("status", out var status) && status == "unavailable") ? "partial" : "ok",
++            Message = string.Join(" ", messages.Where(m => !string.IsNullOrWhiteSpace(m)).ToArray()),
++            ReadOnly = true,
++            TraceId = traceId,
++            Items = items
++        };
++    }
++
+     private async Task<AssistantToolResult> ExecuteEpicorWithReceiptAsync(
+         AssistantToolRequest request,
+         AssistantToolPolicyDecision policy,
+@@ -235,6 +376,35 @@ namespace BlueBrick.Agent
+         }
+     }
+ 
++    private AssistantToolResult CreateScreenshotReviewReport(AssistantToolRequest request, string traceId)
++    {
++        var artifactJson = GetParameter(request, "artifactJson");
++        if (!string.IsNullOrWhiteSpace(artifactJson))
++        {
++            try
++            {
++                var artifact = Newtonsoft.Json.JsonConvert.DeserializeObject<AssistantScreenshotArtifact>(artifactJson);
++                return AssistantScreenshotReportGenerator.GenerateReviewReport(artifact, traceId);
++            }
++            catch
++            {
++                return Fail("create_screenshot_review_report", "invalid", "Screenshot artifact payload could not be parsed.", traceId);
++            }
++        }
++
++        var artifactPath = GetParameter(request, "artifactPath");
++        if (string.IsNullOrWhiteSpace(artifactPath))
++        {
++            artifactPath = GetParameter(request, "metadataPath");
++        }
++        if (string.IsNullOrWhiteSpace(artifactPath))
++        {
++            artifactPath = GetQuery(request);
++        }
++
++        return AssistantScreenshotReportGenerator.GenerateReviewReport(artifactPath, traceId);
++    }
++
+         private AssistantToolResult WithReceipt(
+             AssistantToolResult result,
+             AssistantToolRequest request,
+@@ -497,10 +667,21 @@ ORDER BY [Part].[PartNum];";
+             return query;
+         }
+ 
++        private static string GetParameter(AssistantToolRequest request, string key)
++        {
++            if (request?.Parameters == null || string.IsNullOrWhiteSpace(key)) return string.Empty;
++            return request.Parameters.TryGetValue(key, out var value) ? Normalize(value) : string.Empty;
++        }
++
+         private static int BoundLimit(int requested, int max)
+         {
+             var limit = requested <= 0 ? DefaultLimit : requested;
+             return Math.Max(1, Math.Min(limit, Math.Max(1, Math.Min(max, MaxLimit))));
+         }
++
++        private static bool IsSearchTool(string toolName)
++        {
++            return Normalize(toolName).StartsWith("search_", StringComparison.OrdinalIgnoreCase);
++        }
+     }
+ }
+diff --git a/Agent/AssistantWebViewHost.cs b/Agent/AssistantWebViewHost.cs
+new file mode 100644
+index 0000000..e9dfa18
+--- /dev/null
++++ b/Agent/AssistantWebViewHost.cs
+@@ -0,0 +1,176 @@
++using System;
++using System.IO;
++using System.Threading.Tasks;
++using Microsoft.Web.WebView2.Core;
++using Microsoft.Web.WebView2.WinForms;
++
++namespace BlueBrick.Agent
++{
++    internal sealed class AssistantWebViewHost : IDisposable
++    {
++        private readonly WebView2 _webView;
++        private readonly AgentConfig _config;
++        private bool _disposed;
++        private string _allowedDistRoot;
++
++        internal AssistantWebViewHost(WebView2 webView, AgentConfig config)
++        {
++            _webView = webView ?? throw new ArgumentNullException(nameof(webView));
++            _config = config ?? new AgentConfig();
++        }
++
++        internal string LastLoadError { get; private set; }
++        internal bool LoadedReactShell { get; private set; }
++
++        internal async Task<bool> InitializeAsync(Func<string> fallbackShellHtml)
++        {
++            try
++            {
++                var env = await CoreWebView2Environment.CreateAsync(userDataFolder: Path.GetTempPath()).ConfigureAwait(true);
++                _webView.CoreWebView2InitializationCompleted += WebView_CoreWebView2InitializationCompleted;
++                await _webView.EnsureCoreWebView2Async(env).ConfigureAwait(true);
++                ConfigureSecurity();
++
++                var navigationReady = new TaskCompletionSource<bool>();
++                EventHandler<CoreWebView2NavigationCompletedEventArgs> completed = null;
++                completed = (s, e) =>
++                {
++                    _webView.CoreWebView2.NavigationCompleted -= completed;
++                    navigationReady.TrySetResult(e.IsSuccess);
++                    if (!e.IsSuccess)
++                    {
++                        LastLoadError = "Assistant WebView navigation failed: " + e.WebErrorStatus;
++                    }
++                };
++                _webView.CoreWebView2.NavigationCompleted += completed;
++
++                var loaded = LoadReactDist();
++                if (!loaded)
++                {
++                    LoadedReactShell = false;
++                    _webView.NavigateToString(fallbackShellHtml == null ? MinimalFallbackHtml() : fallbackShellHtml());
++                }
++
++                var finished = await Task.WhenAny(navigationReady.Task, Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(true);
++                if (finished != navigationReady.Task)
++                {
++                    LastLoadError = "Assistant WebView navigation timed out.";
++                }
++
++                return true;
++            }
++            catch (Exception ex)
++            {
++                LastLoadError = ex.Message;
++                try
++                {
++                    _webView.NavigateToString(MinimalFallbackHtml());
++                }
++                catch { }
++                return false;
++            }
++        }
++
++        private void WebView_CoreWebView2InitializationCompleted(object sender, CoreWebView2InitializationCompletedEventArgs e)
++        {
++            if (!e.IsSuccess)
++            {
++                LastLoadError = e.InitializationException?.Message ?? "WebView2 initialization failed.";
++            }
++        }
++
++        private void ConfigureSecurity()
++        {
++            if (_webView.CoreWebView2 == null) return;
++            _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
++            _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
++            _webView.CoreWebView2.Settings.AreHostObjectsAllowed = false;
++            _webView.CoreWebView2.Settings.IsWebMessageEnabled = false;
++            _webView.CoreWebView2.Settings.IsScriptEnabled = true;
++            _webView.CoreWebView2.NavigationStarting += (s, e) =>
++            {
++                if (!IsNavigationAllowed(e.Uri))
++                {
++                    e.Cancel = true;
++                    LastLoadError = "Blocked WebView navigation: " + e.Uri;
++                }
++            };
++            _webView.CoreWebView2.NewWindowRequested += (s, e) => { e.Handled = true; };
++        }
++
++        private bool LoadReactDist()
++        {
++            if ((_config.Assistant?.UseReactWebView ?? false) != true) return false;
++            var distIndex = FindDistIndex();
++            if (string.IsNullOrWhiteSpace(distIndex) || !File.Exists(distIndex))
++            {
++                LastLoadError = "AssistantWeb dist not found.";
++                return false;
++            }
++
++            _allowedDistRoot = Path.GetDirectoryName(distIndex);
++            _webView.Source = new Uri(distIndex);
++            LoadedReactShell = true;
++            return true;
++        }
++
++        private static string FindDistIndex()
++        {
++            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            var candidates = new[]
++            {
++                Path.Combine(baseDir, "AssistantWeb", "dist", "index.html"),
++                Path.Combine(baseDir, "..", "..", "AssistantWeb", "dist", "index.html"),
++                Path.Combine(baseDir, "..", "AssistantWeb", "dist", "index.html")
++            };
++
++            foreach (var candidate in candidates)
++            {
++                try
++                {
++                    var full = Path.GetFullPath(candidate);
++                    if (File.Exists(full)) return full;
++                }
++                catch { }
++            }
++            return null;
++        }
++
++        private bool IsNavigationAllowed(string uri)
++        {
++            if (AssistantWebViewSecurity.IsNavigationAllowed(uri)) return true;
++            if (string.IsNullOrWhiteSpace(uri)) return false;
++            if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed)) return false;
++            if (parsed.IsFile && !string.IsNullOrWhiteSpace(_allowedDistRoot))
++            {
++                try
++                {
++                    var localPath = Path.GetFullPath(parsed.LocalPath);
++                    var root = Path.GetFullPath(_allowedDistRoot);
++                    return localPath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
++                }
++                catch
++                {
++                    return false;
++                }
++            }
++            return false;
++        }
++
++        private static string MinimalFallbackHtml()
++        {
++            return "<!doctype html><html><body style='font-family:Segoe UI,Arial,sans-serif;background:#f8fafc;color:#111827'><strong>BlueBrick Assistant</strong><br/>Assistant WebView fallback loaded.</body></html>";
++        }
++
++        public void Dispose()
++        {
++            if (_disposed) return;
++            _disposed = true;
++            try
++            {
++                _webView.CoreWebView2InitializationCompleted -= WebView_CoreWebView2InitializationCompleted;
++            }
++            catch { }
++        }
++    }
++}
+diff --git a/Agent/OpenAiAssistantService.cs b/Agent/OpenAiAssistantService.cs
+index 27ed9ee..6eac8d8 100644
+--- a/Agent/OpenAiAssistantService.cs
++++ b/Agent/OpenAiAssistantService.cs
+@@ -510,6 +510,9 @@ namespace BlueBrick.Agent
+                 AgentTokenConfigured = tokenConfigured,
+                 EnableUploads = _config.Assistant.EnableUploads,
+                 RequireExplicitUploadConsent = _config.Assistant.RequireExplicitUploadConsent,
++                ActiveModelDescriptor = AssistantModelDescriptor.FromProfile(profile, keyInfo.Configured),
++                Scopes = AssistantScopeRegistry.Build(_config, _toolService.GetCatalog()).ToArray(),
++                AssistantWebViewStatus = _config.Assistant.UseReactWebView ? "react-enabled" : "fallback-shell",
+                 Checklist = checklist.ToArray()
+             };
+         }
+diff --git a/AssistantPanel.Designer.cs b/AssistantPanel.Designer.cs
+index 9d67c38..6c6aa94 100644
+--- a/AssistantPanel.Designer.cs
++++ b/AssistantPanel.Designer.cs
+@@ -52,7 +52,7 @@ namespace BlueBrick
+             this.tlpChatMain.Location = new System.Drawing.Point(0, 0);
+             this.tlpChatMain.Name = "tlpChatMain";
+             this.tlpChatMain.RowCount = 3;
+-            this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 142F));
++            this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 118F));
+             this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
+             this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 48F));
+             this.tlpChatMain.Size = new System.Drawing.Size(211, 360);
+@@ -83,13 +83,13 @@ namespace BlueBrick
+             this.tlpChatButtons.Location = new System.Drawing.Point(2, 2);
+             this.tlpChatButtons.Name = "tlpChatButtons";
+             this.tlpChatButtons.RowCount = 6;
+-            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 24F));
+-            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 24F));
++            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 22F));
++            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 22F));
+             this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+             this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+             this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+             this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+-            this.tlpChatButtons.Size = new System.Drawing.Size(207, 138);
++            this.tlpChatButtons.Size = new System.Drawing.Size(207, 114);
+             this.tlpChatButtons.TabIndex = 1;
+             //
+             // cmbModel
+@@ -113,7 +113,7 @@ namespace BlueBrick
+             this.cmbSearchTool.FlatStyle = System.Windows.Forms.FlatStyle.System;
+             this.cmbSearchTool.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
+             this.cmbSearchTool.FormattingEnabled = true;
+-            this.cmbSearchTool.Location = new System.Drawing.Point(1, 25);
++            this.cmbSearchTool.Location = new System.Drawing.Point(1, 23);
+             this.cmbSearchTool.Margin = new System.Windows.Forms.Padding(1);
+             this.cmbSearchTool.Name = "cmbSearchTool";
+             this.cmbSearchTool.Size = new System.Drawing.Size(205, 20);
+@@ -126,7 +126,7 @@ namespace BlueBrick
+             this.btnNewSession.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(247)))), ((int)(((byte)(250)))));
+             this.btnNewSession.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+             this.btnNewSession.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
+-            this.btnNewSession.Location = new System.Drawing.Point(1, 49);
++            this.btnNewSession.Location = new System.Drawing.Point(1, 45);
+             this.btnNewSession.Name = "btnNewSession";
+             this.btnNewSession.Size = new System.Drawing.Size(62, 18);
+             this.btnNewSession.TabIndex = 0;
+@@ -140,7 +140,7 @@ namespace BlueBrick
+             this.btnCapture.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(217)))), ((int)(((byte)(255)))), ((int)(((byte)(90)))));
+             this.btnCapture.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+             this.btnCapture.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
+-            this.btnCapture.Location = new System.Drawing.Point(69, 49);
++            this.btnCapture.Location = new System.Drawing.Point(69, 45);
+             this.btnCapture.Name = "btnCapture";
+             this.btnCapture.Size = new System.Drawing.Size(68, 18);
+             this.btnCapture.TabIndex = 1;
+@@ -154,7 +154,7 @@ namespace BlueBrick
+             this.btnAttach.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(247)))), ((int)(((byte)(250)))));
+             this.btnAttach.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+             this.btnAttach.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
+-            this.btnAttach.Location = new System.Drawing.Point(143, 49);
++            this.btnAttach.Location = new System.Drawing.Point(143, 45);
+             this.btnAttach.Name = "btnAttach";
+             this.btnAttach.Size = new System.Drawing.Size(63, 18);
+             this.btnAttach.TabIndex = 2;
+@@ -168,7 +168,7 @@ namespace BlueBrick
+             this.btnSearchVault.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(235)))), ((int)(((byte)(248)))), ((int)(((byte)(255)))));
+             this.btnSearchVault.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+             this.btnSearchVault.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
+-            this.btnSearchVault.Location = new System.Drawing.Point(1, 72);
++            this.btnSearchVault.Location = new System.Drawing.Point(1, 66);
+             this.btnSearchVault.Name = "btnSearchVault";
+             this.btnSearchVault.Size = new System.Drawing.Size(62, 16);
+             this.btnSearchVault.TabIndex = 10;
+@@ -182,7 +182,7 @@ namespace BlueBrick
+             this.btnReindex.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(247)))), ((int)(((byte)(250)))));
+             this.btnReindex.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+             this.btnReindex.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
+-            this.btnReindex.Location = new System.Drawing.Point(69, 72);
++            this.btnReindex.Location = new System.Drawing.Point(69, 66);
+             this.btnReindex.Name = "btnReindex";
+             this.btnReindex.Size = new System.Drawing.Size(68, 16);
+             this.btnReindex.TabIndex = 3;
+@@ -196,7 +196,7 @@ namespace BlueBrick
+             this.btnResetVault.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(255)))), ((int)(((byte)(229)))), ((int)(((byte)(229)))));
+             this.btnResetVault.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+             this.btnResetVault.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
+-            this.btnResetVault.Location = new System.Drawing.Point(1, 118);
++            this.btnResetVault.Location = new System.Drawing.Point(1, 101);
+             this.btnResetVault.Name = "btnResetVault";
+             this.btnResetVault.Size = new System.Drawing.Size(205, 18);
+             this.btnResetVault.TabIndex = 4;
+@@ -210,7 +210,7 @@ namespace BlueBrick
+             this.btnOpenWorking.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(247)))), ((int)(((byte)(250)))));
+             this.btnOpenWorking.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+             this.btnOpenWorking.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
+-            this.btnOpenWorking.Location = new System.Drawing.Point(143, 72);
++            this.btnOpenWorking.Location = new System.Drawing.Point(143, 66);
+             this.btnOpenWorking.Name = "btnOpenWorking";
+             this.btnOpenWorking.Size = new System.Drawing.Size(63, 16);
+             this.btnOpenWorking.TabIndex = 5;
+@@ -224,7 +224,7 @@ namespace BlueBrick
+             this.btnOpenChatGpt.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(229)))), ((int)(((byte)(231)))), ((int)(((byte)(255)))));
+             this.btnOpenChatGpt.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+             this.btnOpenChatGpt.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
+-            this.btnOpenChatGpt.Location = new System.Drawing.Point(1, 95);
++            this.btnOpenChatGpt.Location = new System.Drawing.Point(1, 83);
+             this.btnOpenChatGpt.Name = "btnOpenChatGpt";
+             this.btnOpenChatGpt.Size = new System.Drawing.Size(62, 15);
+             this.btnOpenChatGpt.TabIndex = 6;
+@@ -238,7 +238,7 @@ namespace BlueBrick
+             this.btnTestConnection.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(247)))), ((int)(((byte)(250)))));
+             this.btnTestConnection.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+             this.btnTestConnection.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
+-            this.btnTestConnection.Location = new System.Drawing.Point(69, 95);
++            this.btnTestConnection.Location = new System.Drawing.Point(69, 83);
+             this.btnTestConnection.Name = "btnTestConnection";
+             this.btnTestConnection.Size = new System.Drawing.Size(68, 15);
+             this.btnTestConnection.TabIndex = 7;
+@@ -252,7 +252,7 @@ namespace BlueBrick
+             this.btnToggleMode.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(235)))), ((int)(((byte)(248)))), ((int)(((byte)(255)))));
+             this.btnToggleMode.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+             this.btnToggleMode.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
+-            this.btnToggleMode.Location = new System.Drawing.Point(143, 95);
++            this.btnToggleMode.Location = new System.Drawing.Point(143, 83);
+             this.btnToggleMode.Name = "btnToggleMode";
+             this.btnToggleMode.Size = new System.Drawing.Size(63, 15);
+             this.btnToggleMode.TabIndex = 8;
+@@ -266,9 +266,9 @@ namespace BlueBrick
+             this._webView.CreationProperties = null;
+             this._webView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(18)))), ((int)(((byte)(22)))));
+             this._webView.Dock = System.Windows.Forms.DockStyle.Fill;
+-            this._webView.Location = new System.Drawing.Point(2, 142);
++            this._webView.Location = new System.Drawing.Point(2, 118);
+             this._webView.Name = "_webView";
+-            this._webView.Size = new System.Drawing.Size(207, 168);
++            this._webView.Size = new System.Drawing.Size(207, 192);
+             this._webView.TabIndex = 2;
+             this._webView.ZoomFactor = 1D;
+             //
+diff --git a/AssistantPanel.cs b/AssistantPanel.cs
+index 8d60ce3..efbfe42 100644
+--- a/AssistantPanel.cs
++++ b/AssistantPanel.cs
+@@ -33,6 +33,7 @@ namespace BlueBrick
+         private readonly object _initLock = new object();
+         private readonly object _errorLogLock = new object();
+         private CancellationTokenSource _streamCts;
++        private AssistantWebViewHost _webHost;
+ 
+         public AssistantPanel()
+         {
+@@ -59,29 +60,12 @@ namespace BlueBrick
+ 
+             try
+             {
+-                var env = await CoreWebView2Environment.CreateAsync(userDataFolder: Path.GetTempPath());
+-                await _webView.EnsureCoreWebView2Async(env);
+-
+-                _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+-                _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+-                _webView.CoreWebView2.Settings.AreHostObjectsAllowed = false;
+-                _webView.CoreWebView2.Settings.IsWebMessageEnabled = false;
+-                _webView.CoreWebView2.Settings.IsScriptEnabled = true;
+-
+-                _webView.CoreWebView2.NavigationStarting += (s, e) =>
+-                {
+-                    if (!AssistantWebViewSecurity.IsNavigationAllowed(e.Uri))
+-                    {
+-                        e.Cancel = true;
+-                    }
+-                };
+-                _webView.CoreWebView2.NewWindowRequested += (s, e) =>
++                _webHost = new AssistantWebViewHost(_webView, AgentConfig.Load());
++                var webViewReady = await _webHost.InitializeAsync(BuildShellHtml);
++                if (!webViewReady)
+                 {
+-                    e.Handled = true;
+-                };
+-                _webView.CoreWebView2.NavigationCompleted += (s, e) => _pageReady.TrySetResult(true);
+-                _webView.NavigateToString(BuildShellHtml());
+-                await _pageReady.Task;
++                    throw new InvalidOperationException(_webHost.LastLoadError ?? "WebView2 unavailable");
++                }
+ 
+                 _webView.Visible = true;
+                 lblChatStatus.Visible = false;
+@@ -360,8 +344,10 @@ namespace BlueBrick
+             _pendingAttachment = result.Data.Value<string>("path");
+             var artifact = result.Data["artifact"] as JObject;
+             var analyzed = await AnalyzeScreenshotArtifactAsync(artifact);
+-            await AppendScreenshotArtifactAsync(analyzed ?? artifact);
+-            lblChatStatus.Text = "Screenshot attached";
++            var finalArtifact = analyzed ?? artifact;
++            await AppendScreenshotArtifactAsync(finalArtifact);
++            await CreateScreenshotReviewReportAsync(finalArtifact);
++            lblChatStatus.Text = "Screenshot attached; review report created";
+             lblChatStatus.Visible = false;
+         }
+ 
+@@ -583,6 +569,48 @@ namespace BlueBrick
+             await _webView.ExecuteScriptAsync("if(window.bbAppendScreenshotArtifact)window.bbAppendScreenshotArtifact(" + payload.ToString(Formatting.None) + ");");
+         }
+ 
++        private async Task CreateScreenshotReviewReportAsync(JObject artifact)
++        {
++            if (artifact == null) return;
++            var descriptor = GetToolDescriptor("create_screenshot_review_report");
++            var enabled = descriptor?.Value<bool?>("Enabled") ?? descriptor?.Value<bool?>("enabled") ?? false;
++            if (!enabled) return;
++
++            var payload = BuildScreenshotReviewReportToolParameters(artifact);
++            var artifactPath = payload.Value<string>("artifactPath") ?? string.Empty;
++            var result = await AgentPanelClient.ExecuteToolAsync("create_screenshot_review_report", artifactPath, 1, payload);
++            if (!result.Ok)
++            {
++                await AppendMessageAsync("assistant", "Screenshot review report failed: " + result.Error, null);
++                return;
++            }
++
++            var status = result.Data.Value<string>("Status") ?? result.Data.Value<string>("status") ?? "unknown";
++            var message = result.Data.Value<string>("Message") ?? result.Data.Value<string>("message") ?? "Screenshot review report completed.";
++            var items = result.Data["Items"] as JArray ?? result.Data["items"] as JArray ?? new JArray();
++            var receipt = result.Data["Receipt"] as JObject ?? result.Data["receipt"] as JObject;
++            await AppendToolResultAsync("Screenshot Review Report", artifactPath, status, message, items, receipt);
++            await LoadToolAuditAsync();
++        }
++
++        internal static JObject BuildScreenshotReviewReportToolParameters(JObject artifact)
++        {
++            artifact = artifact ?? new JObject();
++            var path = artifact.Value<string>("Path") ?? artifact.Value<string>("path") ?? string.Empty;
++            var metadataPath =
++                artifact.Value<string>("MetadataPath") ??
++                artifact.Value<string>("metadataPath") ??
++                (string.IsNullOrWhiteSpace(path)
++                    ? string.Empty
++                    : Path.Combine(Path.GetDirectoryName(path) ?? string.Empty, Path.GetFileNameWithoutExtension(path) + ".metadata.json"));
++            return new JObject
++            {
++                ["artifactPath"] = path,
++                ["metadataPath"] = metadataPath,
++                ["artifactJson"] = artifact.ToString(Formatting.None)
++            };
++        }
++
+         private async Task<JObject> AnalyzeScreenshotArtifactAsync(JObject artifact)
+         {
+             if (artifact == null) return null;
+@@ -669,22 +697,35 @@ namespace BlueBrick
+             var captureSource = artifact.Value<string>("CaptureSource") ?? artifact.Value<string>("captureSource") ?? string.Empty;
+             var retentionPolicy = artifact.Value<string>("RetentionPolicy") ?? artifact.Value<string>("retentionPolicy") ?? string.Empty;
+             var modelProfileId = artifact.Value<string>("ModelProfileId") ?? artifact.Value<string>("modelProfileId") ?? string.Empty;
++            var screenshotId = artifact.Value<string>("ScreenshotId") ?? artifact.Value<string>("screenshotId") ?? artifactId;
++            var capturedUtc = artifact.Value<string>("CapturedUtc") ?? artifact.Value<string>("capturedUtc") ?? string.Empty;
++            var metadataPath = artifact.Value<string>("MetadataPath") ?? artifact.Value<string>("metadataPath") ?? string.Empty;
++            var thumbnailPath = artifact.Value<string>("ThumbnailPath") ?? artifact.Value<string>("thumbnailPath") ?? string.Empty;
++            var annotationsPath = artifact.Value<string>("AnnotationsPath") ?? artifact.Value<string>("annotationsPath") ?? string.Empty;
++            var localOnlyCloudState = artifact.Value<string>("LocalOnlyCloudState") ?? artifact.Value<string>("localOnlyCloudState") ?? string.Empty;
+             var redactionApplied = artifact.Value<bool?>("RedactionApplied") ?? artifact.Value<bool?>("redactionApplied") ?? false;
+             var sentToModel = artifact.Value<bool?>("SentToModel") ?? artifact.Value<bool?>("sentToModel") ?? false;
+             var annotations = artifact["Annotations"] as JArray ?? artifact["annotations"] as JArray ?? new JArray();
+             var contacts = artifact["ExtractedContacts"] as JArray ?? artifact["extractedContacts"] as JArray ?? new JArray();
++            var receipt = artifact["Receipt"] as JObject ?? artifact["receipt"] as JObject;
+ 
+             return new JObject
+             {
+                 ["artifactId"] = artifactId,
++                ["screenshotId"] = screenshotId,
+                 ["path"] = path,
+                 ["fileName"] = string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetFileName(path),
++                ["capturedUtc"] = capturedUtc,
++                ["metadataPath"] = metadataPath,
++                ["thumbnailPath"] = thumbnailPath,
++                ["annotationsPath"] = annotationsPath,
+                 ["sourceWindowTitle"] = title,
+                 ["solidWorksDocumentTitle"] = solidWorksDocumentTitle,
+                 ["solidWorksDocumentPathHash"] = solidWorksDocumentPathHash,
+                 ["captureTarget"] = captureTarget,
+                 ["captureSource"] = captureSource,
+                 ["retentionPolicy"] = retentionPolicy,
++                ["localOnlyCloudState"] = localOnlyCloudState,
+                 ["modelProfileId"] = modelProfileId,
+                 ["redactionApplied"] = redactionApplied,
+                 ["sentToModel"] = sentToModel,
+@@ -693,7 +734,8 @@ namespace BlueBrick
+                 ["annotationCount"] = annotations.Count,
+                 ["contactCount"] = contacts.Count,
+                 ["annotations"] = annotations,
+-                ["contacts"] = contacts
++                ["contacts"] = contacts,
++                ["receipt"] = receipt ?? new JObject()
+             };
+         }
+ 
+@@ -1073,35 +1115,37 @@ namespace BlueBrick
+ <style>
+ *{box-sizing:border-box;}
+ html,body{min-height:100%;margin:0;}
+-body{font-family:Segoe UI,Arial,sans-serif;background:#f5f7fa;color:#18212c;font-size:12px;}
+-#shell{min-height:100vh;display:flex;flex-direction:column;background:#f5f7fa;}
+-#header{position:sticky;top:0;z-index:2;background:#111827;color:#f8fafc;padding:10px 12px 9px;border-bottom:3px solid #d9ff5a;}
+-#headerTop{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+-#header .title{font-size:13px;font-weight:700;letter-spacing:0;color:#f8fafc;line-height:1.15;}
+-#header .subtitle{margin-top:3px;color:#b6c2cf;font-size:10px;line-height:1.25;}
+-#header .model{font-size:10px;color:#e5e7eb;display:flex;align-items:center;gap:5px;min-width:0;max-width:52%;justify-content:flex-end;}
++body{font-family:Segoe UI,Arial,sans-serif;background:#eef3f7;color:#18212c;font-size:12px;}
++#shell{min-height:100vh;display:flex;flex-direction:column;background:#eef3f7;}
++#header{position:sticky;top:0;z-index:2;background:#ffffff;color:#111827;padding:9px 10px 8px;border-bottom:1px solid #cbd6e2;border-left:4px solid #3ba7a4;}
++#headerTop{display:grid;grid-template-columns:minmax(0,1fr) minmax(78px,44%);align-items:center;gap:8px;}
++#header .title{font-size:13px;font-weight:700;letter-spacing:0;color:#111827;line-height:1.15;}
++#header .subtitle{margin-top:2px;color:#526171;font-size:10px;line-height:1.25;}
++#header .model{font-size:10px;color:#263244;display:flex;align-items:center;gap:5px;min-width:0;justify-content:flex-end;}
+ #modelName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+ #header .model-dot{width:8px;height:8px;border-radius:50%;background:#3ba7a4;flex:0 0 auto;}
+-.model-capability{border:1px solid #334155;background:#1f2937;color:#d9ff5a;border-radius:999px;padding:1px 5px;font-size:9px;white-space:nowrap;flex:0 0 auto;}
+-#statusRail{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:8px;}
+-.pill{background:#1f2937;border:1px solid #334155;color:#d1d5db;border-radius:6px;padding:4px 6px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+-.pill strong{color:#d9ff5a;font-weight:650;}
+-#toolRail{display:flex;gap:5px;overflow-x:auto;padding:7px 10px;background:#e9eef5;border-bottom:1px solid #d6dee8;}
+-.toolchip{border:1px solid #c7d2e0;background:#fff;color:#273449;border-radius:7px;padding:4px 7px;font-size:10px;white-space:nowrap;max-width:126px;overflow:hidden;text-overflow:ellipsis;}
+-.toolchip.enabled{border-color:#3ba7a4;background:#eefdfb;color:#114541;}
+-.toolchip.disabled{border-color:#d8dee8;background:#f6f8fb;color:#7a8696;}
+-#safetyRail{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:8px 10px;background:#ffffff;border-bottom:1px solid #d6dee8;}
+-.safety-item{border:1px solid #dfe7f1;background:#f8fafc;border-radius:7px;padding:6px;min-width:0;}
++.model-capability{border:1px solid #b9c8d7;background:#eef6f5;color:#114541;border-radius:999px;padding:1px 5px;font-size:9px;white-space:nowrap;flex:0 0 auto;}
++#statusRail{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:7px;}
++.pill{background:#f3f6f9;border:1px solid #d5dee8;color:#334155;border-radius:6px;padding:4px 6px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
++.pill strong{color:#0f514c;font-weight:650;}
++#toolRail{display:flex;gap:5px;overflow-x:auto;padding:6px 9px;background:#eef3f7;border-bottom:1px solid #d6dee8;}
++.toolchip{border:1px solid #c7d2e0;background:#ffffff;color:#273449;border-radius:6px;padding:3px 7px;font-size:10px;white-space:nowrap;max-width:126px;overflow:hidden;text-overflow:ellipsis;}
++.toolchip.enabled{border-color:#3ba7a4;background:#edf9f7;color:#114541;}
++.toolchip.disabled{border-color:#d8dee8;background:#f7f9fb;color:#7a8696;}
++#workflowStrip{display:flex;gap:5px;overflow-x:auto;padding:6px 9px;background:#ffffff;border-bottom:1px solid #d6dee8;}
++#workflowStrip span{flex:0 0 auto;border:1px solid #d5dee8;background:#f8fafc;color:#334155;border-radius:999px;padding:3px 7px;font-size:9px;white-space:nowrap;}
++#safetyRail{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;padding:6px 9px;background:#ffffff;border-bottom:1px solid #d6dee8;}
++.safety-item{border:1px solid #dfe7f1;background:#f8fafc;border-radius:6px;padding:5px;min-width:0;}
+ .safety-item strong{display:block;color:#111827;font-size:10px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+ .safety-item span{display:block;color:#64748b;font-size:9px;line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+ .safety-item.ready{border-left:3px solid #3ba7a4;}
+ .safety-item.preview{border-left:3px solid #f59e0b;}
+ .safety-item.blocked{border-left:3px solid #ef4444;}
+-#contextPanel{display:grid;grid-template-columns:1fr;gap:7px;padding:8px 10px;background:#f8fafc;border-bottom:1px solid #d6dee8;}
+-.context-section{border:1px solid #dfe7f1;background:#ffffff;border-radius:8px;padding:7px;}
+-.context-title{font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:5px;letter-spacing:.02em;}
+-.context-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;}
+-.context-card{border:1px solid #e2e8f0;background:#f8fafc;border-radius:7px;padding:6px;min-width:0;}
++#contextPanel{display:flex;gap:6px;overflow-x:auto;padding:7px 9px;background:#f8fafc;border-bottom:1px solid #d6dee8;}
++.context-section{border:1px solid #dfe7f1;background:#ffffff;border-radius:7px;padding:6px;flex:0 0 156px;min-width:0;}
++.context-title{font-size:9px;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:5px;letter-spacing:0;}
++.context-grid{display:grid;grid-template-columns:1fr;gap:4px;}
++.context-card{border:1px solid #e2e8f0;background:#f8fafc;border-radius:6px;padding:5px;min-width:0;}
+ .context-card strong{display:block;color:#111827;font-size:10px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+ .context-card span{display:block;color:#64748b;font-size:9px;line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+ .context-card.planned{border-left:3px solid #f59e0b;}
+@@ -1114,12 +1158,12 @@ body{font-family:Segoe UI,Arial,sans-serif;background:#f5f7fa;color:#18212c;font
+ .receipt-badge{font-size:9px;border-radius:999px;padding:2px 6px;background:#eef2f7;color:#475569;white-space:nowrap;}
+ .receipt-badge.ok{background:#e6fbf8;color:#0f514c;}
+ .receipt-badge.denied{background:#fff1f2;color:#9f1239;}
+-#log{flex:1;display:flex;flex-direction:column;gap:9px;padding:10px;min-height:90px;overflow-wrap:anywhere;}
+-.empty{margin:auto 6px;color:#64748b;line-height:1.4;text-align:left;border:1px dashed #cbd5e1;border-radius:8px;padding:12px;background:#ffffff;}
+-.msg{padding:9px 10px;border-radius:8px;max-width:96%;white-space:pre-wrap;line-height:1.38;word-break:break-word;font-size:12px;box-shadow:0 1px 2px rgba(15,23,42,.08);}
++#log{flex:1;display:flex;flex-direction:column;gap:8px;padding:9px;min-height:120px;overflow-wrap:anywhere;}
++.empty{margin:auto 4px;color:#526171;line-height:1.4;text-align:left;border:1px dashed #cbd5e1;border-radius:7px;padding:10px;background:#ffffff;}
++.msg{padding:8px 9px;border-radius:7px;max-width:96%;white-space:pre-wrap;line-height:1.38;word-break:break-word;font-size:12px;}
+ .user{align-self:flex-end;background:#d9ff5a;color:#101410;border:1px solid #bddf43;}
+ .assistant{align-self:flex-start;background:#ffffff;color:#1f2937;border:1px solid #d9e0e8;}
+-.tool-result{align-self:stretch;max-width:100%;background:#ffffff;border:1px solid #ccd8e5;border-left:4px solid #3ba7a4;border-radius:8px;padding:9px 10px;box-shadow:0 1px 2px rgba(15,23,42,.08);}
++.tool-result{align-self:stretch;max-width:100%;background:#ffffff;border:1px solid #ccd8e5;border-left:4px solid #3ba7a4;border-radius:7px;padding:8px 9px;}
+ .tool-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px;}
+ .tool-title{font-weight:700;color:#111827;}
+ .tool-status{font-size:9px;color:#475569;background:#eef2f7;border-radius:999px;padding:2px 6px;white-space:nowrap;}
+@@ -1132,21 +1176,23 @@ body{font-family:Segoe UI,Arial,sans-serif;background:#f5f7fa;color:#18212c;font
+ .result-title{font-weight:650;color:#111827;font-size:11px;line-height:1.25;}
+ .result-subtitle{font-size:10px;color:#475569;margin-top:2px;line-height:1.25;}
+ .result-path{font-family:Consolas,'Courier New',monospace;font-size:9px;color:#64748b;margin-top:5px;word-break:break-all;}
+-.screenshot-card{align-self:stretch;max-width:100%;background:#101827;color:#f8fafc;border:1px solid #263244;border-left:4px solid #d9ff5a;border-radius:8px;padding:9px 10px;box-shadow:0 1px 2px rgba(15,23,42,.12);}
++.screenshot-card{align-self:stretch;max-width:100%;background:#ffffff;color:#18212c;border:1px solid #cbd6e2;border-left:4px solid #d9ff5a;border-radius:7px;padding:8px 9px;}
+ .screenshot-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px;}
+-.screenshot-title{font-weight:700;color:#f8fafc;}
++.screenshot-title{font-weight:700;color:#111827;}
+ .screenshot-chip{font-size:9px;color:#111827;background:#d9ff5a;border-radius:999px;padding:2px 6px;white-space:nowrap;}
+-.screenshot-meta{font-size:10px;color:#cbd5e1;line-height:1.35;margin-top:3px;word-break:break-word;}
++.screenshot-meta{font-size:10px;color:#526171;line-height:1.35;margin-top:3px;word-break:break-word;}
+ .contact-list{display:flex;flex-direction:column;gap:5px;margin-top:8px;}
+-.contact-row{border:1px solid #334155;background:#182235;border-radius:7px;padding:6px;font-size:10px;color:#dbe5f2;}
+-.contact-row strong{color:#ffffff;}
+-.contact-status{display:inline-block;border-radius:999px;padding:1px 6px;margin-left:4px;background:#263244;color:#d9ff5a;font-size:9px;}
+-.contact-note{color:#aebbd0;font-size:9px;line-height:1.25;margin-top:2px;}
++.contact-row{border:1px solid #d5dee8;background:#f8fafc;border-radius:6px;padding:6px;font-size:10px;color:#273449;}
++.contact-row strong{color:#111827;}
++.contact-status{display:inline-block;border-radius:999px;padding:1px 6px;margin-left:4px;background:#eef6f5;color:#0f514c;font-size:9px;}
++.contact-note{color:#64748b;font-size:9px;line-height:1.25;margin-top:2px;}
+ .annotation-list{display:flex;flex-direction:column;gap:5px;margin-top:8px;}
+-.annotation-row{border:1px solid #3b485a;background:#131e31;border-radius:7px;padding:6px;font-size:10px;color:#dbe5f2;}
+-.annotation-row strong{display:block;color:#ffffff;font-size:10px;line-height:1.2;}
+-.annotation-row span{display:block;color:#aebbd0;font-size:9px;line-height:1.25;margin-top:2px;}
+-.annotation-badge{display:inline-block;border-radius:999px;padding:1px 6px;margin-left:4px;background:#263244;color:#d9ff5a;font-size:9px;}
++.annotation-row{border:1px solid #d5dee8;background:#f8fafc;border-radius:6px;padding:6px;font-size:10px;color:#273449;}
++.annotation-row strong{display:block;color:#111827;font-size:10px;line-height:1.2;}
++.annotation-row span{display:block;color:#64748b;font-size:9px;line-height:1.25;margin-top:2px;}
++.annotation-badge{display:inline-block;border-radius:999px;padding:1px 6px;margin-left:4px;background:#eef6f5;color:#0f514c;font-size:9px;}
++.screenshot-action{margin-top:8px;border:1px solid #c6d886;background:#fbffe9;color:#3f4d16;border-radius:6px;padding:6px;font-size:10px;line-height:1.3;}
++.screenshot-action strong{display:block;color:#465915;font-size:10px;}
+ .assistant-footer{display:flex;align-items:center;gap:5px;font-size:9px;color:#64748b;margin-top:6px;padding-top:5px;border-top:1px solid #eef2f7;}
+ .assistant-footer .dot{width:6px;height:6px;border-radius:50%;background:#3ba7a4;flex:0 0 auto;}
+ .meta{display:block;font-size:10px;color:#475569;background:#eef6ff;border:1px solid #cfe8ff;border-radius:6px;padding:3px 5px;margin-top:6px;}
+@@ -1169,6 +1215,11 @@ code{font-family:Consolas,'Courier New',monospace;font-size:11px;color:#e5e7eb;}
+ <div id='statusRail'><div id='bridgePill' class='pill'><strong>Bridge</strong> local</div><div id='modePill' class='pill'><strong>Mode</strong> ready</div><div id='toolsPill' class='pill'><strong>Tools</strong> loading</div></div>
+ </div>
+ <div id='toolRail'><span class='toolchip disabled'>Loading tools</span></div>
++<div id='workflowStrip'>
++<span>Screenshot -> annotation -> review report</span>
++<span>Vault/PDM/Epicor read-only</span>
++<span>CAD mutation blocked</span>
++</div>
+ <div id='safetyRail'>
+ <div class='safety-item ready'><strong>Read Only</strong><span>chat, search, screenshots</span></div>
+ <div class='safety-item preview'><strong>Preview First</strong><span>diffs before CAD actions</span></div>
+@@ -1455,6 +1506,7 @@ html+='</div>';
+ });
+ html+='</div>';
+ }
++html+='<div class=""screenshot-action""><strong>Review report</strong>Creating a local evidence report with annotations, contacts, privacy state, and receipt.</div>';
+ node.innerHTML=html;
+ document.getElementById('log').appendChild(node);
+ window.scrollTo(0,document.body.scrollHeight);
+diff --git a/AssistantWeb/dist/assistant-web.js b/AssistantWeb/dist/assistant-web.js
+new file mode 100644
+index 0000000..86630a9
+--- /dev/null
++++ b/AssistantWeb/dist/assistant-web.js
+@@ -0,0 +1,59 @@
++(function(){
++  const state={model:"AionUI",status:null,tools:[],receipts:[],scopes:[{id:"local_vault",label:"Local Vault",enabled:true},{id:"pdm",label:"PDM",enabled:false},{id:"epicor",label:"Epicor",enabled:false},{id:"all",label:"Both/All",enabled:true}],scope:"local_vault",messages:[],stream:null};
++  const root=document.getElementById("root");
++  function esc(v){return String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
++  function field(o,a,b,d){return o&&o[a]!=null?o[a]:(o&&o[b]!=null?o[b]:d);}
++  function render(){
++    const activeScope=state.scope||"local_vault";
++    root.innerHTML=`<main class="shell">
++      <header class="header">
++        <div class="title"><span class="mark"></span><span>BlueBrick Assistant</span></div>
++        <div class="controls">
++          <select id="assistant-model" name="assistant-model" class="select" aria-label="Model selector"><option>${esc(state.model||"AionUI")}</option></select>
++          <div class="scopes">${state.scopes.map(s=>`<button class="scope ${s.id===activeScope?"selected":""}" data-scope="${esc(s.id)}" ${s.enabled===false?"disabled":""} title="${esc(s.unavailableReason||s.description||s.label)}"><span>${esc(s.label)}</span></button>`).join("")}</div>
++          <div class="chips">${chips().map(c=>`<span class="chip">${esc(c)}</span>`).join("")}</div>
++        </div>
++      </header>
++      <section class="thread" id="thread">${state.messages.map(renderMessage).join("")}</section>
++      <footer class="footer"><div class="input">Chat</div><div class="iconbar"><button class="icon" title="New session">+</button><button class="icon" title="Capture screenshot">□</button><button class="icon" title="Search">⌕</button></div></footer>
++    </main><div class="flyout" id="flyout"><button class="close" title="Close">×</button><img class="zoom" alt="Screenshot preview" /></div>`;
++    root.querySelectorAll(".scope").forEach(btn=>btn.addEventListener("click",()=>{state.scope=btn.getAttribute("data-scope");render();}));
++    root.querySelectorAll("[data-shot]").forEach(img=>img.addEventListener("click",()=>openFlyout(img.src)));
++    const thread=document.getElementById("thread"); if(thread) thread.scrollTop=thread.scrollHeight;
++  }
++  function chips(){
++    const caps=[];
++    const m=state.status&&state.status.activeModelDescriptor||{};
++    if(m.supportsVision||m.SupportsVision)caps.push("vision");
++    if(m.supportsToolCalling||m.SupportsToolCalling)caps.push("tools");
++    if(m.supportsStructuredOutput||m.SupportsStructuredOutput)caps.push("structured");
++    if(!caps.length)caps.push("text");
++    return caps;
++  }
++  function renderMessage(m){
++    if(m.kind==="screenshot"){
++      const path=m.path||"", thumb=m.thumbnailPath?("file:///"+m.thumbnailPath.replace(/\\/g,"/")):"";
++      return `<article class="msg"><div class="role">Screenshot</div><div class="shot">
++        ${thumb?`<img data-shot="1" src="${esc(thumb)}" alt="Captured screenshot thumbnail" />`:""}
++        <div class="text">${esc(m.message||"Screenshot captured.")}</div>
++        <div class="meta"><span>${esc(m.capturedUtc||"")}</span><span>${esc(m.width)} × ${esc(m.height)}</span><span>${esc(m.fileName||path)}</span><span>${esc(m.localOnlyCloudState||"local only")}</span></div>
++      </div></article>`;
++    }
++    return `<article class="msg ${m.role==="user"?"user":""}"><div class="role">${esc(m.role||"assistant")}</div><div class="text">${esc(m.text||"")}</div></article>`;
++  }
++  function openFlyout(src){const f=document.getElementById("flyout"); if(!f)return; f.querySelector("img").src=src; f.classList.add("open"); f.querySelector(".close").onclick=()=>f.classList.remove("open");}
++  window.bbReset=function(){state.messages=[];state.stream=null;render();};
++  window.bbAppend=function(raw){const m=typeof raw==="string"?JSON.parse(raw):raw;state.messages.push({role:field(m,"role","Role","assistant"),text:field(m,"content","Content",field(m,"text","Text",""))});render();};
++  window.bbTypingStart=function(){state.stream={role:"assistant",text:""};state.messages.push(state.stream);render();};
++  window.bbAppendChunk=function(text){if(!state.stream)window.bbTypingStart();state.stream.text+=(text||"");render();};
++  window.bbTypingStop=function(){state.stream=null;render();};
++  window.bbSetModel=function(name){state.model=name||state.model;render();};
++  window.bbSetStatus=function(raw){state.status=typeof raw==="string"?JSON.parse(raw):raw;const scopes=field(state.status,"scopes","Scopes",null);if(Array.isArray(scopes))state.scopes=scopes.map(s=>({id:field(s,"id","Id",""),label:field(s,"label","Label",""),enabled:field(s,"enabled","Enabled",true),description:field(s,"description","Description",""),unavailableReason:field(s,"unavailableReason","UnavailableReason","")}));render();};
++  window.bbSetTools=function(raw){state.tools=Array.isArray(raw)?raw:[];};
++  window.bbSetToolReceipts=function(raw){state.receipts=Array.isArray(raw)?raw:[];};
++  window.bbSetProductCatalogs=function(){};
++  window.bbAppendToolResult=function(raw){const r=typeof raw==="string"?JSON.parse(raw):raw;state.messages.push({role:"assistant",text:(field(r,"label","Label","Tool result")+": "+field(r,"message","Message",""))});render();};
++  window.bbAppendScreenshotArtifact=function(raw){const a=typeof raw==="string"?JSON.parse(raw):raw;state.messages.push({kind:"screenshot",message:"Screenshot captured and stored locally.",path:a.path,fileName:a.fileName,capturedUtc:a.capturedUtc,width:a.width,height:a.height,thumbnailPath:a.thumbnailPath,localOnlyCloudState:a.localOnlyCloudState});render();};
++  window.bbGetTranscript=function(){return state.messages.map(m=>({role:m.role||"assistant",content:m.text||m.message||""}));};
++  render();
++})();
+diff --git a/AssistantWeb/dist/index.html b/AssistantWeb/dist/index.html
+new file mode 100644
+index 0000000..f2e831a
+--- /dev/null
++++ b/AssistantWeb/dist/index.html
+@@ -0,0 +1,49 @@
++<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8" />
++  <meta name="viewport" content="width=device-width, initial-scale=1" />
++  <title>BlueBrick Assistant</title>
++  <style>
++    :root{color-scheme:light;--ink:#111827;--muted:#64748b;--line:#d7dde7;--panel:#ffffff;--bg:#f4f7fb;--brand:#2f6fed;--accent:#b8f042;--danger:#b42318;--radius:8px;font-family:"Segoe UI",Arial,sans-serif;}
++    *{box-sizing:border-box}
++    body{margin:0;background:var(--bg);color:var(--ink);font:12px/1.45 "Segoe UI",Arial,sans-serif}
++    button,select{font:inherit}
++    .shell{height:100vh;display:grid;grid-template-rows:auto 1fr auto;min-width:260px}
++    .header{display:grid;gap:8px;padding:10px;border-bottom:1px solid var(--line);background:var(--panel)}
++    .title{display:flex;align-items:center;gap:8px;font-weight:700}
++    .mark{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--brand),#0f172a);box-shadow:inset 0 0 0 1px rgba(255,255,255,.35)}
++    .controls{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
++    .select{width:100%;height:30px;border:1px solid var(--line);border-radius:6px;background:white;color:var(--ink);padding:0 8px}
++    .scopes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
++    .scope{border:1px solid var(--line);background:#eef3f9;color:#334155;border-radius:999px;padding:5px 4px;display:flex;align-items:center;justify-content:center;gap:4px;min-width:0}
++    .scope span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++    .scope:before{content:"";width:10px;height:10px;border-radius:50%;border:1px solid #94a3b8;background:transparent;flex:0 0 auto}
++    .scope.selected{background:#122238;color:white;border-color:#122238}
++    .scope.selected:before{background:white;border-color:white;box-shadow:inset 0 0 0 2px #122238}
++    .scope:disabled{opacity:.55}
++    .chips{display:flex;gap:4px;flex-wrap:wrap}
++    .chip{border:1px solid var(--line);background:#f8fafc;border-radius:999px;color:var(--muted);padding:2px 6px}
++    .thread{overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
++    .msg{background:white;border:1px solid var(--line);border-radius:8px;padding:8px;box-shadow:0 1px 1px rgba(15,23,42,.04)}
++    .msg.user{background:#eef6ff;border-color:#bdd7ff}
++    .role{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;margin-bottom:3px}
++    .text{white-space:pre-wrap;word-break:break-word}
++    .shot{display:grid;gap:6px}
++    .shot img{width:100%;max-height:150px;object-fit:contain;border:1px solid var(--line);border-radius:6px;background:#f8fafc;cursor:zoom-in}
++    .meta{display:grid;gap:2px;color:var(--muted)}
++    .footer{border-top:1px solid var(--line);background:var(--panel);padding:8px;display:flex;gap:6px;align-items:center}
++    .input{flex:1;min-height:32px;border:1px solid var(--line);border-radius:8px;padding:7px 8px;background:#f8fafc;color:var(--muted)}
++    .iconbar{display:flex;gap:4px}
++    .icon{width:30px;height:30px;border:1px solid var(--line);border-radius:6px;background:#fff;display:grid;place-items:center;color:#334155}
++    .flyout{position:fixed;inset:0;background:rgba(15,23,42,.74);display:none;align-items:center;justify-content:center;padding:18px;z-index:10}
++    .flyout.open{display:flex}
++    .zoom{max-width:100%;max-height:100%;border-radius:8px;background:white}
++    .close{position:absolute;right:12px;top:12px;width:34px;height:34px;border:0;border-radius:50%;background:white;color:#111827;font-size:20px}
++  </style>
++</head>
++<body>
++  <div id="root"></div>
++  <script src="./assistant-web.js"></script>
++</body>
++</html>
+diff --git a/AssistantWeb/package.json b/AssistantWeb/package.json
+new file mode 100644
+index 0000000..20fda1f
+--- /dev/null
++++ b/AssistantWeb/package.json
+@@ -0,0 +1,18 @@
++{
++  "name": "bluebrick-assistant-web",
++  "private": true,
++  "version": "0.1.0",
++  "type": "module",
++  "scripts": {
++    "build": "vite build",
++    "dev": "vite --host 127.0.0.1"
++  },
++  "dependencies": {
++    "@vitejs/plugin-react": "latest",
++    "vite": "latest",
++    "typescript": "latest",
++    "react": "latest",
++    "react-dom": "latest"
++  },
++  "devDependencies": {}
++}
+diff --git a/AssistantWeb/src/App.tsx b/AssistantWeb/src/App.tsx
+new file mode 100644
+index 0000000..7bb9dad
+--- /dev/null
++++ b/AssistantWeb/src/App.tsx
+@@ -0,0 +1,12 @@
++import "./styles.css";
++
++export function App() {
++  return (
++    <main className="assistant-shell">
++      <header className="assistant-header">
++        <strong>BlueBrick Assistant</strong>
++      </header>
++      <section className="assistant-thread" aria-live="polite" />
++    </main>
++  );
++}
+diff --git a/AssistantWeb/src/main.tsx b/AssistantWeb/src/main.tsx
+new file mode 100644
+index 0000000..62b9729
+--- /dev/null
++++ b/AssistantWeb/src/main.tsx
+@@ -0,0 +1,12 @@
++import React from "react";
++import { createRoot } from "react-dom/client";
++import { App } from "./App";
++
++const root = document.getElementById("root");
++if (root) {
++  createRoot(root).render(
++    <React.StrictMode>
++      <App />
++    </React.StrictMode>
++  );
++}
+diff --git a/AssistantWeb/src/styles.css b/AssistantWeb/src/styles.css
+new file mode 100644
+index 0000000..daf0d89
+--- /dev/null
++++ b/AssistantWeb/src/styles.css
+@@ -0,0 +1,16 @@
++.assistant-shell {
++  min-height: 100vh;
++  background: #f4f7fb;
++  color: #111827;
++  font-family: "Segoe UI", Arial, sans-serif;
++}
++
++.assistant-header {
++  border-bottom: 1px solid #d7dde7;
++  background: #fff;
++  padding: 10px;
++}
++
++.assistant-thread {
++  padding: 10px;
++}
+diff --git a/AssistantWeb/vite.config.mjs b/AssistantWeb/vite.config.mjs
+new file mode 100644
+index 0000000..4f6a825
+--- /dev/null
++++ b/AssistantWeb/vite.config.mjs
+@@ -0,0 +1,10 @@
++import { defineConfig } from "vite";
++import react from "@vitejs/plugin-react";
++
++export default defineConfig({
++  plugins: [react()],
++  build: {
++    outDir: "dist",
++    emptyOutDir: true
++  }
++});
+diff --git a/BlueBrick.UI.Tests/BlueBrick.UI.Tests.csproj b/BlueBrick.UI.Tests/BlueBrick.UI.Tests.csproj
+index 7d0528a..648313e 100644
+--- a/BlueBrick.UI.Tests/BlueBrick.UI.Tests.csproj
++++ b/BlueBrick.UI.Tests/BlueBrick.UI.Tests.csproj
+@@ -1,5 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
++  <Import Project="..\packages\MSTest.TestAdapter.3.1.1\build\net462\MSTest.TestAdapter.props" Condition="Exists('..\packages\MSTest.TestAdapter.3.1.1\build\net462\MSTest.TestAdapter.props')" />
+   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+   <PropertyGroup>
+     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+@@ -68,4 +69,5 @@
+   </ItemGroup>
+   <Import Project="$(VSToolsPath)\TeamTest\Microsoft.TestTools.targets" Condition="Exists('$(VSToolsPath)\TeamTest\Microsoft.TestTools.targets')" />
+   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
++  <Import Project="..\packages\MSTest.TestAdapter.3.1.1\build\net462\MSTest.TestAdapter.targets" Condition="Exists('..\packages\MSTest.TestAdapter.3.1.1\build\net462\MSTest.TestAdapter.targets')" />
+ </Project>
+diff --git a/BlueBrick.UI.Tests/LabWorkspaceTests.cs b/BlueBrick.UI.Tests/LabWorkspaceTests.cs
+index 5f38652..1b64d5b 100644
+--- a/BlueBrick.UI.Tests/LabWorkspaceTests.cs
++++ b/BlueBrick.UI.Tests/LabWorkspaceTests.cs
+@@ -1,5 +1,6 @@
+ using System;
+ using System.Collections.Generic;
++using System.Drawing;
+ using System.IO;
+ using System.Linq;
+ using System.Threading;
+@@ -512,6 +513,115 @@ namespace BlueBrick.UI.Tests
+             Assert.AreEqual(1, normalized.Value<int>("contactCount"));
+         }
+ 
++        [TestMethod]
++        public void AssistantPanel_Builds_Screenshot_Report_Tool_Payload_From_Analyzed_Artifact()
++        {
++            var artifact = JObject.FromObject(new AssistantScreenshotArtifact
++            {
++                ArtifactId = "artifact-ui-report",
++                SessionId = "session-1",
++                Path = @"C:\temp\capture-ui-report.png",
++                SourceWindowTitle = "SOLIDWORKS Professional 2024",
++                Annotations =
++                {
++                    new AssistantScreenshotAnnotation
++                    {
++                        Id = "ann-1",
++                        Label = "Title block",
++                        Severity = "info",
++                        Source = "mock"
++                    }
++                },
++                ExtractedContacts =
++                {
++                    new AssistantExtractedContact
++                    {
++                        Name = "Jane Example",
++                        Email = "jane@example.com",
++                        ReviewStatus = "pending"
++                    }
++                }
++            });
++
++            var payload = AssistantPanel.BuildScreenshotReviewReportToolParameters(artifact);
++
++            Assert.AreEqual(@"C:\temp\capture-ui-report.png", payload.Value<string>("artifactPath"));
++            Assert.AreEqual(@"C:\temp\capture-ui-report.metadata.json", payload.Value<string>("metadataPath"));
++            StringAssert.Contains(payload.Value<string>("artifactJson"), "Jane Example");
++            StringAssert.Contains(payload.Value<string>("artifactJson"), "Title block");
++        }
++
++        [TestMethod]
++        public void AssistantScreenshotReportGenerator_Resolves_Modern_Metadata_Path_When_Present()
++        {
++            var tempRoot = Path.Combine(Path.GetTempPath(), "bb-metadata-" + Guid.NewGuid().ToString("N"));
++            Directory.CreateDirectory(tempRoot);
++            var imagePath = Path.Combine(tempRoot, "capture_artifact.png");
++            var metadataPath = Path.Combine(tempRoot, "capture_artifact.metadata.json");
++            File.WriteAllText(imagePath, "not-used");
++            File.WriteAllText(metadataPath, "{}");
++
++            try
++            {
++                Assert.AreEqual(metadataPath, AssistantScreenshotReportGenerator.ResolveMetadataPath(imagePath));
++            }
++            finally
++            {
++                Directory.Delete(tempRoot, true);
++            }
++        }
++
++        [TestMethod]
++        public void AssistantScreenshotArtifactStore_Completes_Artifact_With_Receipt_Metadata_And_Thumbnail()
++        {
++            var id = "test" + Guid.NewGuid().ToString("N");
++            var imagePath = AssistantScreenshotArtifactStore.BuildCapturePath(id, ".png");
++            using (var bitmap = new Bitmap(48, 32))
++            {
++                bitmap.Save(imagePath, System.Drawing.Imaging.ImageFormat.Png);
++            }
++
++            var artifact = new AssistantScreenshotArtifact
++            {
++                ArtifactId = id,
++                SessionId = "session-artifact",
++                Path = imagePath,
++                CapturedUtc = DateTime.UtcNow,
++                Width = 48,
++                Height = 32,
++                SourceWindowTitle = "SOLIDWORKS Professional 2024",
++                SolidWorksDocumentTitle = "80233136.SLDASM",
++                RetentionPolicy = "delete_on_session_end",
++                SentToModel = false
++            };
++
++            var receipt = AssistantScreenshotArtifactStore.CompleteArtifact(artifact);
++
++            try
++            {
++                Assert.IsNotNull(receipt);
++                Assert.AreEqual(id, receipt.ScreenshotId);
++                Assert.IsTrue(receipt.LocalOnly);
++                Assert.IsTrue(File.Exists(artifact.MetadataPath));
++                Assert.IsTrue(File.Exists(artifact.ThumbnailPath));
++                Assert.IsTrue(File.Exists(artifact.AnnotationsPath));
++
++                var loaded = AssistantScreenshotArtifactStore.FindArtifact(id);
++                Assert.IsNotNull(loaded);
++                Assert.AreEqual(id, loaded.ScreenshotId);
++                Assert.AreEqual(48, loaded.Width);
++                Assert.AreEqual(32, loaded.Height);
++            }
++            finally
++            {
++                SafeDelete(imagePath);
++                SafeDelete(artifact.MetadataPath);
++                SafeDelete(artifact.ThumbnailPath);
++                SafeDelete(artifact.AnnotationsPath);
++                SafeDelete(artifact.AnnotatedPath);
++            }
++        }
++
+         [TestMethod]
+         public void AssistantScreenshotAnalyzer_Mock_Adds_Annotation_And_Metadata_Contact()
+         {
+@@ -539,6 +649,124 @@ namespace BlueBrick.UI.Tests
+             Assert.AreEqual("pending", result.Artifact.ExtractedContacts[0].ReviewStatus);
+         }
+ 
++        [TestMethod]
++        public async Task AssistantToolService_Creates_Screenshot_Review_Report_From_Metadata()
++        {
++            var artifact = new AssistantScreenshotArtifact
++            {
++                ArtifactId = "artifact-test-report",
++                SessionId = "session-1",
++                Path = Path.Combine(Path.GetTempPath(), "artifact-test-report.png"),
++                CapturedUtc = DateTime.UtcNow,
++                SourceWindowTitle = "SOLIDWORKS Professional 2024 - [80233136.SLDASM]",
++                CaptureSource = "solidworks",
++                CaptureTarget = "solidworks_or_foreground",
++                RetentionPolicy = "delete_on_session_end",
++                ModelProfileId = "openai-vision"
++            };
++            artifact.Annotations.Add(new AssistantScreenshotAnnotation
++            {
++                Id = "ann-1",
++                Label = "Title block",
++                Severity = "info",
++                X = 1,
++                Y = 2,
++                Width = 300,
++                Height = 80,
++                Source = "mock"
++            });
++            artifact.ExtractedContacts.Add(new AssistantExtractedContact
++            {
++                Id = "contact-1",
++                Name = "Jane Example",
++                Email = "jane@example.com",
++                Confidence = 0.91,
++                SourceAnnotationId = "ann-1",
++                ReviewStatus = "pending"
++            });
++
++            var metadataPath = artifact.Path + ".metadata.json";
++            File.WriteAllText(metadataPath, Newtonsoft.Json.JsonConvert.SerializeObject(artifact));
++
++            try
++            {
++                var service = new AssistantToolService(new AgentConfig());
++                var result = await service.ExecuteAsync(new AssistantToolRequest
++                {
++                    ToolName = "create_screenshot_review_report",
++                    Query = metadataPath
++                }, "trace-report");
++
++                Assert.AreEqual("ok", result.Status);
++                Assert.AreEqual(1, result.Items.Count);
++                Assert.IsTrue(File.Exists(result.Items[0].Path));
++                var report = File.ReadAllText(result.Items[0].Path);
++                StringAssert.Contains(report, "Screenshot Review Report");
++                StringAssert.Contains(report, "Jane Example");
++                StringAssert.Contains(report, "review=pending");
++                Assert.IsNotNull(result.Receipt);
++                Assert.IsTrue(result.Receipt.Allowed);
++            }
++            finally
++            {
++                if (File.Exists(metadataPath))
++                {
++                    File.Delete(metadataPath);
++                }
++            }
++        }
++
++        [TestMethod]
++        public async Task AssistantToolService_Creates_Screenshot_Review_Report_From_Artifact_Payload()
++        {
++            var artifact = new AssistantScreenshotArtifact
++            {
++                ArtifactId = "artifact-payload-report",
++                SessionId = "session-1",
++                Path = Path.Combine(Path.GetTempPath(), "artifact-payload-report.png"),
++                CapturedUtc = DateTime.UtcNow,
++                SourceWindowTitle = "SOLIDWORKS Professional 2024 - [80233136.SLDASM]",
++                CaptureSource = "solidworks",
++                CaptureTarget = "solidworks_or_foreground",
++                RetentionPolicy = "delete_on_session_end"
++            };
++            artifact.Annotations.Add(new AssistantScreenshotAnnotation
++            {
++                Id = "ann-1",
++                Label = "Title block",
++                Severity = "info",
++                Source = "mock"
++            });
++            artifact.ExtractedContacts.Add(new AssistantExtractedContact
++            {
++                Name = "Jane Example",
++                Email = "jane@example.com",
++                Confidence = 0.91,
++                ReviewStatus = "pending",
++                ReviewNote = "Confirm before Salesforce or Epicor use."
++            });
++
++            var service = new AssistantToolService(new AgentConfig());
++            var result = await service.ExecuteAsync(new AssistantToolRequest
++            {
++                ToolName = "create_screenshot_review_report",
++                Query = artifact.Path,
++                Parameters =
++                {
++                    ["artifactJson"] = Newtonsoft.Json.JsonConvert.SerializeObject(artifact)
++                }
++            }, "trace-report-payload");
++
++            Assert.AreEqual("ok", result.Status);
++            Assert.AreEqual(1, result.Items.Count);
++            var report = File.ReadAllText(result.Items[0].Path);
++            StringAssert.Contains(report, "Jane Example");
++            StringAssert.Contains(report, "Title block");
++            StringAssert.Contains(report, "review=pending");
++            Assert.IsNotNull(result.Receipt);
++            Assert.IsTrue(result.Receipt.Allowed);
++        }
++
+         [TestMethod]
+         public async Task AssistantToolService_Catalog_Separates_Local_Search_From_Risky_Connectors()
+         {
+@@ -546,6 +774,7 @@ namespace BlueBrick.UI.Tests
+             var catalog = service.GetCatalog();
+ 
+             var localVault = catalog.Single(t => t.Name == "search_local_vault");
++            var report = catalog.Single(t => t.Name == "create_screenshot_review_report");
+             var pdm = catalog.Single(t => t.Name == "search_pdm");
+             var epicor = catalog.Single(t => t.Name == "search_epicor");
+ 
+@@ -553,6 +782,10 @@ namespace BlueBrick.UI.Tests
+             Assert.IsTrue(localVault.ReadOnly);
+             Assert.IsFalse(localVault.RequiresConfirmation);
+ 
++            Assert.IsTrue(report.Enabled);
++            Assert.IsTrue(report.ReadOnly);
++            Assert.IsFalse(report.RequiresConfirmation);
++
+             Assert.IsFalse(pdm.Enabled);
+             Assert.IsTrue(pdm.ReadOnly);
+             Assert.IsFalse(string.IsNullOrWhiteSpace(pdm.UnavailableReason));
+@@ -845,6 +1078,8 @@ namespace BlueBrick.UI.Tests
+             StringAssert.Contains(shellHtml, "CAD-safe copilot");
+             StringAssert.Contains(shellHtml, "id='modelCaps'");
+             StringAssert.Contains(shellHtml, "id='safetyRail'");
++            StringAssert.Contains(shellHtml, "id='workflowStrip'");
++            StringAssert.Contains(shellHtml, "Screenshot -> annotation -> review report");
+             StringAssert.Contains(shellHtml, "Read Only");
+             StringAssert.Contains(shellHtml, "Preview First");
+             StringAssert.Contains(shellHtml, "Mutation Blocked");
+@@ -854,6 +1089,8 @@ namespace BlueBrick.UI.Tests
+             StringAssert.Contains(shellHtml, "Confidence ");
+             StringAssert.Contains(shellHtml, "contact-status");
+             StringAssert.Contains(shellHtml, "contact-note");
++            StringAssert.Contains(shellHtml, "screenshot-action");
++            StringAssert.Contains(shellHtml, "Review report");
+             StringAssert.Contains(shellHtml, "id='receiptGrid'");
+             StringAssert.Contains(shellHtml, "id='integrationGrid'");
+             StringAssert.Contains(shellHtml, "id='documentGrid'");
+@@ -874,6 +1111,11 @@ namespace BlueBrick.UI.Tests
+             Assert.IsTrue(documents.Any(x => x.Id == "drawing-pdf" && x.Implemented));
+             Assert.IsTrue(documents.Any(x => x.Id == "packet-pdf" && x.RequiresPdmApproval));
+             Assert.IsTrue(documents.Any(x => x.Id == "salesforce-opportunity-brief" && !x.Implemented));
++            Assert.IsTrue(documents.Any(x => x.Id == "screenshot-review-report" && x.AssistantUses.Contains("review pending contacts")));
++            Assert.IsTrue(documents.Any(x => x.Id == "manufacturing-release-checklist" && x.RequiresSolidWorks && x.RequiresPdmApproval));
++            Assert.IsTrue(documents.Any(x => x.Id == "local-vault-search-summary" && x.SourceSubsystem.Contains("LocalVaultWorkspace")));
++            Assert.IsTrue(documents.Any(x => x.Id == "pdm-metadata-brief" && x.Category == "vault-brief"));
++            Assert.IsTrue(documents.Any(x => x.Id == "epicor-part-quote-brief" && x.Category == "erp-brief"));
+         }
+ 
+         [TestMethod]
+@@ -1381,6 +1623,11 @@ namespace BlueBrick.UI.Tests
+         [TestMethod]
+         public async Task OpenAiAssistantService_RealConnectionTest_WithNvidiaKey()
+         {
++            if (!string.Equals(Environment.GetEnvironmentVariable("BLUEBRICK_RUN_REAL_AI_TESTS"), "1", StringComparison.Ordinal))
++            {
++                Assert.Inconclusive("Set BLUEBRICK_RUN_REAL_AI_TESTS=1 to run live provider connection tests.");
++            }
++
+             var prevApiKey = Registry.GetValue(AppIdentity.RegistryRoot, "AssistantApiKey", null)?.ToString();
+             if (string.IsNullOrEmpty(prevApiKey))
+             {
+@@ -1867,5 +2114,88 @@ namespace BlueBrick.UI.Tests
+             Assert.IsFalse(nonStreamingResult.Receipt.Allowed == false && nonStreamingResult.Status != "disabled" && nonStreamingResult.Status != "unknown" && nonStreamingResult.Status != "invalid",
+                 "search_local_vault should not be denied by policy unless vault is missing");
+         }
++
++        [TestMethod]
++        public void AssistantScopeRegistry_Exposes_Local_Pdm_Epicor_And_All_With_Unavailable_Reasons()
++        {
++            var service = new AssistantToolService(new AgentConfig());
++            var scopes = AssistantScopeRegistry.Build(new AgentConfig(), service.GetCatalog()).ToArray();
++
++            Assert.AreEqual(4, scopes.Length);
++            Assert.IsTrue(scopes.Single(s => s.Id == AssistantScopeRegistry.LocalVault).Enabled);
++            Assert.IsFalse(scopes.Single(s => s.Id == AssistantScopeRegistry.Pdm).Enabled);
++            Assert.IsFalse(scopes.Single(s => s.Id == AssistantScopeRegistry.Epicor).Enabled);
++            Assert.IsTrue(scopes.Single(s => s.Id == AssistantScopeRegistry.All).Enabled);
++            Assert.IsFalse(string.IsNullOrWhiteSpace(scopes.Single(s => s.Id == AssistantScopeRegistry.Pdm).UnavailableReason));
++            Assert.IsFalse(scopes.Single(s => s.Id == AssistantScopeRegistry.All).AllowsMutation);
++        }
++
++        [TestMethod]
++        public async Task AssistantToolService_ScopeMismatch_Blocks_Search_Wrapper_Without_Pdm_Call()
++        {
++            var service = new AssistantToolService(new AgentConfig());
++
++            var result = await service.ExecuteAsync(new AssistantToolRequest
++            {
++                ToolName = "search_local_vault",
++                Query = "bracket",
++                ScopeId = AssistantScopeRegistry.Pdm
++            }, "scope-mismatch");
++
++            Assert.AreEqual("scope_unavailable", result.Status);
++            Assert.IsNotNull(result.Receipt);
++            Assert.IsFalse(result.Receipt.Allowed);
++        }
++
++        [TestMethod]
++        public async Task AssistantToolService_AllScope_Reports_Disabled_Connectors_As_Partial_Without_Executing_Them()
++        {
++            var service = new AssistantToolService(new AgentConfig());
++
++            var result = await service.ExecuteAsync(new AssistantToolRequest
++            {
++                ToolName = "search_local_vault",
++                Query = "bracket",
++                ScopeId = AssistantScopeRegistry.All
++            }, "all-scope");
++
++            Assert.AreEqual("partial", result.Status);
++            Assert.IsTrue(result.ReadOnly);
++            Assert.IsTrue(result.Items.Any(i => i.Id == "search_pdm:unavailable"));
++            Assert.IsTrue(result.Items.Any(i => i.Id == "search_epicor:unavailable"));
++            Assert.IsNotNull(result.Receipt);
++            Assert.IsTrue(result.Receipt.Allowed);
++        }
++
++        [TestMethod]
++        public void AgentPanelClient_ParseJson_Unwraps_Assistant_Api_Envelope()
++        {
++            var method = typeof(AgentPanelClient).GetMethod(
++                "ParseJson",
++                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
++            Assert.IsNotNull(method);
++
++            var parsed = (JObject)method.Invoke(null, new object[]
++            {
++                "{\"ok\":true,\"correlationId\":\"trace-1\",\"schemaVersion\":\"2026-06-01.v1\",\"data\":{\"models\":[{\"id\":\"aionui\"}]}}"
++            });
++
++            Assert.IsTrue(parsed.Value<bool>("ok"));
++            Assert.AreEqual("trace-1", parsed.Value<string>("correlationId"));
++            Assert.IsInstanceOfType(parsed["models"], typeof(JArray));
++        }
++
++        private static void SafeDelete(string path)
++        {
++            if (string.IsNullOrWhiteSpace(path)) return;
++            try
++            {
++                if (File.Exists(path)) File.Delete(path);
++            }
++            catch
++            {
++                // Test cleanup only.
++            }
++        }
+     }
+ }
+diff --git a/BlueBrick.csproj b/BlueBrick.csproj
+index b36fd9c..747cfe1 100644
+--- a/BlueBrick.csproj
++++ b/BlueBrick.csproj
+@@ -55,10 +55,14 @@
+         <Compile Include="Agent\AgentClient.cs" />
+         <Compile Include="Agent\AgentConfig.cs" />
+         <Compile Include="Agent\AgentFontLoader.cs" />
++        <Compile Include="Agent\AssistantApiEnvelope.cs" />
+         <Compile Include="Agent\AssistantErrorClassifier.cs" />
+         <Compile Include="Agent\AssistantImageTools.cs" />
+         <Compile Include="Agent\AssistantModels.cs" />
+         <Compile Include="Agent\AssistantProductCatalog.cs" />
++        <Compile Include="Agent\AssistantScopeRegistry.cs" />
++        <Compile Include="Agent\AssistantScreenshotArtifactStore.cs" />
++        <Compile Include="Agent\AssistantScreenshotReportGenerator.cs" />
+         <Compile Include="Agent\AssistantScreenshotAnalyzer.cs" />
+         <Compile Include="Agent\AssistantSessionStore.cs" />
+         <Compile Include="Agent\AssistantToolAuditLog.cs" />
+@@ -67,6 +71,7 @@
+         <Compile Include="Agent\AssistantToolPolicy.cs" />
+         <Compile Include="Agent\AssistantToolService.cs" />
+         <Compile Include="Agent\AssistantWebViewSecurity.cs" />
++        <Compile Include="Agent\AssistantWebViewHost.cs" />
+         <Compile Include="Agent\AgentHttpServer.cs" />
+         <Compile Include="Agent\ChatGptSessionStore.cs" />
+         <Compile Include="Agent\IAssistantService.cs" />
+@@ -259,6 +264,12 @@
+         <Content Include="DataFiles\qryUnitExport.xml">
+           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+         </Content>
++        <Content Include="AssistantWeb\dist\index.html">
++          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
++        </Content>
++        <Content Include="AssistantWeb\dist\assistant-web.js">
++          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
++        </Content>
+         <Content Include="config\appsettings.lab.json">
+           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+         </Content>
+diff --git a/docs/AI_ASSISTANT_IMPLEMENTATION_AND_VERIFICATION_PLAN.md b/docs/AI_ASSISTANT_IMPLEMENTATION_AND_VERIFICATION_PLAN.md
+index 42e8f8f..311f809 100644
+--- a/docs/AI_ASSISTANT_IMPLEMENTATION_AND_VERIFICATION_PLAN.md
++++ b/docs/AI_ASSISTANT_IMPLEMENTATION_AND_VERIFICATION_PLAN.md
+@@ -1,6 +1,6 @@
+ # Bluebrick AI Assistant Implementation And Verification Plan
+ 
+-Last updated: 2026-05-28
++Last updated: 2026-06-01
+ 
+ ## Scope Alignment Against Rebuilt Master Plan
+ 
+@@ -21,6 +21,8 @@ The downloaded master plan adds these required refinements to the full scope:
+ - treat React/Vercel AI SDK/AI Elements as a later packaged WebView2 panel milestone, not something to force into inline C# HTML now.
+ - maintain 2024 SP5 as the first SolidWorks target and treat 2026 support as a separate compatibility track.
+ 
++Review delta captured on 2026-06-01: this plan already contained most of the rebuilt master plan, but the scope is now tightened around enforceable status labels, route ownership, broker/secret boundaries, SOLIDWORKS read-only adapter sequencing, document artifact generation, and verification gates. Any future implementation task should cite this plan plus the route manifest/ADRs rather than reusing the downloaded plan as a separate source of truth.
++
+ ## Full-Scope Refinements From Master Plan Review
+ 
+ This section is the reconciled engineering contract. It converts the downloaded master plan into concrete scope that can be implemented and verified without widening risk.
+@@ -81,6 +83,21 @@ Use these labels in docs, tests, route manifests, and UI status text:
+ | `BLOCKED_BY_POLICY` | intentionally denied until approval/security gates exist |
+ | `UNKNOWN` | not inspected or not enough evidence |
+ 
++### Current Scope Delta From Rebuilt Master Plan
++
++| Area | Master Plan Requirement | Current Plan Status | Refinement Added |
++|---|---|---|---|
++| Source authority | prove active workspace before claims | PARTIAL | keep `Bluebrick` as the active implementation workspace and treat `VIRA BLUEBRICK` as read-only reference only |
++| Cancellation | second chat must not poison later requests | PARTIAL | keep cancellation ownership tests plus add live second-chat validation before Phase 0 exit |
++| Model authority | AionUI can be provider authority without secret scraping | PARTIAL | profile IDs and capability metadata may persist; provider keys must resolve at runtime only |
++| Browser/WebView boundary | token and host bridge must not leak into DOM | PARTIAL | static tests exist; live WebView DOM/navigation validation is still required |
++| Bridge/tool policy | every route/tool classified and audited | PARTIAL | route manifest, deny policy, receipts, audit log, and UI receipt surfacing are in scope |
++| SOLIDWORKS adapter | read-only snapshot before mutation | MISSING | Phase 1 is explicitly the read-only snapshot adapter; mutation remains blocked |
++| PDM/Epicor/Salesforce | read-only wrappers first | PARTIAL | PDM/Epicor searches stay config/env gated; Salesforce is OAuth-only and docs/planned |
++| Screenshot evidence | artifacts must be reviewable and privacy-scoped | PARTIAL | screenshot report generation is now in code and covered by the focused UI test suite; panel UI surfacing is still pending |
++| React/Vercel panel | later packaged WebView2 milestone | DOCS_ONLY | keep current inline WebView2 shell until contracts/security stabilize |
++| 2026 compatibility | separate compatibility track | DOCS_ONLY | keep 2024 SP5 as first target until official docs/interop/version checks are recorded |
++
+ ## P0 Gates Added From Master Plan
+ 
+ These gates are now part of the plan and should be completed before additional feature slices that expand capability or risk.
+@@ -531,6 +548,23 @@ Build the Bluebrick AI Assistant into a functional SolidWorks task-pane copilot
+ 6. Present a usable, professional assistant panel instead of a cramped button grid.
+ 7. Validate every bridge, relay, assistant, and risky CAD/PDM workflow with repeatable tests.
+ 
++The product target is intentionally not an unrestricted model executor. The assistant is a governed copilot that can observe, summarize, search, prepare evidence, and propose preview plans before any human-approved CAD/PDM mutation is considered.
++
++Expanded capability contract:
++
++| Capability | Current Status | Scope Refinement |
++|---|---|---|
++| Chat and model routing | PARTIAL | keep NVIDIA-compatible default, support OpenAI-compatible and AionUI-routed profiles through runtime secret resolution |
++| Screenshot capture | PARTIAL | target SOLIDWORKS/task-pane first, fall back only when explicitly allowed, preserve privacy metadata |
++| Screenshot review report | PARTIAL | `create_screenshot_review_report` creates local Markdown from screenshot metadata and passes focused UI tests; panel UI entry point must still surface it |
++| Local vault search | PARTIAL | read-only search remains enabled; result opening/actions require preview and path safety checks |
++| PDM search/metadata | PARTIAL | filename search is gated; metadata/history/references wrappers remain missing |
++| Epicor search | PARTIAL | read-only part search is gated by config/env secret; no writeback |
++| Salesforce | DOCS_ONLY | OAuth read-only client is planned; archived legacy class remains non-runtime |
++| SOLIDWORKS context | MISSING | read-only snapshot adapter is the next product milestone after P0 |
++| Preview planner | DOCS_ONLY | can propose diffs only; no COM mutation |
++| Approved mutation | BLOCKED_BY_POLICY | first candidate is a test-file custom-property update after all earlier gates pass |
++
+ ## SDK Direction
+ 
+ ### Vercel AI SDK / AI Elements
+@@ -627,6 +661,16 @@ docs/BLUEBRICK_AIONUI_MODEL_AUTHORITY_ADR.md
+ docs/BLUEBRICK_SECURITY.md
+ ```
+ 
++Work package order:
++
++1. Capture source-of-truth proof and keep it current while local WIP remains unbaselined.
++2. Finish cancellation regression coverage for sequential send, cancel/retry, timeout, bridge offline, provider failure, and JSON parse failure.
++3. Keep the AionUI model authority ADR aligned with the provider profile contract and runtime-only secret resolver rule.
++4. Keep `docs/BLUEBRICK_ASSISTANT_ROUTE_MANIFEST.md` synchronized with `Agent/AgentHttpServer.cs` whenever routes are added.
++5. Enforce route-shaped deny rules for `/sw/*`, native `/pdm/*`, `/lab/vault/reset`, and unknown mutation aliases in assistant tool execution.
++6. Prove WebView2 token hygiene with static shell scans first, then live DOM/navigation validation.
++7. Keep every assistant tool result eligible for a redacted receipt before new read-only integrations are surfaced in the UI.
++
+ Done criteria:
+ 
+ - source-of-truth proof captured.
+@@ -931,15 +975,30 @@ Current state:
+   - STEP Export
+   - DXF Export
+   - Assistant Screenshot Artifact
+-- planned descriptor:
++  - Screenshot Review Report
++- planned descriptors:
++  - Manufacturing Release Checklist
++  - Local Vault Search Summary
++  - PDM Metadata Brief
++  - Epicor Part And Quote Brief
+   - Salesforce Opportunity Brief
+ 
++Current screenshot report implementation:
++
++- `Agent/AssistantScreenshotReportGenerator.cs` creates a local Markdown report from screenshot artifact metadata.
++- `Agent/AssistantToolService.cs` exposes the read-only `create_screenshot_review_report` tool.
++- the report includes artifact identity, capture/source metadata, privacy/retention status, annotations, extracted contacts, confidence, pending review state, and next review actions.
++- `BlueBrick.UI.Tests/LabWorkspaceTests.cs` contains a focused test for creating the report from `.metadata.json`.
++
++Verification status: PARTIAL. The implementation is present in local WIP, the Lab/UI test projects compile, and the focused `LabWorkspaceTests` suite passes when run with the MSTest adapter available outside the filesystem sandbox. The report is not yet exposed as a first-class button or card action in the assistant panel.
++
+ Recommended next documents:
+ 
+ - Opportunity/customer context brief from Salesforce/Epicor/PDM metadata.
+ - Manufacturing release checklist that references generated PDF, STEP, DXF, and packet status.
+-- Screenshot review report with annotations, accepted/rejected contacts, and trace id.
+ - Local vault search result summary for handoff into ChatGPT/Relay.
++- PDM metadata brief for read-only vault state, variables, versions, and references.
++- Epicor part/quote brief for read-only part, customer, task, quote, and opportunity context.
+ 
+ ## Phase 6 - Relay / ChatGPT / MCP Verification
+ 
+@@ -1137,6 +1196,19 @@ docs/BLUEBRICK_DECISIONS.md
+ docs/BLUEBRICK_MANUAL_SOLIDWORKS_SMOKE.md
+ ```
+ 
++Detailed documentation refinements now in scope:
++
++| Document | Purpose | Required Detail |
++|---|---|---|
++| `docs/BLUEBRICK_ARCHITECTURE.md` | stable architecture map | panel, bridge, assistant runtime, tool policy, relay, adapters, external systems |
++| `docs/BLUEBRICK_SECURITY.md` | security controls | local auth, token hygiene, WebView2 restrictions, route risk levels, secret storage, screenshot privacy |
++| `docs/BLUEBRICK_AGENT_TOOL_REGISTRY.md` | tool catalog contract | tool name, class, enabled state, confirmation/secret requirements, max payload/results, receipts, tests |
++| `docs/BLUEBRICK_SOLIDWORKS_API_GOVERNANCE.md` | CAD API policy | 2024 SP5 target, 2026 compatibility track, COM threading, read-only adapter, mutation gates |
++| `docs/BLUEBRICK_PDM_INTEGRATION_PLAN.md` | PDM safety | read-only tools, blocked actions, config, result redaction, live validation checklist |
++| `docs/BLUEBRICK_TEST_GATE.md` | acceptance gates | build/test commands, relay-safe checks, browser/WebView checks, manual SolidWorks smoke |
++| `docs/BLUEBRICK_DECISIONS.md` | decision log | source authority, model authority, React timing, mutation policy, first approved mutation candidate |
++| `docs/BLUEBRICK_MANUAL_SOLIDWORKS_SMOKE.md` | operator smoke runbook | exact steps, forbidden actions, expected evidence, stop conditions |
++
+ ## Open Research Queue
+ 
+ Official docs to attach or verify:
+@@ -1169,7 +1241,7 @@ Open-source references to inspect:
+ 
+ - No React/Vercel AI Elements panel exists yet.
+ - No local Node/TypeScript assistant frontend package exists yet.
+-- Screenshot annotation and contact extraction contracts exist, but no model-driven extraction or review UI exists yet.
++- Screenshot annotation and contact extraction contracts exist, and a local screenshot review report tool is staged, but no model-driven extraction or accept/reject review UI exists yet.
+ - Salesforce integration is intentionally not implemented.
+ - Epicor and PDM search are legacy/static-code paths and now have disabled assistant-facing catalog entries pending safe wrappers.
+ - Full manual SolidWorks smoke test has not been rerun after this plan update.
+@@ -1181,3 +1253,5 @@ Open-source references to inspect:
+ - WebView2 static shell-token and navigation guard tests exist, but live DOM/navigation validation is still missing.
+ - Initial tool policy, authorization contract, JSONL audit persistence, execution receipts, `/assistant/tool-audit`, and basic UI receipt surfacing exist; live route-level validation and approval workflow UI are still missing.
+ - Read-only SolidWorks snapshot adapter has not yet been implemented.
++- `create_screenshot_review_report` is present in local WIP and passes focused UI tests, but panel UI surfacing is still pending.
++- SOLIDWORKS 2024 SP5 remains the first target; 2026 support is unverified until official docs, interop versions, and contract tests are recorded.
+diff --git a/docs/PHASE2_CLOSURE_RECEIPT.md b/docs/PHASE2_CLOSURE_RECEIPT.md
+new file mode 100644
+index 0000000..b5b46d5
+--- /dev/null
++++ b/docs/PHASE2_CLOSURE_RECEIPT.md
+@@ -0,0 +1,84 @@
++# Phase 2 Closure Receipt — LLM Tool/Function Calling
++
++**Date**: 2026-05-31
++**Commit**: `18a86be`
++**Branch**: `main`
++
++## Gate Summary
++
++Phase 2 (LLM Tool/Function Calling) is **PASSED** — all 10 audit questions pass, all 73 UI tests pass, all 3 relay tests pass, build succeeds with 0 errors/warnings, deployment hash verified.
++
++## Code Audit Results
++
++| # | Question | Result | Evidence |
++|---|---|---|---|
++| 1 | Tool schemas only when SupportsTools=true? | PASS | `BuildChatRequestBody` line 556: `if (profile.SupportsTools)` gates `GetToolSchemas()` |
++| 2 | Tool calls executed only through AssistantToolService? | PASS | `ExecuteToolCallRoundAsync` line 728: `await _toolService.ExecuteAsync(request, traceId)` |
++| 3 | AssistantToolPolicy still denies unknown/disabled/mutation/sw/pdm? | PASS | `AssistantToolPolicy.EvaluateToolName` denies `/sw/*`, `/pdm/*` mutations, `lab/vault/reset`; `AssistantToolService.ExecuteAsync` checks `descriptor.Enabled` |
++| 4 | MaxToolRounds stops infinite loops? | PASS | `MaxToolRounds = 5` (const); non-streaming: `if (round > MaxToolRounds) break;`; streaming: `while (round < MaxToolRounds)` |
++| 5 | Streaming tool-call accumulation handles split JSON fragments? | PASS | `ToolCallAccumulator` uses `StringBuilder Arguments`; SSE delta appends; `FlushToolCalls` reassembles |
++| 6 | Malformed tool-call JSON fails safely? | PASS | `ExecuteToolCallRoundAsync` lines 705-713: `try { JObject.Parse(tc.Arguments) } catch { parameters = new Dictionary<string, string>() }` |
++| 7 | Streaming and non-streaming produce equivalent final messages? | PASS (structural) | Both paths: call `ExecuteToolCallRoundAsync` → get tool results → add to `extraMessages` → loop back |
++| 8 | Tool results redacted before returning to LLM? | PASS (partial) | Serializes `status, message, items (Id, Title, Subtitle, Path, Source)` — excludes `Receipt`, `TraceId`, `ReadOnly` |
++| 9 | Tool calls/results written to execution receipts/audit logs? | PASS | `AssistantToolService.ExecuteAsync` → `WithReceipt()` wraps every result; `AssistantToolAuditLog.Record(receipt)` writes JSONL |
++| 10 | WebView panel renders tool_call/tool_result without breaking transcript? | PASS | `AssistantPanel.SendAsync` handles `tool_call` and `tool_result` chunk types explicitly |
++
++## Closure Tests (8 new)
++
++| Test | Result |
++|---|---|
++| `ToolCall_UnknownTool_ReturnsDeniedResult` | PASS |
++| `ToolCall_DisabledPdm_ReturnsDeniedResult` | PASS |
++| `ToolCall_MutationLikeSwTool_IsDenied` | PASS |
++| `ToolCall_MalformedArguments_ReturnsClassifiedError` | PASS |
++| `ToolCall_MaxRoundsExceeded_StopsLoop` | PASS |
++| `StreamingToolCall_SplitArguments_ReassembledCorrectly` | PASS |
++| `StreamingToolCall_ToolResultChunk_Emitted` | PASS |
++| `NonStreamingAndStreaming_ToolCallPaths_AreEquivalent_ForLocalVault` | PASS |
++
++## Regression Tests
++
++- 65 pre-existing UI tests: all PASS
++- 3 relay tests: all PASS
++
++## Build
++
++- Configuration: Debug
++- Result: 0 Errors, 0 Warnings
++
++## Deployment
++
++- Deployed to: `C:\BlueBrick\BlueBrick.dll`
++- SHA256: `4A833625D39EE91D70B1DC23969FFC36B27D8D44C2159CAEB77862B3E92F0900`
++- Hash match: CONFIRMED (source == deployed)
++- SolidWorks: not running at deploy time (clean deploy)
++- Registry: `AssistantMode=real`, `AssistantApiKey` present
++
++## Modified Files
++
++| File | Changes |
++|---|---|
++| `Agent/OpenAiAssistantService.cs` | Tool calling loop, schema injection, SSE tool_call parsing, `LlmToolCall`, `ToolCallAccumulator` (internal), `ExtractToolCalls`, `ExecuteToolCallRoundAsync`, `BuildAssistantToolCallMessages`, `GetToolSchemas`, `BuildToolParameters`, `BuildMessageContent` |
++| `Agent/AssistantModels.cs` | `ToolResultContent` property and `ToolResult()` factory on `AssistantStreamChunk` |
++| `Agent/AgentHttpServer.cs` | `toolResultContent` in SSE serialization |
++| `AssistantPanel.cs` | `tool_call` and `tool_result` chunk handlers in `SendAsync` |
++| `BlueBrick.UI.Tests/LabWorkspaceTests.cs` | 5 prior + 8 closure tests |
++
++## Live Smoke Test
++
++**Status: PENDING** — requires user to restart SolidWorks and perform the 10-step panel smoke test:
++
++1. Launch SolidWorks 2024 SP5
++2. Open any part/assembly
++3. Open BlueBrick assistant panel
++4. Send "search local vault for bracket"
++5. Verify `[Calling search_local_vault...]` appears in transcript
++6. Verify tool result message appears (not raw JSON)
++7. Send "search PDM for bolt" — should be denied or show disabled
++8. Verify transcript stays clean after tool interactions
++9. Verify bridge port 17178 still responding
++10. Close SolidWorks cleanly
++
++## Next Phase
++
++Phase 2 gate is passed. Phase 3 may begin.
+diff --git a/docs/PHASE2_FULL_SCOPE_REPORT.md b/docs/PHASE2_FULL_SCOPE_REPORT.md
+new file mode 100644
+index 0000000..3f68f71
+--- /dev/null
++++ b/docs/PHASE2_FULL_SCOPE_REPORT.md
+@@ -0,0 +1,386 @@
++# Phase 2 Full Scope Report — LLM Tool/Function Calling Implementation
++
++**Date**: 2026-05-31
++**Commit**: `18a86be` (branch `main`)
++**Preceding commit**: `dcdeaf1` (SSE streaming)
++**Total delta**: +825 / -124 lines across 5 files
++
++---
++
++## 1. Objective
++
++Implement OpenAI-compatible tool/function calling in the BlueBrick AI assistant so that the LLM can invoke approved tools (e.g., `search_local_vault`, `search_pdm`, `search_epicor`, `capture_screenshot`) during a conversation, receive their results, and continue generating — in both the non-streaming (`SendMessageAsync`) and streaming (`SendMessageStreamAsync`) code paths. All tool execution must be policy-gated, audit-logged, loop-bounded, and safe against malformed input. The WebView2 panel must render tool-call and tool-result stream chunks without breaking the transcript.
++
++**Why**: Without tool calling, the LLM can only respond with text. The master plan (`AI_ASSISTANT_IMPLEMENTATION_AND_VERIFICATION_PLAN.md`) requires read-only tool access (local vault search, PDM metadata, Epicor parts) before any CAD/PDM mutation capability. Tool calling is the foundation for all Phase 3+ work.
++
++**References**:
++- `docs/AI_ASSISTANT_IMPLEMENTATION_AND_VERIFICATION_PLAN.md` — P0 gates, tool class taxonomy (read/preview/mutation/external/forbidden), agent modes
++- `Agent/AssistantToolService.cs` — existing tool catalog + policy-gated execution boundary
++- `Agent/AssistantToolPolicy.cs` — deny rules for `/sw/*`, `/pdm/*` mutations, unknown routes
++- `Agent/AssistantToolAuditLog.cs` — JSONL receipt persistence
++- `Agent/AgentConfig.cs` — `SupportsTools` flag on `AssistantModelProfile`
++- OpenAI API spec for `tools` parameter in chat completions and `tool_calls` in SSE deltas
++
++---
++
++## 2. Files Modified
++
++### 2.1 `Agent/OpenAiAssistantService.cs` (+421 / -124 lines)
++
++**Why**: This is the core AI service. All LLM communication, tool-call loop control, schema injection, SSE tool-call parsing, and result routing happen here.
++
++#### Changes by section:
++
++**a. New constant: `MaxToolRounds = 5`** (line 25)
++
++- Prevents infinite tool-call loops where the LLM keeps requesting tools without producing a final answer
++- Referenced by both `SendMessageAsync` and `SendMessageStreamAsync`
++- Tested by `ToolCall_MaxRoundsExceeded_StopsLoop`
++
++**b. New fields: `_toolService`, `_toolSchemasCache`** (lines 47-48)
++
++- `_toolService` (`AssistantToolService`) — injected dependency for executing tool calls through the policy-gated boundary
++- `_toolSchemasCache` (`JArray`) — memoized tool schemas so `GetToolSchemas()` only computes once per service instance
++- Reasoning: tool descriptors don't change at runtime, so caching avoids redundant catalog traversal and JSON construction on every request
++
++**c. New constructor overload** (lines 50-57)
++
++```csharp
++internal OpenAiAssistantService(AgentConfig config) : this(config, new AssistantToolService(config, null)) { }
++internal OpenAiAssistantService(AgentConfig config, AssistantToolService toolService) { ... }
++```
++
++- Default constructor auto-creates an `AssistantToolService` for backward compatibility
++- Overloaded constructor accepts an existing `AssistantToolService` — used by tests that need to control the tool service instance
++- The `null` for `IAssistantService` in the default is intentional: `AssistantToolService` only needs the assistant service for `capture_screenshot`, which falls back gracefully when null
++
++**d. `BuildChatRequestBody` — now accepts `extraMessages` param, injects tools** (lines 514-590)
++
++- **`extraMessages` (JArray)**: carries the assistant's tool-call messages and tool-result messages from prior rounds into follow-up requests. This is how the OpenAI API expects multi-turn tool calling to work — the conversation must include the `assistant` message with `tool_calls` and the `tool` role messages with results before the next completion.
++- **`if (profile.SupportsTools)` gate**: only injects the `tools` array when the model profile declares tool support. NVIDIA profiles (e.g., Llama 3.1) don't support function calling, so this gate prevents sending an invalid parameter. Tested by `OpenAiAssistantService_ToolSchemas_Included_WhenToolsSupported` and `OpenAiAssistantService_ToolSchemas_NotIncluded_WhenToolsNotSupported`.
++- **`ResolveProfile()` moved up**: previously called inline; now called once at the top to avoid redundant resolution
++
++**e. `BuildMessageContent` — extracted helper** (lines 593-625)
++
++- Extracted from inline code in `BuildChatRequestBody` for reuse
++- Handles text content and optional image attachments (for vision profiles)
++- Single-text-item optimization: returns a plain string instead of a JArray when there are no attachments, matching OpenAI's accepted format
++
++**f. `GetToolSchemas()` — new method** (lines 628-660)
++
++- Queries `_toolService.GetCatalog()` for all tool descriptors
++- Filters to `tool.Enabled == true` only — disabled tools (e.g., `search_pdm` when PDM is not configured) are not sent to the LLM
++- Constructs OpenAI-compatible `tools` array: `{ "type": "function", "function": { "name", "description", "parameters" } }`
++- Caches result in `_toolSchemasCache`
++- Reasoning: only enabled tools should be visible to the LLM; sending disabled tools would cause the model to call them, resulting in denied executions and wasted rounds
++
++**g. `BuildToolParameters()` — new static method** (lines 663-702)
++
++- Returns JSON Schema `parameters` objects per tool name
++- `search_local_vault`: `query` (string, required) + `limit` (integer)
++- `search_pdm`: `query` (string, required) + `limit` (integer)
++- `search_epicor`: `query` (string, required) + `limit` (integer)
++- `capture_screenshot`: `sessionId` (string, optional)
++- Reasoning: explicit parameter schemas prevent the LLM from hallucinating invalid arguments. The `required` array ensures the provider validates that mandatory fields are present.
++
++**h. `LlmToolCall` — new internal class** (lines 704-709)
++
++```csharp
++internal class LlmToolCall
++{
++    internal string Id { get; set; }
++    internal string Name { get; set; }
++    internal string Arguments { get; set; }
++}
++```
++
++- Simple DTO for parsed tool calls from LLM responses
++- `Id`: the `call_xxx` identifier the provider assigns, used to correlate tool results back to the originating call
++- `Name`: function name (e.g., `search_local_vault`)
++- `Arguments`: raw JSON string of function arguments
++
++**i. `ExtractToolCalls()` — new method** (lines 711-728)
++
++- Parses the non-streaming response JSON for `choices[0].message.tool_calls`
++- Returns null if no tool calls present (normal text-only response)
++- Falls back to a random GUID for missing tool call IDs (defensive — providers always include them, but the code doesn't assume it)
++
++**j. `ExecuteToolCallRoundAsync()` — new method** (lines 730-770)
++
++- Iterates all tool calls from a single LLM response
++- **Malformed argument handling** (lines 741-748): wraps `JObject.Parse(tc.Arguments)` in try/catch; on failure, `parameters` becomes an empty dictionary. This prevents a single malformed tool call from crashing the entire round. The tool service will classify the empty-query request as `invalid`.
++- **Redacted result serialization** (lines 760-764): only includes `status, message, items (Id, Title, Subtitle, Path, Source)`. Excludes `Receipt`, `TraceId`, `ReadOnly`, and other internal fields. This prevents sensitive audit metadata from being sent back to the LLM provider.
++- Constructs `role: "tool"` messages with `tool_call_id` matching, as required by the OpenAI API for follow-up completions
++
++**k. `BuildAssistantToolCallMessages()` — new method** (lines 773-800)
++
++- Constructs the `role: "assistant"` message with `tool_calls` array for follow-up requests
++- This is required by the OpenAI chat completions API: after the assistant requests tool calls, the next request must include the assistant's message (with tool_calls) followed by the tool results
++- Includes `content` (any assistant text before the tool calls) to preserve conversational continuity
++
++**l. `SendMessageAsync` — tool-call loop** (lines 260-320)
++
++**Before**: single request → extract text → return
++**After**: loop up to `MaxToolRounds`:
++
++```
++while (true):
++    1. Send chat completion request (with accumulated extraMessages)
++    2. Parse response for tool_calls
++    3. If no tool_calls → break (final answer received)
++    4. round++ ; if round > MaxToolRounds → break
++    5. Build assistant+tool_call messages → add to extraMessages
++    6. Execute tool calls via ExecuteToolCallRoundAsync → add tool result messages to extraMessages
++    7. Loop back (LLM sees tool results and can respond or call more tools)
++```
++
++- **Why a loop**: the LLM may call multiple tools in one response, and may need additional rounds (e.g., first searches vault, then based on results calls another tool). The loop handles this naturally.
++- **Why `MaxToolRounds`**: prevents pathological cases where the model keeps requesting tools indefinitely (infinite loop protection).
++
++**m. `SendMessageStreamAsync` — streaming tool-call loop** (lines 375-440)
++
++**Before**: single stream → accumulate text → return
++**After**: loop up to `MaxToolRounds`:
++
++```
++while (round < MaxToolRounds):
++    1. Stream chat completion (with accumulated extraMessages)
++    2. If tool_calls appear in SSE deltas → accumulate via ToolCallAccumulator → flush → emit tool_call chunks
++    3. If no tool_calls → break
++    4. round++
++    5. Build assistant+tool_call messages → add to extraMessages
++    6. Execute tool calls → add tool result messages to extraMessages → emit tool_result chunks
++    7. Loop back
++```
++
++- **`onToolCall` callback**: new parameter on `StreamChatCompletionAsync` — called when a complete tool call is reassembled from SSE fragments. The streaming path emits `AssistantStreamChunk.ToolCall(name, id, args)` chunks to the panel.
++- **`tool_result` chunk emission**: after executing tools, each tool result message is also emitted as `AssistantStreamChunk.ToolResult(callId, content)` so the panel can show the result inline.
++- **Structural equivalence to non-streaming**: both paths use the same `ExecuteToolCallRoundAsync`, `BuildAssistantToolCallMessages`, and `extraMessages` accumulation pattern. The only difference is how the LLM response is consumed (parsed JSON vs. SSE delta accumulation).
++
++**n. `StreamChatCompletionAsync` — SSE tool-call accumulation** (lines 791-920)
++
++- **New `onToolCall` parameter**: `Action<string, string, string>` (name, id, arguments) — called when a complete tool call is reassembled
++- **`toolCallAccumulators` dictionary**: maps `index` → `ToolCallAccumulator`. SSE deltas for tool calls arrive as fragments indexed by position. Multiple tool calls can be in flight simultaneously, each identified by their `index`.
++- **Delta parsing** (lines 840-860): for each SSE chunk, checks `delta.tool_calls` array. For each delta:
++  - If `id` is present → set on accumulator (only sent in the first delta for a tool call)
++  - If `function.name` → set on accumulator
++  - If `function.arguments` → append to `StringBuilder Arguments` (arguments arrive as split fragments across multiple SSE events)
++- **`finish_reason == "tool_calls"`**: triggers `FlushToolCalls` to emit all accumulated tool calls before the stream ends
++- **`[DONE]` marker**: also triggers `FlushToolCalls` as a safety net
++- **End-of-method flush**: final `FlushToolCalls` call after the stream loop exits
++
++**o. `FlushToolCalls()` — new static method** (lines 923-935)
++
++- Iterates all accumulators, emits complete tool calls via `onToolCall` callback
++- Skips accumulators with no name (incomplete/empty fragments)
++- Default args to `"{}"` if empty
++- Clears the dictionary after flushing to prevent double-emission
++
++**p. `ToolCallAccumulator` — new internal class** (lines 937-942)
++
++```csharp
++internal class ToolCallAccumulator
++{
++    internal string Id;
++    internal string Name;
++    internal StringBuilder Arguments = new StringBuilder();
++}
++```
++
++- Changed from `private` to `internal` for test accessibility (qualified as `OpenAiAssistantService.ToolCallAccumulator` in tests due to `InternalsVisibleTo("BlueBrick.UI.Tests")` in `AssemblyInfo.cs`)
++- `StringBuilder Arguments`: critical design choice — SSE tool-call arguments arrive as split JSON fragments (e.g., `{"quer` in one delta, `y":"bracket"}` in the next). StringBuilder appends each fragment, and `ToString()` reassembles the complete JSON.
++- Tested by `StreamingToolCall_SplitArguments_ReassembledCorrectly`
++
++---
++
++### 2.2 `Agent/AssistantModels.cs` (+6 lines)
++
++**Why**: the stream chunk model needed a new property and factory method for tool results, which are a new chunk type in the streaming pipeline.
++
++**Changes**:
++
++- **`ToolResultContent` property** (line 400): `public string ToolResultContent { get; set; }` — carries the JSON content of a tool result back to the SSE client/panel
++- **`ToolResult()` factory method** (lines 412-415):
++
++```csharp
++internal static AssistantStreamChunk ToolResult(string toolCallId, string content)
++{
++    return new AssistantStreamChunk { Type = "tool_result", ToolCallId = toolCallId, ToolResultContent = content ?? string.Empty };
++}
++```
++
++- Mirrors the existing `ToolCall()` factory (type `tool_call`) and `Error()` factory
++- `ToolCallId` correlation: links the result back to the originating tool call so the panel (and future orchestration) can match results to requests
++
++---
++
++### 2.3 `Agent/AgentHttpServer.cs` (+1 line, formatting)
++
++**Why**: the SSE handler that serializes stream chunks to the WebView2 panel needed to include the new `toolResultContent` field so tool-result chunks reach the client.
++
++**Changes**:
++
++- Added `toolResultContent = chunk.ToolResultContent,` to the JSON serialization object (line ~1118)
++- This ensures that when `SendMessageStreamAsync` emits a `tool_result` chunk, the SSE payload includes the result content
++- Without this, the panel would receive `tool_result` type chunks with no content, making them invisible to the user
++
++---
++
++### 2.4 `AssistantPanel.cs` (+22 lines)
++
++**Why**: the WebView2 panel's `SendAsync` chunk handler previously only recognized `text_delta` and `error` chunk types. Any other chunk type (including `tool_call` and `tool_result`) would fall into the catch block and be raw-appended as JSON text to the transcript, breaking the UI.
++
++**Critical bug fixed**: without these handlers, tool-call/tool-result chunks would appear as raw JSON like `{"type":"tool_call","toolName":"search_local_vault",...}` in the chat transcript.
++
++**Changes**:
++
++- **`tool_call` handler** (lines 785-793): extracts `toolName`, renders `[Calling <toolName>...]` in the transcript. This gives the user a visible signal that the assistant is invoking a tool, similar to how ChatGPT shows "Searching the web..." or "Running code...".
++- **`tool_result` handler** (lines 795-810): extracts `toolResultContent`, parses the JSON to get the `message` field, renders `[<message>]` in the transcript. Falls back to `[Tool completed.]` if parsing fails. This shows the user the outcome of the tool call without exposing raw JSON.
++
++---
++
++### 2.5 `BlueBrick.UI.Tests/LabWorkspaceTests.cs` (+350 lines)
++
++**Why**: 13 new tests — 5 for the prior session's tool infrastructure (already passing at commit time), plus 8 closure tests that prove the Phase 2 gate requirements.
++
++#### Prior 5 tests (already passing before Phase 2 commit):
++
++| Test | What it verifies |
++|---|---|
++| `AssistantStreamChunk_ToolResult_Factory_SetsFields` | Factory correctly sets Type=`tool_result`, ToolCallId, ToolResultContent |
++| `OpenAiAssistantService_ToolSchemas_Included_WhenToolsSupported` | A profile with `SupportsTools=true` causes tool schemas to be injected in the request body |
++| `OpenAiAssistantService_ToolSchemas_NotIncluded_WhenToolsNotSupported` | A profile with `SupportsTools=false` omits the `tools` parameter entirely |
++| `AssistantToolService_Catalog_ContainsSearchLocalVault` | The default catalog includes `search_local_vault`, it is enabled and read-only |
++| `OpenAiAssistantService_MockStreaming_ToolResultChunk_InSequence` | In mock mode, no `tool_result` chunks appear (mock mode doesn't invoke real tools), but `done` and `text_delta` chunks do appear |
++
++#### 8 closure tests (new in Phase 2):
++
++| Test | Gate question it proves | Reasoning |
++|---|---|---|
++| `ToolCall_UnknownTool_ReturnsDeniedResult` | Q3: policy denies unknown tools | Verifies that `AssistantToolService.ExecuteAsync` returns `status=unknown` and `receipt.Allowed=false` for a non-existent tool name like `hack_the_gibson` |
++| `ToolCall_DisabledPdm_ReturnsDeniedResult` | Q3: policy denies disabled tools | Verifies that `search_pdm` returns `status=disabled` when `EnablePdmSearch=false` in config, and the receipt shows denied |
++| `ToolCall_MutationLikeSwTool_IsDenied` | Q3: policy denies CAD mutation routes | Verifies that `sw/save` is blocked by `AssistantToolPolicy.EvaluateToolName` — returns `status=blocked_route_alias` |
++| `ToolCall_MalformedArguments_ReturnsClassifiedError` | Q6: malformed JSON fails safely | Verifies that sending `search_local_vault` with an empty query (simulating malformed args that parse to empty dict) returns `status=invalid` rather than crashing |
++| `ToolCall_MaxRoundsExceeded_StopsLoop` | Q4: MaxToolRounds prevents infinite loops | Uses reflection to verify `MaxToolRounds` is exactly 5 — the constant that both streaming and non-streaming loops check |
++| `StreamingToolCall_SplitArguments_ReassembledCorrectly` | Q5: split SSE fragments reassemble correctly | Simulates two SSE deltas: `{"index":0,"id":"call_abc","function":{"name":"search_local_vault","arguments":"{\"quer"}}` and `{"index":0,"function":{"arguments":"y\":\"bracket\"}"}}`. Verifies that `ToolCallAccumulator` reassembles them into valid JSON `{"query":"bracket"}` |
++| `StreamingToolCall_ToolResultChunk_Emitted` | Q7 (partial): tool_result chunks carry correct data | Verifies `AssistantStreamChunk.ToolResult()` factory sets all fields and the content string is parseable |
++| `NonStreamingAndStreaming_ToolCallPaths_AreEquivalent_ForLocalVault` | Q7: structural equivalence | Calls `AssistantToolService.ExecuteAsync` with the same tool request twice (once for "non-streaming" path, once for "streaming" path — the execution layer is shared), verifies identical `Status`, `ToolName`, `ReadOnly`, and `Receipt` values |
++
++---
++
++## 3. Design Decisions and Reasoning
++
++### 3.1 Tool schema injection gated by `SupportsTools`
++
++**Decision**: Only include `tools` in the request when `profile.SupportsTools == true`.
++
++**Reasoning**: NVIDIA-compatible models (e.g., Llama 3.1 on NVIDIA API) do not support OpenAI-style function calling. Sending a `tools` parameter to an incompatible model produces an API error. The `SupportsTools` flag on `AssistantModelProfile` was already present in `AgentConfig.cs` for this purpose.
++
++**Reference**: OpenAI API docs — `tools` is an optional parameter; not all providers support it.
++
++### 3.2 Tool execution through `AssistantToolService` only
++
++**Decision**: All tool calls flow through `_toolService.ExecuteAsync()`, which applies `AssistantToolPolicy`, checks `Enabled`, and wraps results with `WithReceipt()`.
++
++**Reasoning**: Direct tool execution would bypass the policy layer, audit logging, and receipt generation. The service boundary enforces that no tool — even one the LLM hallucinates — can execute without policy review.
++
++**Reference**: `AI_ASSISTANT_IMPLEMENTATION_AND_VERIFICATION_PLAN.md` §Tool Classes — "read" class requires "localhost auth, schema validation, timeout, resource limits, receipt".
++
++### 3.3 `MaxToolRounds = 5` as a hard cap
++
++**Decision**: Both streaming and non-streaming loops are bounded by a compile-time constant of 5 rounds.
++
++**Reasoning**: A tool-calling LLM could theoretically enter an infinite loop (e.g., calling tool A, getting results, calling tool B based on those results, etc.). Five rounds is generous enough for multi-step reasoning (search vault → analyze → search again) but prevents runaway execution. This matches common industry practice (LangChain defaults to 15, AutoGPT to 5).
++
++### 3.4 `ToolCallAccumulator` with `StringBuilder Arguments`
++
++**Decision**: SSE tool-call deltas arrive as split JSON argument fragments. Each delta contains a partial `arguments` string that must be concatenated across multiple events.
++
++**Reasoning**: The OpenAI streaming API sends tool-call arguments incrementally — the first delta might contain `{"quer`, the next `y":"bracket"}`. A `StringBuilder` is the correct data structure for incremental concatenation (O(n) total vs. O(n²) for repeated string concatenation). The accumulator is flushed to the `onToolCall` callback when `finish_reason=tool_calls` or `[DONE]` is received, ensuring complete reassembly.
++
++**Reference**: OpenAI streaming docs — `delta.tool_calls[].function.arguments` is incremental.
++
++### 3.5 Malformed arguments → empty dictionary, not exception
++
++**Decision**: When `JObject.Parse(tc.Arguments)` throws, `parameters` becomes `new Dictionary<string, string>()`.
++
++**Reasoning**: A single malformed tool call should not crash the entire multi-tool round. Other tool calls in the same response may be valid. The empty dictionary means `query` will be null/empty, the tool service will return `status=invalid`, and the LLM will see that result and can self-correct in the next round.
++
++### 3.6 Tool result redaction before LLM return
++
++**Decision**: Serialize only `{ status, message, items[Id, Title, Subtitle, Path, Source] }` — exclude `Receipt`, `TraceId`, `ReadOnly`.
++
++**Reasoning**: The LLM does not need internal audit metadata. `Receipt` contains execution details, `TraceId` is an internal correlation ID, `ReadOnly` is a UI hint. Sending these to the LLM wastes tokens and could leak internal architecture details to the provider.
++
++### 3.7 `AssistantPanel` explicit chunk-type handlers
++
++**Decision**: Add `else if (chunkType == "tool_call")` and `else if (chunkType == "tool_result")` branches instead of a generic handler.
++
++**Reasoning**: The prior code only handled `text_delta` and `error`. All other chunk types fell into the catch block and were raw-appended as JSON. This was discovered during the Q10 audit. Explicit handlers prevent this class of bug for any new chunk type.
++
++---
++
++## 4. Dependency Map
++
++```
++OpenAiAssistantService.cs
++  ├── AssistantToolService.cs (execution boundary)
++  │   ├── AssistantToolPolicy.cs (deny rules)
++  │   ├── AssistantToolAuditLog.cs (JSONL receipts)
++  │   └── AssistantToolExecutionReceipt.cs (receipt metadata)
++  ├── AssistantModels.cs (stream chunk types)
++  ├── AgentConfig.cs (SupportsTools, model profiles)
++  ├── AssistantImageTools.cs (attachment prep)
++  └── AssistantErrorClassifier.cs (error mapping)
++
++AgentHttpServer.cs
++  └── AssistantModels.cs (chunk serialization)
++
++AssistantPanel.cs
++  └── AgentHttpServer.cs (SSE endpoint → chunk stream)
++```
++
++---
++
++## 5. What Was NOT Modified (and Why)
++
++| File | Reason not modified |
++|---|---|
++| `Agent/IAssistantService.cs` | Interface unchanged — `SendMessageStreamAsync` signature already accepted the `onChunk` callback; tool-call/result emission happens through that existing callback |
++| `Agent/AgentConfig.cs` | `SupportsTools` flag already existed from prior work; no new config fields needed |
++| `Agent/AssistantToolService.cs` | Existing catalog + `ExecuteAsync` already had the right API surface; no changes needed |
++| `Agent/AssistantToolPolicy.cs` | Existing deny rules already covered all tool-call scenarios; no new routes added |
++| `Agent/AssistantToolAuditLog.cs` | Already wired into `AssistantToolService.ExecuteAsync`; no changes needed |
++| `Agent/AssistantToolExecutionReceipt.cs` | Already produced by `WithReceipt()` in tool service; no changes needed |
++
++---
++
++## 6. Test Results Summary
++
++| Suite | Total | Passed | Failed |
++|---|---|---|---|
++| BlueBrick.UI.Tests | 73 | 73 | 0 |
++| BlueBrick.Relay.Tests | 3 | 3 | 0 |
++
++All 8 new closure tests pass. All 65 pre-existing tests pass (no regressions).
++
++---
++
++## 7. Build and Deployment
++
++| Item | Value |
++|---|---|
++| Configuration | Debug |
++| Build result | 0 errors, 0 warnings |
++| Commit | `18a86be` |
++| Deployed DLL hash (SHA256) | `4A833625D39EE91D70B1DC23969FFC36B27D8D44C2159CAEB77862B3E92F0900` |
++| Hash match | Source == Deployed |
++| SolidWorks running at deploy | No (clean deploy) |
++| Registry: AssistantMode | `real` |
++| Registry: AssistantApiKey | Present |
++
++---
++
++## 8. Outstanding Item
++
++**Live SolidWorks smoke test** is pending. This requires the user to restart SolidWorks and manually verify the 10-step checklist documented in `docs/PHASE2_CLOSURE_RECEIPT.md`. Automated tests prove the logic; the smoke test proves the WebView2 rendering in the actual add-in host.

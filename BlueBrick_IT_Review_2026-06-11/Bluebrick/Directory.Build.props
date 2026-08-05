@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <TargetFrameworkMonikerAssemblyDirectoriesPath>C:\Users\cweir\.dotnet\local-targeting-pack\</TargetFrameworkMonikerAssemblyDirectoriesPath>
+    <_TargetFrameworkDirectories>C:\Users\cweir\.dotnet\local-targeting-pack\net48\</_TargetFrameworkDirectories>
+    <_FullFrameworkReferenceAssemblyPaths>C:\Users\cweir\.dotnet\local-targeting-pack\net48\</_FullFrameworkReferenceAssemblyPaths>
+    <FrameworkPathOverride>C:\Users\cweir\.dotnet\local-targeting-pack\net48\</FrameworkPathOverride>
+    <AssemblySearchPaths>{HintPathFromItem};{TargetFrameworkDirectory};{RawFileName};{GAC};{AssemblyFolders}</AssemblySearchPaths>
+    <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
+  </PropertyGroup>
+</Project>

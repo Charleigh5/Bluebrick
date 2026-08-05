@@ -1,0 +1,17 @@
+ M Agent/AgentHttpServer.cs
+ M ClsEnums.cs
+?? "C\357\200\272Userscweirrelay_test_output.txt"
+?? IntegrationTest/
+?? SESSION_STATE_20260530.md
+?? check_regroot.ps1
+?? docs/review/
+?? tmp_check2.ps1
+?? tmp_check_addin.ps1
+?? tmp_check_com.ps1
+?? tmp_check_reg.ps1
+?? tmp_copy_config.ps1
+?? tmp_copy_dlls.ps1
+?? tmp_copy_extras.ps1
+?? tmp_deploy.ps1
+?? tmp_register.bat
+?? tmp_register_lab.ps1

@@ -1,0 +1,2031 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "excalidraw-cli",
+  "elements": [
+    {
+      "type": "text",
+      "id": "title",
+      "x": 80,
+      "y": 40,
+      "text": "Bluebrick AI Assistant + AionUI Model Connection Layout",
+      "fontSize": 32,
+      "strokeColor": "#1e1e1e",
+      "fontFamily": 1
+    },
+    {
+      "type": "text",
+      "id": "subtitle",
+      "x": 82,
+      "y": 88,
+      "text": "Editable architecture canvas: task-pane dropdowns, assistant bridge, provider/model routing, and guarded CAD/PDM boundaries",
+      "fontSize": 18,
+      "strokeColor": "#4b5563",
+      "fontFamily": 1
+    },
+    {
+      "type": "rectangle",
+      "id": "zone_ui",
+      "x": 60,
+      "y": 140,
+      "width": 520,
+      "height": 880,
+      "backgroundColor": "#dbe4ff",
+      "fillStyle": "solid",
+      "strokeColor": "#4a9eed",
+      "opacity": 45,
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "zone_ui_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "zone_ui_label",
+      "x": 70,
+      "y": 150,
+      "width": 500,
+      "height": 860,
+      "text": "1. Bluebrick SolidWorks Task Pane",
+      "fontSize": 22,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "zone_ui",
+      "strokeColor": "#4a9eed"
+    },
+    {
+      "type": "rectangle",
+      "id": "zone_bridge",
+      "x": 650,
+      "y": 140,
+      "width": 620,
+      "height": 880,
+      "backgroundColor": "#e5dbff",
+      "fillStyle": "solid",
+      "strokeColor": "#8b5cf6",
+      "opacity": 45,
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "zone_bridge_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "zone_bridge_label",
+      "x": 660,
+      "y": 150,
+      "width": 600,
+      "height": 860,
+      "text": "2. Assistant Bridge + Model Routing",
+      "fontSize": 22,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "zone_bridge",
+      "strokeColor": "#8b5cf6"
+    },
+    {
+      "type": "rectangle",
+      "id": "zone_side",
+      "x": 1340,
+      "y": 140,
+      "width": 520,
+      "height": 880,
+      "backgroundColor": "#d3f9d8",
+      "fillStyle": "solid",
+      "strokeColor": "#22c55e",
+      "opacity": 45,
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "zone_side_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "zone_side_label",
+      "x": 1350,
+      "y": 150,
+      "width": 500,
+      "height": 860,
+      "text": "3. Tools, Data, and Guardrails",
+      "fontSize": 22,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "zone_side",
+      "strokeColor": "#22c55e"
+    },
+    {
+      "type": "rectangle",
+      "id": "sw_host",
+      "x": 110,
+      "y": 220,
+      "width": 410,
+      "height": 70,
+      "backgroundColor": "#a5d8ff",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "sw_host_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "sw_host_label",
+      "x": 120,
+      "y": 230,
+      "width": 390,
+      "height": 50,
+      "text": "SolidWorks hosts Bluebrick add-in\nswaddin.cs",
+      "fontSize": 18,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "sw_host"
+    },
+    {
+      "type": "rectangle",
+      "id": "frm_pane",
+      "x": 110,
+      "y": 330,
+      "width": 410,
+      "height": 80,
+      "backgroundColor": "#a5d8ff",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "frm_pane_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "frm_pane_label",
+      "x": 120,
+      "y": 340,
+      "width": 390,
+      "height": 60,
+      "text": "FrmPane task pane shell\nCollapsePanel sections",
+      "fontSize": 18,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "frm_pane"
+    },
+    {
+      "type": "arrow",
+      "id": "a_sw_pane",
+      "x": 315,
+      "y": 290,
+      "width": 0,
+      "height": 40,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          40
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "sw_host",
+        "fixedPoint": [
+          0.5,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "frm_pane",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "roughness": 2
+    },
+    {
+      "type": "rectangle",
+      "id": "panel_gen",
+      "x": 100,
+      "y": 455,
+      "width": 190,
+      "height": 65,
+      "backgroundColor": "#fff3bf",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "panel_gen_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "panel_gen_label",
+      "x": 110,
+      "y": 465,
+      "width": 170,
+      "height": 45,
+      "text": "Document\nGenerator",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "panel_gen"
+    },
+    {
+      "type": "rectangle",
+      "id": "panel_tools",
+      "x": 330,
+      "y": 455,
+      "width": 190,
+      "height": 65,
+      "backgroundColor": "#fff3bf",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "panel_tools_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "panel_tools_label",
+      "x": 340,
+      "y": 465,
+      "width": 170,
+      "height": 45,
+      "text": "Tools / Utils",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "panel_tools"
+    },
+    {
+      "type": "rectangle",
+      "id": "panel_props",
+      "x": 100,
+      "y": 550,
+      "width": 190,
+      "height": 65,
+      "backgroundColor": "#fff3bf",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "panel_props_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "panel_props_label",
+      "x": 110,
+      "y": 560,
+      "width": 170,
+      "height": 45,
+      "text": "Properties",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "panel_props"
+    },
+    {
+      "type": "rectangle",
+      "id": "panel_sales",
+      "x": 330,
+      "y": 550,
+      "width": 190,
+      "height": 65,
+      "backgroundColor": "#fff3bf",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "panel_sales_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "panel_sales_label",
+      "x": 340,
+      "y": 560,
+      "width": 170,
+      "height": 45,
+      "text": "Salesforce /\nOpportunity",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "panel_sales"
+    },
+    {
+      "type": "rectangle",
+      "id": "panel_conv",
+      "x": 100,
+      "y": 645,
+      "width": 190,
+      "height": 65,
+      "backgroundColor": "#fff3bf",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "panel_conv_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "panel_conv_label",
+      "x": 110,
+      "y": 655,
+      "width": 170,
+      "height": 45,
+      "text": "Conversions",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "panel_conv"
+    },
+    {
+      "type": "rectangle",
+      "id": "panel_ai",
+      "x": 330,
+      "y": 645,
+      "width": 190,
+      "height": 65,
+      "backgroundColor": "#b2f2bb",
+      "fillStyle": "solid",
+      "strokeColor": "#22c55e",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "panel_ai_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "panel_ai_label",
+      "x": 340,
+      "y": 655,
+      "width": 170,
+      "height": 45,
+      "text": "AI Assistant\npnlAssistantHost",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "panel_ai",
+      "strokeColor": "#22c55e"
+    },
+    {
+      "type": "arrow",
+      "id": "a_pane_gen",
+      "x": 250,
+      "y": 410,
+      "width": -55,
+      "height": 45,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -55,
+          45
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "frm_pane",
+        "fixedPoint": [
+          0.35,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "panel_gen",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "roughness": 2
+    },
+    {
+      "type": "arrow",
+      "id": "a_pane_tools",
+      "x": 380,
+      "y": 410,
+      "width": 45,
+      "height": 45,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          45,
+          45
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "frm_pane",
+        "fixedPoint": [
+          0.65,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "panel_tools",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "roughness": 2
+    },
+    {
+      "type": "arrow",
+      "id": "a_pane_props",
+      "x": 225,
+      "y": 410,
+      "width": -30,
+      "height": 140,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -30,
+          140
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "frm_pane",
+        "fixedPoint": [
+          0.3,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "panel_props",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "roughness": 2
+    },
+    {
+      "type": "arrow",
+      "id": "a_pane_sales",
+      "x": 405,
+      "y": 410,
+      "width": 20,
+      "height": 140,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20,
+          140
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "frm_pane",
+        "fixedPoint": [
+          0.7,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "panel_sales",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "roughness": 2
+    },
+    {
+      "type": "arrow",
+      "id": "a_pane_conv",
+      "x": 195,
+      "y": 410,
+      "width": 0,
+      "height": 235,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          235
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "frm_pane",
+        "fixedPoint": [
+          0.2,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "panel_conv",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "roughness": 2
+    },
+    {
+      "type": "arrow",
+      "id": "a_pane_ai",
+      "x": 450,
+      "y": 410,
+      "width": -25,
+      "height": 235,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -25,
+          235
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "frm_pane",
+        "fixedPoint": [
+          0.83,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "panel_ai",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "roughness": 2
+    },
+    {
+      "type": "rectangle",
+      "id": "assistant_ui",
+      "x": 790,
+      "y": 220,
+      "width": 330,
+      "height": 85,
+      "backgroundColor": "#b2f2bb",
+      "fillStyle": "solid",
+      "strokeColor": "#22c55e",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "assistant_ui_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "assistant_ui_label",
+      "x": 800,
+      "y": 230,
+      "width": 310,
+      "height": 65,
+      "text": "AssistantPanel.cs\nWebView chat + action buttons",
+      "fontSize": 18,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "assistant_ui",
+      "strokeColor": "#22c55e"
+    },
+    {
+      "type": "arrow",
+      "id": "a_ai_to_ui",
+      "x": 520,
+      "y": 678,
+      "width": 270,
+      "height": -415,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          270,
+          -415
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "panel_ai",
+        "fixedPoint": [
+          1,
+          0.5
+        ]
+      },
+      "endBinding": {
+        "elementId": "assistant_ui",
+        "fixedPoint": [
+          0,
+          0.5
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_ai_to_ui_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_ai_to_ui_label",
+      "x": 530,
+      "y": 688,
+      "width": 250,
+      "height": -435,
+      "text": "mounted control",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_ai_to_ui"
+    },
+    {
+      "type": "rectangle",
+      "id": "panel_client",
+      "x": 800,
+      "y": 360,
+      "width": 310,
+      "height": 75,
+      "backgroundColor": "#d0bfff",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "panel_client_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "panel_client_label",
+      "x": 810,
+      "y": 370,
+      "width": 290,
+      "height": 55,
+      "text": "AgentPanelClient\nHTTP + streaming calls",
+      "fontSize": 18,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "panel_client"
+    },
+    {
+      "type": "arrow",
+      "id": "a_ui_client",
+      "x": 955,
+      "y": 305,
+      "width": 0,
+      "height": 55,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          55
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "assistant_ui",
+        "fixedPoint": [
+          0.5,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "panel_client",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_ui_client_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_ui_client_label",
+      "x": 965,
+      "y": 315,
+      "width": 80,
+      "height": 35,
+      "text": "/assistant/*",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_ui_client"
+    },
+    {
+      "type": "rectangle",
+      "id": "http_server",
+      "x": 785,
+      "y": 500,
+      "width": 340,
+      "height": 90,
+      "backgroundColor": "#d0bfff",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "http_server_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "http_server_label",
+      "x": 795,
+      "y": 510,
+      "width": 320,
+      "height": 70,
+      "text": "AgentHttpServer\nlocal bridge on 17178 / 17179",
+      "fontSize": 18,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "http_server"
+    },
+    {
+      "type": "arrow",
+      "id": "a_client_server",
+      "x": 955,
+      "y": 435,
+      "width": 0,
+      "height": 65,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          65
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "panel_client",
+        "fixedPoint": [
+          0.5,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "http_server",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_client_server_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_client_server_label",
+      "x": 965,
+      "y": 445,
+      "width": 80,
+      "height": 45,
+      "text": "X-Agent-Auth",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_client_server"
+    },
+    {
+      "type": "rectangle",
+      "id": "assistant_service",
+      "x": 740,
+      "y": 660,
+      "width": 220,
+      "height": 95,
+      "backgroundColor": "#d0bfff",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "assistant_service_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "assistant_service_label",
+      "x": 750,
+      "y": 670,
+      "width": 200,
+      "height": 75,
+      "text": "OpenAiAssistantService\ncurrent chat-completions client",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "assistant_service"
+    },
+    {
+      "type": "rectangle",
+      "id": "provider_broker",
+      "x": 1010,
+      "y": 660,
+      "width": 220,
+      "height": 95,
+      "backgroundColor": "#ffec99",
+      "fillStyle": "solid",
+      "strokeColor": "#f59e0b",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "provider_broker_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "provider_broker_label",
+      "x": 1020,
+      "y": 670,
+      "width": 200,
+      "height": 75,
+      "text": "Target Provider Broker\nAionUI model profiles",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "provider_broker",
+      "strokeColor": "#f59e0b"
+    },
+    {
+      "type": "arrow",
+      "id": "a_server_service",
+      "x": 900,
+      "y": 590,
+      "width": -50,
+      "height": 70,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -50,
+          70
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "http_server",
+        "fixedPoint": [
+          0.42,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "assistant_service",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_server_service_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_server_service_label",
+      "x": 910,
+      "y": 600,
+      "width": -70,
+      "height": 50,
+      "text": "message/test/status",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_server_service"
+    },
+    {
+      "type": "arrow",
+      "id": "a_service_broker",
+      "x": 960,
+      "y": 707,
+      "width": 50,
+      "height": 0,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          50,
+          0
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "assistant_service",
+        "fixedPoint": [
+          1,
+          0.5
+        ]
+      },
+      "endBinding": {
+        "elementId": "provider_broker",
+        "fixedPoint": [
+          0,
+          0.5
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_service_broker_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_service_broker_label",
+      "x": 970,
+      "y": 717,
+      "width": 30,
+      "height": 40,
+      "text": "refactor seam",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_service_broker"
+    },
+    {
+      "type": "rectangle",
+      "id": "aionui_models",
+      "x": 730,
+      "y": 825,
+      "width": 240,
+      "height": 85,
+      "backgroundColor": "#c3fae8",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "aionui_models_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "aionui_models_label",
+      "x": 740,
+      "y": 835,
+      "width": 220,
+      "height": 65,
+      "text": "AionUI Model Registry\nprovider + model selection",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "aionui_models"
+    },
+    {
+      "type": "rectangle",
+      "id": "nvidia_provider",
+      "x": 1005,
+      "y": 825,
+      "width": 175,
+      "height": 75,
+      "backgroundColor": "#ffd8a8",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "nvidia_provider_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "nvidia_provider_label",
+      "x": 1015,
+      "y": 835,
+      "width": 155,
+      "height": 55,
+      "text": "NVIDIA-compatible\nOpenAI wire format",
+      "fontSize": 16,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "nvidia_provider"
+    },
+    {
+      "type": "rectangle",
+      "id": "openai_provider",
+      "x": 1005,
+      "y": 930,
+      "width": 175,
+      "height": 75,
+      "backgroundColor": "#ffd8a8",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "openai_provider_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "openai_provider_label",
+      "x": 1015,
+      "y": 940,
+      "width": 155,
+      "height": 55,
+      "text": "OpenAI Platform\nproject API key",
+      "fontSize": 16,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "openai_provider"
+    },
+    {
+      "type": "arrow",
+      "id": "a_broker_registry",
+      "x": 1105,
+      "y": 755,
+      "width": -255,
+      "height": 70,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -255,
+          70
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "provider_broker",
+        "fixedPoint": [
+          0.45,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "aionui_models",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_broker_registry_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_broker_registry_label",
+      "x": 1115,
+      "y": 765,
+      "width": -275,
+      "height": 50,
+      "text": "reads profiles",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_broker_registry"
+    },
+    {
+      "type": "arrow",
+      "id": "a_broker_nvidia",
+      "x": 1110,
+      "y": 755,
+      "width": -15,
+      "height": 70,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -15,
+          70
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "provider_broker",
+        "fixedPoint": [
+          0.5,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "nvidia_provider",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_broker_nvidia_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_broker_nvidia_label",
+      "x": 1120,
+      "y": 765,
+      "width": -35,
+      "height": 50,
+      "text": "default",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_broker_nvidia"
+    },
+    {
+      "type": "arrow",
+      "id": "a_broker_openai",
+      "x": 1165,
+      "y": 755,
+      "width": -75,
+      "height": 175,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -75,
+          175
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "provider_broker",
+        "fixedPoint": [
+          0.75,
+          1
+        ]
+      },
+      "endBinding": {
+        "elementId": "openai_provider",
+        "fixedPoint": [
+          0.5,
+          0
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_broker_openai_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_broker_openai_label",
+      "x": 1175,
+      "y": 765,
+      "width": -95,
+      "height": 155,
+      "text": "optional",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_broker_openai"
+    },
+    {
+      "type": "rectangle",
+      "id": "config_keys",
+      "x": 730,
+      "y": 950,
+      "width": 240,
+      "height": 75,
+      "backgroundColor": "#c3fae8",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "config_keys_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "config_keys_label",
+      "x": 740,
+      "y": 960,
+      "width": 220,
+      "height": 55,
+      "text": "Config + key sources\nappsettings, env, registry",
+      "fontSize": 16,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "config_keys"
+    },
+    {
+      "type": "arrow",
+      "id": "a_config_broker",
+      "x": 970,
+      "y": 985,
+      "width": 40,
+      "height": -280,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          40,
+          -280
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "config_keys",
+        "fixedPoint": [
+          1,
+          0.5
+        ]
+      },
+      "endBinding": {
+        "elementId": "provider_broker",
+        "fixedPoint": [
+          0,
+          0.55
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_config_broker_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_config_broker_label",
+      "x": 980,
+      "y": 995,
+      "width": 20,
+      "height": -300,
+      "text": "no secrets in repo",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_config_broker"
+    },
+    {
+      "type": "rectangle",
+      "id": "guarded_cad",
+      "x": 1395,
+      "y": 235,
+      "width": 385,
+      "height": 95,
+      "backgroundColor": "#ffc9c9",
+      "fillStyle": "solid",
+      "strokeColor": "#ef4444",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "guarded_cad_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "guarded_cad_label",
+      "x": 1405,
+      "y": 245,
+      "width": 365,
+      "height": 75,
+      "text": "Guarded CAD/PDM endpoints\n/sw/* and /pdm/*\nnever call during active CAD work",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "guarded_cad",
+      "strokeColor": "#ef4444"
+    },
+    {
+      "type": "arrow",
+      "id": "a_server_cad",
+      "x": 1125,
+      "y": 545,
+      "width": 270,
+      "height": -260,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          270,
+          -260
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "http_server",
+        "fixedPoint": [
+          1,
+          0.5
+        ]
+      },
+      "endBinding": {
+        "elementId": "guarded_cad",
+        "fixedPoint": [
+          0,
+          0.5
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_server_cad_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_server_cad_label",
+      "x": 1135,
+      "y": 555,
+      "width": 250,
+      "height": -280,
+      "text": "separate from chat",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_server_cad"
+    },
+    {
+      "type": "rectangle",
+      "id": "local_vault",
+      "x": 1395,
+      "y": 390,
+      "width": 385,
+      "height": 85,
+      "backgroundColor": "#c3fae8",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "local_vault_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "local_vault_label",
+      "x": 1405,
+      "y": 400,
+      "width": 365,
+      "height": 65,
+      "text": "Local Vault Workspace\nsearch, generated artifacts, reindex",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "local_vault"
+    },
+    {
+      "type": "arrow",
+      "id": "a_server_vault",
+      "x": 1125,
+      "y": 555,
+      "width": 270,
+      "height": -120,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          270,
+          -120
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "http_server",
+        "fixedPoint": [
+          1,
+          0.58
+        ]
+      },
+      "endBinding": {
+        "elementId": "local_vault",
+        "fixedPoint": [
+          0,
+          0.5
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_server_vault_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_server_vault_label",
+      "x": 1135,
+      "y": 565,
+      "width": 250,
+      "height": -140,
+      "text": "/lab/vault/status",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_server_vault"
+    },
+    {
+      "type": "rectangle",
+      "id": "telemetry",
+      "x": 1395,
+      "y": 535,
+      "width": 385,
+      "height": 80,
+      "backgroundColor": "#eebefa",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "telemetry_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "telemetry_label",
+      "x": 1405,
+      "y": 545,
+      "width": 365,
+      "height": 60,
+      "text": "Telemetry + Logs\nAgentPanel / TraceViewer",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "telemetry"
+    },
+    {
+      "type": "arrow",
+      "id": "a_server_logs",
+      "x": 1125,
+      "y": 562,
+      "width": 270,
+      "height": 13,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          270,
+          13
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "http_server",
+        "fixedPoint": [
+          1,
+          0.68
+        ]
+      },
+      "endBinding": {
+        "elementId": "telemetry",
+        "fixedPoint": [
+          0,
+          0.5
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_server_logs_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_server_logs_label",
+      "x": 1135,
+      "y": 572,
+      "width": 250,
+      "height": -7,
+      "text": "/agent/telemetry/*",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_server_logs"
+    },
+    {
+      "type": "rectangle",
+      "id": "relay_mcp",
+      "x": 1395,
+      "y": 675,
+      "width": 385,
+      "height": 95,
+      "backgroundColor": "#d0bfff",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "relay_mcp_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "relay_mcp_label",
+      "x": 1405,
+      "y": 685,
+      "width": 365,
+      "height": 75,
+      "text": "Relay / MCP bridge\nBlueBrick.Relay\nChatGPT handoff + tools",
+      "fontSize": 17,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "relay_mcp"
+    },
+    {
+      "type": "arrow",
+      "id": "a_server_relay",
+      "x": 1125,
+      "y": 570,
+      "width": 270,
+      "height": 150,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          270,
+          150
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "http_server",
+        "fixedPoint": [
+          1,
+          0.78
+        ]
+      },
+      "endBinding": {
+        "elementId": "relay_mcp",
+        "fixedPoint": [
+          0,
+          0.5
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_server_relay_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_server_relay_label",
+      "x": 1135,
+      "y": 580,
+      "width": 250,
+      "height": 130,
+      "text": "/chatgpt + tunnel",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_server_relay"
+    },
+    {
+      "type": "rectangle",
+      "id": "panel_actions",
+      "x": 1395,
+      "y": 835,
+      "width": 385,
+      "height": 95,
+      "backgroundColor": "#ffec99",
+      "fillStyle": "solid",
+      "strokeColor": "#f59e0b",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "panel_actions_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "panel_actions_label",
+      "x": 1405,
+      "y": 845,
+      "width": 365,
+      "height": 75,
+      "text": "Recommended panel contract\nEach dropdown exposes: context, actions,\nerrors, and safe assistant suggestions",
+      "fontSize": 16,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "panel_actions",
+      "strokeColor": "#f59e0b"
+    },
+    {
+      "type": "arrow",
+      "id": "a_panels_contract",
+      "x": 520,
+      "y": 585,
+      "width": 875,
+      "height": 300,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          875,
+          300
+        ]
+      ],
+      "endArrowhead": "arrow",
+      "startBinding": {
+        "elementId": "panel_props",
+        "fixedPoint": [
+          1,
+          0.5
+        ]
+      },
+      "endBinding": {
+        "elementId": "panel_actions",
+        "fixedPoint": [
+          0,
+          0.5
+        ]
+      },
+      "boundElements": [
+        {
+          "id": "a_panels_contract_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "a_panels_contract_label",
+      "x": 530,
+      "y": 595,
+      "width": 855,
+      "height": 280,
+      "text": "all dropdown panels publish structured context",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "a_panels_contract"
+    },
+    {
+      "type": "rectangle",
+      "id": "legend_current",
+      "x": 95,
+      "y": 820,
+      "width": 170,
+      "height": 55,
+      "backgroundColor": "#b2f2bb",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "legend_current_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "legend_current_label",
+      "x": 105,
+      "y": 830,
+      "width": 150,
+      "height": 35,
+      "text": "Green: current\nassistant path",
+      "fontSize": 15,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "legend_current"
+    },
+    {
+      "type": "rectangle",
+      "id": "legend_target",
+      "x": 295,
+      "y": 820,
+      "width": 170,
+      "height": 55,
+      "backgroundColor": "#ffec99",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "legend_target_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "legend_target_label",
+      "x": 305,
+      "y": 830,
+      "width": 150,
+      "height": 35,
+      "text": "Yellow: target\nprovider seam",
+      "fontSize": 15,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "legend_target"
+    },
+    {
+      "type": "rectangle",
+      "id": "legend_guard",
+      "x": 95,
+      "y": 895,
+      "width": 170,
+      "height": 55,
+      "backgroundColor": "#ffc9c9",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "legend_guard_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "legend_guard_label",
+      "x": 105,
+      "y": 905,
+      "width": 150,
+      "height": 35,
+      "text": "Red: guarded\nCAD/PDM side effects",
+      "fontSize": 15,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "legend_guard"
+    },
+    {
+      "type": "rectangle",
+      "id": "legend_data",
+      "x": 295,
+      "y": 895,
+      "width": 170,
+      "height": 55,
+      "backgroundColor": "#c3fae8",
+      "fillStyle": "solid",
+      "roundness": {
+        "type": 3
+      },
+      "boundElements": [
+        {
+          "id": "legend_data_label",
+          "type": "text"
+        }
+      ],
+      "roughness": 2
+    },
+    {
+      "type": "text",
+      "id": "legend_data_label",
+      "x": 305,
+      "y": 905,
+      "width": 150,
+      "height": 35,
+      "text": "Teal: config,\nvault, memory",
+      "fontSize": 15,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "legend_data"
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff",
+    "gridSize": null
+  },
+  "files": {}
+}

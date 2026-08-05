@@ -60,6 +60,19 @@
     <Compile Include="TraceViewerControlTests.cs" />
     <Compile Include="HotsetControlTests.cs" />
     <Compile Include="LogsControlTests.cs" />
+    <!-- BB-M001 Slices 0-2: audit kernel pure tests + read-only SolidWorks snapshot adapter tests. -->
+    <Compile Include="Audit\AuditReceiptAndFindingTests.cs" />
+    <Compile Include="Audit\CanonicalSerializerTests.cs" />
+    <Compile Include="SolidWorks\AuditRuntimeWiringTests.cs" />
+    <Compile Include="SolidWorks\SnapshotAdapterTests.cs" />
+    <Compile Include="SolidWorks\ThreadGuardTests.cs" />
+    <!-- Hardening slice tests: signed manifests, provider expiry, injection guard, integrity scanner, chained receipts, promotion gate -->
+    <Compile Include="Agent\AssistantManifestTests.cs" />
+    <Compile Include="Agent\AssistantProviderExpiryTests.cs" />
+    <Compile Include="Agent\AssistantInjectionGuardTests.cs" />
+    <Compile Include="Agent\AssistantIntegrityScannerTests.cs" />
+    <Compile Include="Agent\AssistantChainedReceiptTests.cs" />
+    <Compile Include="Agent\AssistantPromotionGateTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BlueBrick.csproj">

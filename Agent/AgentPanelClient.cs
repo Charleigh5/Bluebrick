@@ -142,6 +142,20 @@ namespace BlueBrick.Agent
                             }
                         }
                     }
+
+                    var remaining = lineBuffer.ToString().Trim();
+                    if (remaining.Length > 0)
+                    {
+                        if (remaining.StartsWith("data:"))
+                        {
+                            var data = remaining.Substring(5).Trim();
+                            if (data != "[DONE]") onChunk(data);
+                        }
+                        else if (remaining.StartsWith("{"))
+                        {
+                            onChunk(remaining);
+                        }
+                    }
                 }
             }
         }

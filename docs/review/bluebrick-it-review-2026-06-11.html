@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BlueBrick IT Architecture Review</title>
+  <style>
+    :root {
+      --cyan: #22b8d6;
+      --cyan-dark: #1289a3;
+      --cyan-soft: #d9f6fb;
+      --lime: #c8ff2e;
+      --ink: #111318;
+      --ink-2: #1b1e25;
+      --slate: #2a2f38;
+      --muted: #65717f;
+      --line: #d9dee4;
+      --paper: #ffffff;
+      --off: #f7f8f9;
+      --warn: #b86a00;
+      --risk: #b42318;
+      --ok: #18794e;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--off);
+      color: var(--ink);
+      font-family: "Segoe UI", Arial, sans-serif;
+      line-height: 1.48;
+    }
+
+    header {
+      background: var(--ink);
+      color: var(--paper);
+      border-bottom: 6px solid var(--cyan);
+    }
+
+    .wrap {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      min-height: 360px;
+      display: grid;
+      align-items: center;
+      padding: 46px 0 54px;
+    }
+
+    .mark {
+      display: inline-flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 26px;
+      color: var(--cyan-soft);
+      font-size: 13px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .mark-icon {
+      width: 34px;
+      height: 34px;
+      border: 3px solid var(--cyan);
+      border-right-color: var(--lime);
+      display: inline-block;
+      position: relative;
+    }
+
+    .mark-icon:after {
+      content: "";
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      border: 3px solid var(--cyan);
+      right: -9px;
+      bottom: -9px;
+      background: var(--ink);
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 860px;
+      font-size: 48px;
+      line-height: 1.05;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .hero p {
+      max-width: 820px;
+      color: #dfe7ec;
+      font-size: 18px;
+      margin: 18px 0 0;
+    }
+
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(255,255,255,.22);
+      color: var(--paper);
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      background: rgba(255,255,255,.06);
+    }
+
+    .badge.light {
+      color: var(--ink);
+      border-color: var(--line);
+      background: var(--paper);
+    }
+
+    .badge.ok { color: var(--ok); border-color: #a7d7bd; background: #eef9f3; }
+    .badge.warn { color: var(--warn); border-color: #f1ca8e; background: #fff7e8; }
+    .badge.risk { color: var(--risk); border-color: #f2aaa3; background: #fff1ef; }
+    .badge.info { color: var(--cyan-dark); border-color: #a7dfea; background: var(--cyan-soft); }
+
+    main { padding: 34px 0 60px; }
+
+    section {
+      margin: 0 0 34px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .section-head {
+      padding: 22px 24px 0;
+    }
+
+    h2 {
+      margin: 0 0 8px;
+      color: var(--ink);
+      font-size: 25px;
+      line-height: 1.2;
+    }
+
+    .section-head p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+      padding: 22px 24px 24px;
+    }
+
+    .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+      color: var(--ink-2);
+    }
+
+    .card p, .card li {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .card p { margin: 0; }
+
+    .metric {
+      display: block;
+      font-size: 28px;
+      line-height: 1;
+      margin-bottom: 8px;
+      font-weight: 800;
+      color: var(--cyan-dark);
+    }
+
+    code {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: .95em;
+      background: #eef3f6;
+      border: 1px solid #d7e1e7;
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border-top: 1px solid var(--line);
+      padding: 11px 12px;
+    }
+
+    th {
+      background: #eef3f6;
+      color: var(--slate);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .table-wrap { padding: 22px 24px 24px; overflow-x: auto; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 10px;
+      padding: 22px 24px 24px;
+    }
+
+    .node {
+      min-height: 108px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--cyan);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .node strong { display: block; margin-bottom: 6px; color: var(--ink); }
+    .node span { display: block; color: var(--muted); font-size: 13px; }
+
+    .timeline {
+      padding: 22px 24px 24px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .phase {
+      display: grid;
+      grid-template-columns: 120px 1fr auto;
+      gap: 16px;
+      align-items: start;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--cyan);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .phase strong { color: var(--ink); }
+    .phase p { margin: 3px 0 0; color: var(--muted); font-size: 14px; }
+
+    ul.clean {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .callout {
+      margin: 0 24px 24px;
+      padding: 16px;
+      border-left: 5px solid var(--lime);
+      background: #fbffe8;
+      color: var(--slate);
+    }
+
+    footer {
+      color: var(--muted);
+      font-size: 13px;
+      padding: 20px 0 40px;
+    }
+
+    @media (max-width: 900px) {
+      h1 { font-size: 34px; }
+      .grid.cols-2, .grid.cols-3, .grid.cols-4, .flow { grid-template-columns: 1fr; }
+      .phase { grid-template-columns: 1fr; }
+      .wrap { width: min(100% - 24px, 1180px); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap hero">
+      <div>
+        <div class="mark"><span class="mark-icon"></span> VIRA Insight / BlueBrick Review Dossier</div>
+        <h1>BlueBrick IT Architecture Review Package</h1>
+        <p>A source-backed review index for the new BlueBrick assistant foundation, its current WIP surface, security posture, verification evidence, and roadmap toward governed SolidWorks automation.</p>
+        <div class="hero-meta">
+          <span class="badge">Generated 2026-06-11</span>
+          <span class="badge">Branch bluebrick-assistant-slice1-foundation</span>
+          <span class="badge">HEAD ced14be</span>
+          <span class="badge">Base main</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section>
+      <div class="section-head">
+        <h2>Executive Summary</h2>
+        <p>BlueBrick is moving from a SolidWorks utility add-in toward a governed engineering assistant with local context, tool policy, reviewable evidence, and staged automation.</p>
+      </div>
+      <div class="grid cols-3">
+        <div class="card">
+          <span class="metric">29</span>
+          <h3>Files changed since main</h3>
+          <p>The branch delta includes assistant services, WebView shell work, model/tool contracts, screenshot/report stores, tests, and Phase 2 documentation.</p>
+        </div>
+        <div class="card">
+          <span class="metric">2</span>
+          <h3>Current WIP files</h3>
+          <p><code>Agent/AgentHttpServer.cs</code> and <code>ClsEnums.cs</code> add STEP generation by configuration. This is not yet committed.</p>
+        </div>
+        <div class="card">
+          <span class="metric">77</span>
+          <h3>Focused UI/Lab tests found</h3>
+          <p>The package verification run passed 76 and skipped 1 for the focused LabWorkspace test filter.</p>
+        </div>
+      </div>
+      <div class="callout">
+        Review this HTML first, then inspect <code>review-package-manifest.md</code>, <code>phase2-branch-delta-main-to-head.patch</code>, and <code>current-working-tree-delta.patch</code>.
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Current Branch State</h2>
+        <p>The package separates committed branch work from local uncommitted WIP and untracked scratch files.</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Layer</th><th>Status</th><th>Review Evidence</th><th>Architect Note</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Committed branch delta</td>
+              <td><span class="badge ok">Ready for review</span></td>
+              <td><code>phase2-branch-delta-main-to-head.patch</code></td>
+              <td>Compare branch <code>bluebrick-assistant-slice1-foundation</code> at <code>ced14be</code> against <code>main</code>.</td>
+            </tr>
+            <tr>
+              <td>Uncommitted WIP</td>
+              <td><span class="badge warn">Review separately</span></td>
+              <td><code>current-working-tree-delta.patch</code></td>
+              <td>New route <code>/sw/generate_step_configs</code> and enum flag <code>NamedConfig</code>. Requires live SolidWorks validation before promotion.</td>
+            </tr>
+            <tr>
+              <td>Local scratch files</td>
+              <td><span class="badge risk">Excluded</span></td>
+              <td><code>git-status-at-packaging.txt</code></td>
+              <td>Temporary deployment/check scripts and build outputs are excluded from the package.</td>
+            </tr>
+            <tr>
+              <td>Local test harness</td>
+              <td><span class="badge warn">Quarantined</span></td>
+              <td><code>local-test-harness/README.md</code></td>
+              <td>Contains source only. It reads registry/env state and should not be treated as production test structure yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>What Changed Since Main</h2>
+        <p>The branch moves the assistant from basic chat toward governed tool execution and reviewable evidence.</p>
+      </div>
+      <div class="grid cols-2">
+        <div class="card">
+          <h3>Assistant Runtime</h3>
+          <ul class="clean">
+            <li>Tool/function calling loop and streaming tool-result handling.</li>
+            <li>Tool schema injection gated by model capabilities.</li>
+            <li>Policy-gated execution through <code>AssistantToolService</code>.</li>
+            <li>Audit receipt and redacted tool-result paths.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Panel And WebView</h3>
+          <ul class="clean">
+            <li>WebView host and packaged assistant web shell files.</li>
+            <li>Explicit tool call and tool result rendering paths.</li>
+            <li>Model capability cues and safety/status labels.</li>
+            <li>Security hardening around navigation and token exposure.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Evidence And Screenshots</h3>
+          <ul class="clean">
+            <li>Screenshot artifact store and report generator.</li>
+            <li>Privacy metadata normalization.</li>
+            <li>Reviewable annotations and extracted-contact boundaries.</li>
+            <li>Local-only and review-first defaults remain important.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Tests And Documentation</h3>
+          <ul class="clean">
+            <li><code>LabWorkspaceTests</code> expanded for assistant behavior.</li>
+            <li>Phase 2 closure receipt added.</li>
+            <li>Full scope report added for LLM tool/function calling.</li>
+            <li>Implementation and verification plan updated.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Architecture Map</h2>
+        <p>The current system is local-first, review-first, and policy-gated before expanding into mutation or external integration.</p>
+      </div>
+      <div class="flow">
+        <div class="node"><strong>SolidWorks Add-In</strong><span><code>swaddin.cs</code>, <code>ClsMain.cs</code>. Host process and CAD entrypoint.</span></div>
+        <div class="node"><strong>WinForms Panel</strong><span><code>AssistantPanel.cs</code>. User-facing assistant, status, screenshot, and tool-result surface.</span></div>
+        <div class="node"><strong>Local Bridge</strong><span><code>AgentHttpServer</code>. HTTP boundary with auth, route handling, and SSE serialization.</span></div>
+        <div class="node"><strong>Assistant Runtime</strong><span><code>OpenAiAssistantService</code>. Model selection, streaming, tool calling, redaction.</span></div>
+        <div class="node"><strong>Tool Policy</strong><span><code>AssistantToolService</code> and policy classes. Allows read/search, denies risky routes by default.</span></div>
+        <div class="node"><strong>Relay And Systems</strong><span>Relay, Vault, PDM, Epicor, Salesforce, documents. Integrated only behind reviewed contracts.</span></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Security Posture</h2>
+        <p>Security work focuses on keeping the assistant useful while preventing accidental CAD/PDM mutation, secret exposure, and unreviewed downstream use.</p>
+      </div>
+      <div class="grid cols-4">
+        <div class="card">
+          <h3>WebView2</h3>
+          <p>Host objects disabled, unexpected navigation blocked, popups blocked, token text scanned in shell HTML.</p>
+        </div>
+        <div class="card">
+          <h3>Local Bridge</h3>
+          <p>Local auth and request-size boundaries are part of the bridge security model.</p>
+        </div>
+        <div class="card">
+          <h3>Tool Policy</h3>
+          <p>Unknown, disabled, CAD mutation, PDM mutation, and destructive lab routes are blocked by policy.</p>
+        </div>
+        <div class="card">
+          <h3>Evidence Privacy</h3>
+          <p>Screenshot artifacts stay review-first with privacy metadata and local-only defaults until explicitly expanded.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Verification Evidence</h2>
+        <p>Automated checks passed for safe build/test surfaces. Live CAD behavior remains intentionally unverified in this package.</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Area</th><th>Result</th><th>Evidence</th></tr></thead>
+          <tbody>
+            <tr><td>Lab add-in build</td><td><span class="badge ok">Pass</span></td><td><code>BlueBrick.csproj -c Lab</code>, 0 warnings, 0 errors.</td></tr>
+            <tr><td>UI test project build</td><td><span class="badge warn">Pass with warnings</span></td><td>0 errors, 24 existing compiler warnings.</td></tr>
+            <tr><td>Relay tests</td><td><span class="badge ok">Pass</span></td><td>3 passed.</td></tr>
+            <tr><td>Focused UI/Lab tests</td><td><span class="badge ok">Pass</span></td><td>76 passed, 1 skipped.</td></tr>
+            <tr><td>Live SolidWorks smoke</td><td><span class="badge warn">Pending</span></td><td>Not run. Requires explicit live add-in validation.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Roadmap</h2>
+        <p>The recommended path is staged: stabilize governance, prove read-only context, then introduce preview and approved mutation only after test gates.</p>
+      </div>
+      <div class="timeline">
+        <div class="phase"><strong>P0 / P1</strong><div><strong>Foundation and model/bridge stabilization</strong><p>Source-of-truth gates, model profiles, WebView2 hardening, bridge auth, route manifest, tool policy, audit receipts.</p></div><span class="badge info">Foundation</span></div>
+        <div class="phase"><strong>Phase 3</strong><div><strong>Screenshot review, annotation, contact extraction</strong><p>Reviewable evidence cards, confidence, pending review status, privacy metadata, downstream reuse blocked until approved.</p></div><span class="badge warn">Next</span></div>
+        <div class="phase"><strong>Phase 4</strong><div><strong>Tool search integration</strong><p>Local vault, PDM metadata, Epicor lookups, route-scoped search wrappers, disabled connector visibility.</p></div><span class="badge light">Planned</span></div>
+        <div class="phase"><strong>Phase 5</strong><div><strong>Salesforce integration decision</strong><p>Decide connected app shape, scopes, review workflow, and whether contact data may leave local review.</p></div><span class="badge light">Planned</span></div>
+        <div class="phase"><strong>Phase 6</strong><div><strong>Relay, ChatGPT, and MCP verification</strong><p>Verify relay contracts, handoff flow, and tool routing without weakening local policy gates.</p></div><span class="badge light">Planned</span></div>
+        <div class="phase"><strong>Phase 7</strong><div><strong>Full manual SolidWorks validation</strong><p>Validate actual panel rendering, cancellation, screenshot capture, and user workflow in SolidWorks.</p></div><span class="badge warn">Manual</span></div>
+        <div class="phase"><strong>Phase 8</strong><div><strong>Preview-only SolidWorks planner</strong><p>Generate proposed CAD actions without mutation, with receipts, confirmations, and rollback notes.</p></div><span class="badge light">Planned</span></div>
+        <div class="phase"><strong>Phase 9</strong><div><strong>First approved mutation</strong><p>Only after preview, explicit user approval, audit receipts, and rollback path are proven.</p></div><span class="badge risk">Gated</span></div>
+        <div class="phase"><strong>Phase 10</strong><div><strong>Packaged React assistant panel</strong><p>Replace inline HTML after route, security, and cancellation gates are stable.</p></div><span class="badge light">Planned</span></div>
+        <div class="phase"><strong>Phase 11</strong><div><strong>SolidWorks 2026 compatibility track</strong><p>Verify official interop/version behavior and add compatibility tests before claiming support.</p></div><span class="badge light">Planned</span></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Architect Review Checklist</h2>
+        <p>Recommended inspection questions for a lead systems architect.</p>
+      </div>
+      <div class="grid cols-2">
+        <div class="card">
+          <h3>Code And Contracts</h3>
+          <ul class="clean">
+            <li>Are bridge routes categorized by read, preview, mutation, external, or forbidden behavior?</li>
+            <li>Do assistant tool schemas match the tool service contracts?</li>
+            <li>Does streaming and non-streaming tool execution produce equivalent user-visible behavior?</li>
+            <li>Should <code>/sw/generate_step_configs</code> remain in WIP or be redesigned behind preview/approval gates?</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Security And Operations</h3>
+          <ul class="clean">
+            <li>Are secrets absent from HTML, config, logs, and review artifacts?</li>
+            <li>Are risky CAD/PDM operations denied until approval and rollback are defined?</li>
+            <li>Does the package avoid machine-local build outputs and temporary scripts?</li>
+            <li>What live SolidWorks smoke tests are required before deployment?</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap">
+    BlueBrick review package generated for internal architecture review. Current live SolidWorks behavior remains unverified unless separately documented.
+  </footer>
+</body>
+</html>

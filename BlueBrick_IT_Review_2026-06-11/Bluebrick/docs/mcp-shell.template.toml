@@ -1,0 +1,13 @@
+# Copy this block into C:\Users\cweir\.codex\config.toml only after
+# PowerShell 7 has been verified outside Codex and VS Code is already
+# using pwsh successfully.
+
+[mcp_servers.shell]
+command = "npx"
+args = [
+    "-y",
+    "MCPShell"
+]
+
+[mcp_servers.shell.env]
+SHELL = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"

@@ -1,0 +1,195 @@
+diff --git a/Agent/AgentHttpServer.cs b/Agent/AgentHttpServer.cs
+index 67300d1..2246599 100644
+--- a/Agent/AgentHttpServer.cs
++++ b/Agent/AgentHttpServer.cs
+@@ -395,8 +395,11 @@ case "/sw/apply_properties":
+ await HandleApplyProperties(context, json, traceId);
+ return;
+ case "/sw/generate_step":
+-await HandleSwGenerateStep(context, json, traceId);
+-return;
++  await HandleSwGenerateStep(context, json, traceId);
++  return;
++case "/sw/generate_step_configs":
++  await HandleSwGenerateStepConfigs(context, json, traceId);
++  return;
+ case "/pdm/check_out":
+                     await HandlePdmCheckOut(context, json, traceId);
+                     return;
+@@ -700,7 +703,159 @@ await WriteJson(context, new { status = "ok", traceId });
+         }
+     }
+ 
+-    private string ResolveVaultName()
++    private async Task HandleSwGenerateStepConfigs(HttpListenerContext context, JObject json, string traceId)
++{
++  var modelPath = json.Value<string>("modelPath");
++  var saveToPdm = json.Value<bool?>("saveToPdm") ?? true;
++  var captureScreenshot = json.Value<bool?>("captureScreenshot") ?? false;
++  var configName = json.Value<string>("configName");
++  var allConfigs = json.Value<bool?>("allConfigs") ?? false;
++
++  if (string.IsNullOrEmpty(modelPath))
++  {
++    context.Response.StatusCode = 400;
++    await WriteJson(context, new { error = "modelPath required", traceId });
++    return;
++  }
++  if (string.IsNullOrEmpty(configName) && !allConfigs)
++  {
++    context.Response.StatusCode = 400;
++    await WriteJson(context, new { error = "configName or allConfigs=true required", traceId });
++    return;
++  }
++
++  try
++  {
++    if (!File.Exists(modelPath))
++    {
++      try
++      {
++        var vaultName = _config?.Pdm?.VaultName;
++        if (string.IsNullOrEmpty(vaultName)) vaultName = "_PDMVault";
++        var vault = new EdmVault5();
++        if (!vault.IsLoggedIn) vault.LoginAuto(vaultName, 0);
++        var pdmFile = vault.GetFileFromPath(modelPath, out IEdmFolder5 folder) as IEdmFile5;
++        if (pdmFile != null) pdmFile.GetFileCopy(folder.ID, 0);
++      }
++      catch (Exception pdmEx)
++      {
++        Console.WriteLine($"[STEP_GEN_CFG] PDM get failed: {pdmEx.Message}");
++      }
++    }
++
++    var err = 0;
++    var warn = 0;
++    var model = _swApp.OpenDoc6(modelPath, ResolveDocType(modelPath), (int)swOpenDocOptions_e.swOpenDocOptions_Silent, "", ref err, ref warn) as ModelDoc2;
++    if (model == null)
++    {
++      await WriteJson(context, new { status = "fail", error = $"Failed to open model (error={err}, warning={warn})", traceId });
++      return;
++    }
++
++    var configs = new List<string>();
++    if (allConfigs)
++    {
++      try { configs.AddRange((string[])model.GetConfigurationNames()); }
++      catch (Exception ex) { Console.WriteLine($"[STEP_GEN_CFG] GetConfigurationNames failed: {ex.Message}"); }
++    }
++    else if (!string.IsNullOrEmpty(configName))
++    {
++      configs.Add(configName);
++    }
++
++    if (configs.Count == 0)
++    {
++      _swApp.CloseDoc(modelPath);
++      await WriteJson(context, new { status = "fail", error = "No configurations found", traceId });
++      return;
++    }
++
++    var results = new List<object>();
++    var tempBase = Path.Combine(Path.GetTempPath(), "ViraInsight_" + Path.GetRandomFileName());
++    var basePartNo = model.CustomInfo["Part Number"] ?? Path.GetFileNameWithoutExtension(modelPath);
++
++    foreach (var cfgName in configs)
++    {
++      try
++      {
++        if (!model.ShowConfiguration2(cfgName))
++        {
++          results.Add(new { configName = cfgName, status = "fail", error = "Failed to switch configuration" });
++          continue;
++        }
++
++        var safeCfg = string.Join("_", cfgName.Split(Path.GetInvalidFileNameChars()));
++        var partNo = allConfigs ? $"{basePartNo}_{safeCfg}" : basePartNo;
++        var options = (int)(ClsEnums.EnumGenOptions.Step | ClsEnums.EnumGenOptions.Silent | ClsEnums.EnumGenOptions.One);
++        if (saveToPdm) options |= (int)ClsEnums.EnumGenOptions.SaveToPdm;
++
++        var generator = new DocGenerator.ClsGenerators();
++        generator.SetStatus += (sender, args) => { Console.WriteLine($"[STEP_GEN_CFG][{cfgName}] {args.Message}"); };
++        generator.GenerateDoc(_swApp, options, string.Empty);
++
++        var dir = saveToPdm
++          ? Path.Combine(Path.GetDirectoryName(modelPath) ?? "", "..", "DXF-STP's")
++          : Path.GetDirectoryName(modelPath) ?? "";
++        var stepPath = Path.Combine(dir, partNo + ".STEP");
++
++        var resultEntry = new JObject
++        {
++          ["configName"] = cfgName,
++          ["partNo"] = partNo,
++          ["stepPath"] = stepPath,
++          ["status"] = "ok"
++        };
++
++        if (captureScreenshot)
++        {
++          try
++          {
++            model.ViewZoomtofit2();
++            model.ShowNamedView2(string.Empty, (int)swStandardViews_e.swTrimetricView);
++            var pngTemp = tempBase + "_" + safeCfg + ".png";
++            var swExt = model.Extension;
++            var iWarn = 0;
++            var iErr2 = 0;
++            var bSaved = swExt.SaveAs3(pngTemp, 0, 0, null, null, ref iErr2, ref iWarn);
++            if (bSaved && File.Exists(pngTemp))
++            {
++              var pngBytes = File.ReadAllBytes(pngTemp);
++              resultEntry["screenshotBytes"] = Convert.ToBase64String(pngBytes);
++              resultEntry["screenshotSize"] = pngBytes.Length;
++              File.Delete(pngTemp);
++            }
++          }
++          catch (Exception ssEx)
++          {
++            resultEntry["screenshotError"] = ssEx.Message;
++          }
++        }
++
++        results.Add(resultEntry);
++      }
++      catch (Exception ex)
++      {
++        results.Add(new { configName = cfgName, status = "fail", error = ex.Message });
++      }
++    }
++
++    _swApp.CloseDoc(modelPath);
++
++    await WriteJson(context, new
++    {
++      status = "ok",
++      configCount = configs.Count,
++      results,
++      traceId
++    });
++  }
++  catch (Exception ex)
++  {
++    await WriteJson(context, new { status = "fail", error = ex.Message, traceId });
++  }
++}
++
++private string ResolveVaultName()
+     {
+         var name = _config?.Pdm?.VaultName;
+         return !string.IsNullOrEmpty(name) ? name : "_PDMVault";
+diff --git a/ClsEnums.cs b/ClsEnums.cs
+index 6882396..2f8d128 100644
+--- a/ClsEnums.cs
++++ b/ClsEnums.cs
+@@ -20,8 +20,9 @@ namespace BlueBrick
+             Packet = 512, //collate into PDF packet
+             Silent = 1024, //suppress dialogs
+             Iges = 2048,
+-            Skip = 4096 //skipped part but has drawing
+-        }
++  Skip = 4096, //skipped part but has drawing
++  NamedConfig = 8192 //force specific SolidWorks configuration name
++}
+ 
+         [Flags]
+         internal enum EnumGenTop //top level file info
