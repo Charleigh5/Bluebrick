@@ -33,6 +33,13 @@ jobs:
           PDF_MIN_SHA256=5b5799e6f8c680663207ac5b42ee14eed2a406fa7af48f50c154f0c0b1566946
           PDF_WORKER_SHA256=feabdf309770ed24bba31a5467836cdc8cf639c705af27d52b585b041bb8527b
           EOF
+      - name: Upload temporary verified asset bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: wave-b1-pdfjs-3.11.174-exact
+          path: tmp/wave-b1-pdfjs-transport/
+          if-no-files-found: error
+          retention-days: 1
       - name: Commit temporary verified open-source assets
         shell: bash
         run: |
@@ -40,5 +47,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add tmp/wave-b1-pdfjs-transport
+          if git diff --cached --quiet; then exit 0; fi
           git commit -m 'test: stage verified PDF.js 3.11.174 transport'
           git push origin HEAD:temp/wave-b1-pdfjs-transport
