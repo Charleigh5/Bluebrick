@@ -31,6 +31,7 @@ namespace BlueBrick.Agent
         private readonly IAssistantService _assistantService;
         private readonly AssistantToolService _assistantTools;
         private readonly ChatGptSessionStore _chatGptSessions;
+        private readonly BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition _auditComposition;
         private readonly PreviewSessionCoordinator _previewSessions;
         private readonly PreviewActionPolicy _previewActionPolicy;
         private readonly PreviewActionExecutor _previewActionExecutor;
@@ -51,6 +52,7 @@ namespace BlueBrick.Agent
         _telemetry = new TelemetryLogger(logDir, "events", 0.1, 7, 2048, 500);
         _generateReviewJobs = new GenerateReviewJobManager(swApp, _telemetry);
         _assistantService = new OpenAiAssistantService(config);
+        try { _auditComposition = swApp != null ? new BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition(swApp) : null; } catch { _auditComposition = null; }
         _assistantTools = new AssistantToolService(config, _assistantService);
         _chatGptSessions = new ChatGptSessionStore();
         _previewActionPolicy = new PreviewActionPolicy();
@@ -466,6 +468,9 @@ case "/pdm/check_out":
                 return;
             case "/assistant/history":
                 await HandleAssistantHistory(context, traceId);
+                return;
+            case "/assistant/snapshot/active-document":
+                await HandleAssistantSnapshotActiveDocument(context, traceId);
                 return;
             case "/lab/vault/reindex":
                 await HandleVaultReindex(context, traceId);
@@ -1473,6 +1478,28 @@ private string ResolveVaultName()
                 annotationsPath = artifact.AnnotationsPath,
                 artifact,
                 traceId
+            }, traceId).ConfigureAwait(false);
+        }
+
+        private async Task HandleAssistantSnapshotActiveDocument(HttpListenerContext context, string traceId)
+        {
+            if (_auditComposition == null)
+            {
+                context.Response.StatusCode = 503;
+                await WriteAssistantError(context, "unavailable", "Snapshot service unavailable", traceId).ConfigureAwait(false);
+                return;
+            }
+            var result = _auditComposition.GetActiveDocumentSnapshot(traceId, traceId);
+            var hasDoc = result.Errors == null || !result.Errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT);
+            var status = hasDoc ? (result.Errors.Count == 0 ? "ok" : "partial") : "empty";
+            await WriteAssistantJson(context, new
+            {
+                status,
+                traceId,
+                runtime = new { classification = result.Receipt?.RuntimeClassification, version = result.Receipt?.RuntimeVersion, displayVersion = result.Snapshot?.RuntimeVersion },
+                snapshot = result.Snapshot,
+                errors = result.Errors,
+                receipt = result.Receipt
             }, traceId).ConfigureAwait(false);
         }
 

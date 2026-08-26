@@ -66,6 +66,7 @@ namespace BlueBrick
 #if LAB_BUILD
         private FrmAssistantWindow _assistantWindow;
 #endif
+        private BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition _auditComposition;
 
         private BitmapHandler iBmp;
         //private int registerID;
@@ -371,6 +372,7 @@ namespace BlueBrick
 
                 _agentOverlay = new AgentOverlay(ParseColor(_agentConfig.Agent.OverlayColor));
                 TraceDiagnostic("AgentOverlay created");
+                try { _auditComposition = SwApp != null ? new BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition(SwApp) : null; TraceDiagnostic("AuditComposition wired: " + (_auditComposition?.Runtime?.Classification.ToString() ?? "null")); } catch (Exception ex) { TraceDiagnostic("AuditComposition wire failed: " + ex); }
                 _agentServer = new AgentHttpServer(SwApp, _agentConfig, _agentOverlay);
                 TraceDiagnostic("AgentHttpServer created");
                 _agentServer.Start();
@@ -411,6 +413,7 @@ namespace BlueBrick
             RemoveCommandMgr();
             DetachEventHandlers();
 
+            try { _auditComposition = null; } catch { }
             try
             {
                 _agentServer?.Stop();

@@ -201,6 +201,8 @@
       <Compile Include="SolidWorks\Adapters\ISolidWorksReadOnlySnapshotService.cs" />
       <Compile Include="SolidWorks\Adapters\SolidWorksCustomPropertyReadAdapter.cs" />
       <Compile Include="SolidWorks\Adapters\SolidWorksReadOnlySnapshotService.cs" />
+      <Compile Include="SolidWorks\Adapters\SwLiveDocumentSource.cs" />
+      <Compile Include="SolidWorks\Composition\SolidWorksAuditComposition.cs" />
       <Compile Include="SolidWorks\Snapshots\CustomPropertySnapshot.cs" />
       <Compile Include="SolidWorks\Snapshots\DocumentIdentitySnapshot.cs" />
       <Compile Include="SolidWorks\Snapshots\DocumentStateSnapshot.cs" />

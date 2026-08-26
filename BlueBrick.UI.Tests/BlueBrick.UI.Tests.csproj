@@ -66,6 +66,7 @@
     <Compile Include="SolidWorks\AuditRuntimeWiringTests.cs" />
     <Compile Include="SolidWorks\SnapshotAdapterTests.cs" />
     <Compile Include="SolidWorks\ThreadGuardTests.cs" />
+    <Compile Include="SolidWorks\WiringTests.cs" />
     <!-- Hardening slice tests: signed manifests, provider expiry, injection guard, integrity scanner, chained receipts, promotion gate -->
     <Compile Include="Agent\AssistantManifestTests.cs" />
     <Compile Include="Agent\AssistantProviderExpiryTests.cs" />

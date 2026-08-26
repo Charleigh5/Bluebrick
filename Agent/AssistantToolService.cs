@@ -117,6 +117,20 @@ namespace BlueBrick.Agent
                     AuditRequired = true,
                     AllowedInChat = false,
                     ManualOnly = true
+                },
+                new AssistantToolDescriptor
+                {
+                    Name = "solidworks.get_active_document_snapshot",
+                    DisplayName = "Get Active Document Snapshot",
+                    Category = "solidworks",
+                    Description = "Read-only snapshot of the active SOLIDWORKS document (type, dirty, custom properties). Never writes, saves, or rebuilds.",
+                    ReadOnly = true,
+                    RequiresConfirmation = false,
+                    Enabled = true,
+                    RiskLevel = "low",
+                    AuditRequired = true,
+                    AllowedInChat = true,
+                    RequiresCredential = false
                 }
             };
         }
@@ -231,6 +245,11 @@ namespace BlueBrick.Agent
         if (toolName == "create_screenshot_review_report")
         {
             result = CreateScreenshotReviewReport(request, traceId);
+            return WithReceipt(result, request, policy, descriptor, traceId);
+        }
+        if (toolName == "solidworks.get_active_document_snapshot")
+        {
+            result = GetActiveDocumentSnapshot(request, traceId);
             return WithReceipt(result, request, policy, descriptor, traceId);
         }
 
@@ -404,6 +423,31 @@ namespace BlueBrick.Agent
 
         return AssistantScreenshotReportGenerator.GenerateReviewReport(artifactPath, traceId);
     }
+
+        private AssistantToolResult GetActiveDocumentSnapshot(AssistantToolRequest request, string traceId)
+        {
+            try
+            {
+                var adapter = new BlueBrick.SolidWorks.Adapters.SolidWorksCustomPropertyReadAdapter(
+                    new BlueBrick.SolidWorks.Runtime.SolidWorksThreadGuard(),
+                    BlueBrick.SolidWorks.Runtime.SolidWorksRuntimeInfoFactory.ForMock(),
+                    new BlueBrick.Audit.Core.AuditReceiptFactory(),
+                    () => null);
+                System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> errors;
+                var snap = adapter.ReadCustomProperties(new BlueBrick.Audit.Contracts.AuditRunRequest { CorrelationId = traceId, Mode = BlueBrick.Audit.Contracts.AuditOperationMode.READ_ONLY_ANALYST }, out errors);
+                var status = errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT) ? "empty" : (errors.Count == 0 ? "ok" : "partial");
+                return new AssistantToolResult
+                {
+                    ToolName = "solidworks.get_active_document_snapshot",
+                    Status = status,
+                    Message = status == "empty" ? "No active SOLIDWORKS document." : (status == "partial" ? "Snapshot partial — some properties unavailable." : "Snapshot captured."),
+                    ReadOnly = true,
+                    TraceId = traceId,
+                    Items = new System.Collections.Generic.List<AssistantToolResultItem> { new AssistantToolResultItem { Id = "snapshot", Title = snap?.Identity?.DocumentType ?? "Unknown", Metadata = new System.Collections.Generic.Dictionary<string,string> { ["mutation_count"]="0", ["runtime"]=snap?.RuntimeVersion ?? "" } } }
+                };
+            }
+            catch (Exception ex) { return Fail("solidworks.get_active_document_snapshot", "error", ex.Message, traceId); }
+        }
 
         private AssistantToolResult WithReceipt(
             AssistantToolResult result,
