@@ -44,6 +44,7 @@ namespace BlueBrick.Audit.Core
         /// </summary>
         public static string ToCanonicalJson(object value)
         {
+            if (value == null) return "null";
             var token = JToken.FromObject(value, JsonSerializer.Create(CanonicalJsonSettings));
             var ordered = OrderToken(token);
             using (var sw = new StringWriter(CultureInfo.InvariantCulture))
@@ -109,9 +110,16 @@ namespace BlueBrick.Audit.Core
         {
             Culture = CultureInfo.InvariantCulture,
             Formatting = Formatting.None,
-            NullValueHandling = NullValueHandling.Include, // explicit null vs empty distinction
-            DefaultValueHandling = DefaultValueHandling.Include, // do not silently drop defaults
-            StringEscapeHandling = StringEscapeHandling.EscapeNonAscii
+            NullValueHandling = NullValueHandling.Include,
+            DefaultValueHandling = DefaultValueHandling.Include,
+            StringEscapeHandling = StringEscapeHandling.EscapeNonAscii,
+            TypeNameHandling = TypeNameHandling.None,
+            MetadataPropertyHandling = MetadataPropertyHandling.Ignore,
+            DateFormatHandling = DateFormatHandling.IsoDateFormat,
+            DateTimeZoneHandling = DateTimeZoneHandling.RoundtripKind,
+            DateParseHandling = DateParseHandling.None,
+            FloatFormatHandling = FloatFormatHandling.String,
+            FloatParseHandling = FloatParseHandling.Double
         };
     }
 }

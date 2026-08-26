@@ -168,13 +168,12 @@ namespace BlueBrick.SolidWorks.Adapters
                 if (cfgSource != null) scopes.Add(BuildScopeSnapshot(cfgSource, candidateNames, request.CorrelationId, localErrors));
             }
 
-            // Bounded all-config option — only when explicitly requested AND limit>0.
+            bool configLimitReached = false;
             if (request.ReadAllConfigurations && (request.ConfigurationReadLimit ?? 0) > 0)
             {
                 var cfgNames = doc.GetConfigurationNames();
                 if (cfgNames == null)
                 {
-                    // Enumeration unavailable on this interop family. Record an interop limitation.
                     localErrors.Add(new AuditError { Code = AuditErrorCodes.INTEROP_LIMITATION, CorrelationId = request.CorrelationId, Message = "Configuration name enumeration unavailable on installed interop." });
                 }
                 else
@@ -183,7 +182,7 @@ namespace BlueBrick.SolidWorks.Adapters
                     int taken = 0;
                     foreach (var cfg in cfgNames)
                     {
-                        if (cfg == activeConfigBefore) continue; // already read above
+                        if (cfg == activeConfigBefore) continue;
                         if (taken >= limit) break;
                         var cfgSrc = doc.GetConfigurationSource(cfg);
                         if (cfgSrc != null) scopes.Add(BuildScopeSnapshot(cfgSrc, candidateNames, request.CorrelationId, localErrors));
@@ -191,8 +190,8 @@ namespace BlueBrick.SolidWorks.Adapters
                     }
                     if (cfgNames.Count > (taken + (cfgNames.Contains(activeConfigBefore) ? 1 : 0)))
                     {
-                        // Add a per-bundle limitation note (no error code — bounded by caller's explicit limit).
-                        // We surface the limit-reached classifier only via the missing-configs count.
+                        configLimitReached = true;
+                        localErrors.Add(new AuditError { Code = AuditErrorCodes.CONFIG_LIMIT_REACHED, CorrelationId = request.CorrelationId, Message = "Bounded all-config limit reached (" + limit + "); " + (cfgNames.Count - taken - (cfgNames.Contains(activeConfigBefore) ? 1 : 0)) + " configuration(s) not read." });
                     }
                 }
             }
@@ -228,6 +227,8 @@ namespace BlueBrick.SolidWorks.Adapters
                 ActiveConfigurationAfter = activeConfigAfter,
                 AvailableConfigurations = (doc.GetConfigurationNames() ?? new string[0]).ToList()
             };
+            var topLimitations = new List<string>();
+            if (configLimitReached) topLimitations.Add(AuditErrorCodes.CONFIG_LIMIT_REACHED);
             var bundle = new PropertyAuditSnapshot
             {
                 Identity = identity,
@@ -235,7 +236,7 @@ namespace BlueBrick.SolidWorks.Adapters
                 Scopes = scopes,
                 GovernedPropertyNames = candidateNames.OrderBy(x => x, StringComparer.Ordinal).ToList(),
                 DiscoveredPropertyNames = scopes.SelectMany(s => s.Properties).Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal).Distinct().ToList(),
-                Limitations = new List<string>(),
+                Limitations = topLimitations,
                 RuntimeClassification = _runtimeInfo.Classification.ToString(),
                 RuntimeVersion = _runtimeInfo.Version?.DisplayVersion ?? string.Empty
             };
@@ -252,11 +253,17 @@ namespace BlueBrick.SolidWorks.Adapters
                 string raw, resolved, linked, editable, apiStatus;
                 bool wasResolved;
                 List<string> lms;
-                if (!source.TryGet(name, out raw, out resolved, out wasResolved, out linked, out editable, out apiStatus, out lms))
+                bool got;
+                try
                 {
-                    // Property absent from this source — NOT an error per packet §17 (we DO NOT infer missing values).
+                    got = source.TryGet(name, out raw, out resolved, out wasResolved, out linked, out editable, out apiStatus, out lms);
+                }
+                catch (Exception ex)
+                {
+                    errors.Add(new AuditError { Code = AuditErrorCodes.READ_FAILURE, CorrelationId = correlationId, Scope = source.Scope + ":" + name, Message = "Per-property read failed for '" + name + "': " + ex.Message });
                     continue;
                 }
+                if (!got) continue;
                 props.Add(new CustomPropertySnapshot
                 {
                     Name = name,
@@ -273,10 +280,16 @@ namespace BlueBrick.SolidWorks.Adapters
                 });
             }
 
-            // Optionally record discovered property names available on this manager (when interop supports enumeration).
-            var allNames = source.GetPropertyNames();
+            IReadOnlyList<string> allNames;
             var limitations = new List<string>();
-            if (allNames == null)
+            try { allNames = source.GetPropertyNames(); }
+            catch (Exception ex)
+            {
+                errors.Add(new AuditError { Code = AuditErrorCodes.INTEROP_LIMITATION, CorrelationId = correlationId, Scope = source.Scope, Message = "GetPropertyNames failed: " + ex.Message });
+                allNames = null;
+                limitations.Add("interop_GetPropertyNames_unavailable");
+            }
+            if (allNames == null && limitations.Count == 0)
             {
                 limitations.Add("interop_GetPropertyNames_unavailable");
             }

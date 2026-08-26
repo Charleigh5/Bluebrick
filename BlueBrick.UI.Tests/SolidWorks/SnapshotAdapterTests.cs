@@ -288,12 +288,10 @@ namespace BlueBrick.UI.Tests.SolidWorks
             var adapter = NewAdapter(new FailingDocSource());
             var req = new AuditRunRequest { CorrelationId = "fail", Mode = AuditOperationMode.READ_ONLY_ANALYST };
             List<AuditError> errors;
-            // The adapter should not throw — a per-property TryGet throwing cannot be wrapped cleanly because the seam throws synchronously.
-            // To match the packet's typed partial-error requirement we expect this run to throw via the seam's behaviour; we wrap it in our test
-            // and confirm the snapshot is returned with typed errors only when the seam itself returns false (not throws).
-            // For the throwing-seam simulation, the snapshot is not produced; this test instead asserts that when TryGet returns false
-            // (simulated by the regular FakeDocSource + a property not present) the snapshot omits that property WITHOUT recording a global failure.
-            Assert.ThrowsException<InvalidOperationException>(() => adapter.ReadCustomProperties(req, out errors));
+            var snapshot = adapter.ReadCustomProperties(req, out errors);
+            Assert.IsNotNull(snapshot);
+            Assert.IsTrue(errors.Any(e => e.Code == AuditErrorCodes.READ_FAILURE), "Per-property read failures must be recorded as typed READ_FAILURE partial errors, not a global throw.");
+            Assert.IsTrue(snapshot.Scopes.Count >= 1);
         }
 
         [TestMethod]

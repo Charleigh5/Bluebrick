@@ -15,19 +15,19 @@ namespace BlueBrick.SolidWorks.Runtime
     public sealed class SolidWorksVersion
     {
         /// <summary>Dotted major.version label (e.g. "33.5.0.53" from the install registry); empty when not available.</summary>
-        public string DisplayVersion { get; set; }
+        public string DisplayVersion { get; set; } = string.Empty;
 
         /// <summary>SOLIDWORKS major release number (2024, 2025, 2026); 0 when unknown.</summary>
         public int MajorVersion { get; set; }
 
         /// <summary>Human-readable service pack label (e.g. "SP5.0"); empty when not proven live.</summary>
-        public string ServicePack { get; set; }
+        public string ServicePack { get; set; } = string.Empty;
 
         /// <summary>Raw revision string from <c>ISldWorks.RevisionNumber()</c>; empty when not queried live.</summary>
-        public string RawRevisionString { get; set; }
+        public string RawRevisionString { get; set; } = string.Empty;
 
         /// <summary>Build number when available; empty otherwise.</summary>
-        public string BuildNumber { get; set; }
+        public string BuildNumber { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -66,11 +66,19 @@ namespace BlueBrick.SolidWorks.Runtime
         /// </summary>
         public static SolidWorksRuntimeInfo FromInstallRegistry(SolidWorksVersion version)
         {
+            var sanitized = version == null ? new SolidWorksVersion() : new SolidWorksVersion
+            {
+                DisplayVersion = version.DisplayVersion ?? string.Empty,
+                MajorVersion = version.MajorVersion,
+                ServicePack = string.Empty,
+                BuildNumber = string.Empty,
+                RawRevisionString = string.Empty
+            };
             return new SolidWorksRuntimeInfo
             {
                 CaptureSource = RuntimeInfoCaptureSource.FromInstallRegistry,
                 CaptureTimestampUtc = DateTime.UtcNow,
-                Version = version ?? new SolidWorksVersion(),
+                Version = sanitized,
                 Classification = ClassifyInstall(version)
             };
         }
