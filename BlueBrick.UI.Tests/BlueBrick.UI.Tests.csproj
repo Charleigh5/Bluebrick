@@ -74,6 +74,7 @@
     <Compile Include="Agent\AssistantIntegrityScannerTests.cs" />
     <Compile Include="Agent\AssistantChainedReceiptTests.cs" />
     <Compile Include="Agent\AssistantPromotionGateTests.cs" />
+    <Compile Include="SolidWorks\T5LiveEvidenceTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BlueBrick.csproj">

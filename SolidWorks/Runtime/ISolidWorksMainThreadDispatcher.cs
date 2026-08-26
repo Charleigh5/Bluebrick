@@ -22,5 +22,11 @@ namespace BlueBrick.SolidWorks.Runtime
 
         /// <summary>Throws a typed <see cref="BlueBrick.Audit.Contracts.AuditError"/>-backing COM_THREAD_VIOLATION when called from a non-UI thread.</summary>
         void VerifyAccess();
+
+        /// <summary>Synchronously invoke <paramref name="action"/> on the proven main thread. Uses captured <see cref="System.Threading.SynchronizationContext"/> when off-thread; throws if no dispatcher is available.</summary>
+        void Invoke(Action action);
+
+        /// <summary>Try to synchronously invoke <paramref name="action"/> on the proven main thread. Returns true if executed (directly or via captured context), false if no dispatcher is available to marshal.</summary>
+        bool TryInvoke(Action action);
     }
 }

@@ -16,23 +16,35 @@ namespace BlueBrick.Agent
         private readonly AssistantToolPolicy _policy;
         private readonly AssistantToolAuditLog _auditLog;
         private readonly IAssistantService _assistantService;
+        private readonly BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition _auditComposition;
 
         internal AssistantToolService(AgentConfig config)
-            : this(config, null, CreateAuditLog(config))
+            : this(config, null, CreateAuditLog(config), null)
         {
         }
 
         internal AssistantToolService(AgentConfig config, IAssistantService assistantService)
-            : this(config, assistantService, CreateAuditLog(config))
+            : this(config, assistantService, CreateAuditLog(config), null)
         {
         }
 
         internal AssistantToolService(AgentConfig config, IAssistantService assistantService, AssistantToolAuditLog auditLog)
+            : this(config, assistantService, auditLog, null)
+        {
+        }
+
+        internal AssistantToolService(AgentConfig config, IAssistantService assistantService, BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition auditComposition)
+            : this(config, assistantService, CreateAuditLog(config), auditComposition)
+        {
+        }
+
+        internal AssistantToolService(AgentConfig config, IAssistantService assistantService, AssistantToolAuditLog auditLog, BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition auditComposition)
         {
             _config = config ?? new AgentConfig();
             _policy = new AssistantToolPolicy();
             _auditLog = auditLog ?? new AssistantToolAuditLog();
             _assistantService = assistantService;
+            _auditComposition = auditComposition;
         }
 
         internal IReadOnlyList<AssistantToolDescriptor> GetCatalog()
@@ -122,7 +134,7 @@ namespace BlueBrick.Agent
                 {
                     Name = "solidworks.get_active_document_snapshot",
                     DisplayName = "Get Active Document Snapshot",
-                    Category = "solidworks",
+                    Category = "read",
                     Description = "Read-only snapshot of the active SOLIDWORKS document (type, dirty, custom properties). Never writes, saves, or rebuilds.",
                     ReadOnly = true,
                     RequiresConfirmation = false,
@@ -130,7 +142,9 @@ namespace BlueBrick.Agent
                     RiskLevel = "low",
                     AuditRequired = true,
                     AllowedInChat = true,
-                    RequiresCredential = false
+                    RequiresCredential = false,
+                    AllowedModes = new[] { "READ_ONLY_ANALYST" },
+                    FailureMode = "deny_safe"
                 }
             };
         }
@@ -426,27 +440,82 @@ namespace BlueBrick.Agent
 
         private AssistantToolResult GetActiveDocumentSnapshot(AssistantToolRequest request, string traceId)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
+                if (_auditComposition != null)
+                {
+                    var run = _auditComposition.GetActiveDocumentSnapshot(traceId, traceId);
+                    var errors = run.Errors ?? new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError>();
+                    var snap = run.Snapshot;
+                    var hasReadFailure = errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.READ_FAILURE);
+                    var hasNoDoc = errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT);
+                    var status = hasNoDoc ? "empty" : (hasReadFailure || errors.Count > 0 ? "partial" : "ok");
+                    sw.Stop();
+                    var metadata = new System.Collections.Generic.Dictionary<string,string>
+                    {
+                        ["mutation_count"]="0",
+                        ["runtime"]=snap?.RuntimeVersion ?? run.Receipt?.RuntimeVersion ?? "",
+                        ["duration_ms"]=sw.ElapsedMilliseconds.ToString(),
+                        ["correlation"]=traceId ?? "",
+                        ["mode"]="READ_ONLY_ANALYST",
+                        ["status"]=status
+                    };
+                    if (hasReadFailure) metadata["warning"] = "READ_FAILURE";
+                    var result = new AssistantToolResult
+                    {
+                        ToolName = "solidworks.get_active_document_snapshot",
+                        Status = status,
+                        Message = status == "empty" ? "No active SOLIDWORKS document." : (status == "partial" ? "Snapshot partial — some properties unavailable." : "Snapshot captured."),
+                        ReadOnly = true,
+                        TraceId = traceId,
+                        Items = new System.Collections.Generic.List<AssistantToolResultItem> { new AssistantToolResultItem { Id = "snapshot", Title = snap?.Identity?.DocumentType ?? "Unknown", Metadata = metadata } }
+                    };
+                    return result;
+                }
                 var adapter = new BlueBrick.SolidWorks.Adapters.SolidWorksCustomPropertyReadAdapter(
                     new BlueBrick.SolidWorks.Runtime.SolidWorksThreadGuard(),
                     BlueBrick.SolidWorks.Runtime.SolidWorksRuntimeInfoFactory.ForMock(),
                     new BlueBrick.Audit.Core.AuditReceiptFactory(),
                     () => null);
-                System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> errors;
-                var snap = adapter.ReadCustomProperties(new BlueBrick.Audit.Contracts.AuditRunRequest { CorrelationId = traceId, Mode = BlueBrick.Audit.Contracts.AuditOperationMode.READ_ONLY_ANALYST }, out errors);
-                var status = errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT) ? "empty" : (errors.Count == 0 ? "ok" : "partial");
-                return new AssistantToolResult
+                System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> fallbackErrors;
+                BlueBrick.SolidWorks.Snapshots.PropertyAuditSnapshot fallbackSnap;
+                try
+                {
+                    fallbackSnap = adapter.ReadCustomProperties(new BlueBrick.Audit.Contracts.AuditRunRequest { CorrelationId = traceId, Mode = BlueBrick.Audit.Contracts.AuditOperationMode.READ_ONLY_ANALYST }, out fallbackErrors);
+                }
+                catch (BlueBrick.SolidWorks.Runtime.SolidWorksThreadViolationException ex)
+                {
+                    fallbackErrors = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> { new BlueBrick.Audit.Contracts.AuditError { Code = BlueBrick.Audit.Contracts.AuditErrorCodes.READ_FAILURE, CorrelationId = traceId, Message = ex.Message } };
+                    fallbackSnap = new BlueBrick.SolidWorks.Snapshots.PropertyAuditSnapshot { Identity = new BlueBrick.SolidWorks.Snapshots.DocumentIdentitySnapshot { DocumentType = "Unknown" }, State = new BlueBrick.SolidWorks.Snapshots.DocumentStateSnapshot() };
+                }
+                if (fallbackErrors == null) fallbackErrors = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError>();
+                var hasFallbackReadFailure = fallbackErrors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.READ_FAILURE);
+                var hasFallbackNoDoc = fallbackErrors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT);
+                var fallbackStatus = hasFallbackNoDoc ? "empty" : (hasFallbackReadFailure || fallbackErrors.Count > 0 ? "partial" : "ok");
+                sw.Stop();
+                var fallbackMetadata = new System.Collections.Generic.Dictionary<string,string>
+                {
+                    ["mutation_count"]="0",
+                    ["runtime"]=fallbackSnap?.RuntimeVersion ?? "",
+                    ["duration_ms"]=sw.ElapsedMilliseconds.ToString(),
+                    ["correlation"]=traceId ?? "",
+                    ["mode"]="READ_ONLY_ANALYST",
+                    ["status"]=fallbackStatus
+                };
+                if (hasFallbackReadFailure) fallbackMetadata["warning"] = "READ_FAILURE";
+                var fallbackResult = new AssistantToolResult
                 {
                     ToolName = "solidworks.get_active_document_snapshot",
-                    Status = status,
-                    Message = status == "empty" ? "No active SOLIDWORKS document." : (status == "partial" ? "Snapshot partial — some properties unavailable." : "Snapshot captured."),
+                    Status = fallbackStatus,
+                    Message = fallbackStatus == "empty" ? "No active SOLIDWORKS document." : (fallbackStatus == "partial" ? "Snapshot partial — some properties unavailable." : "Snapshot captured."),
                     ReadOnly = true,
                     TraceId = traceId,
-                    Items = new System.Collections.Generic.List<AssistantToolResultItem> { new AssistantToolResultItem { Id = "snapshot", Title = snap?.Identity?.DocumentType ?? "Unknown", Metadata = new System.Collections.Generic.Dictionary<string,string> { ["mutation_count"]="0", ["runtime"]=snap?.RuntimeVersion ?? "" } } }
+                    Items = new System.Collections.Generic.List<AssistantToolResultItem> { new AssistantToolResultItem { Id = "snapshot", Title = fallbackSnap?.Identity?.DocumentType ?? "Unknown", Metadata = fallbackMetadata } }
                 };
+                return fallbackResult;
             }
-            catch (Exception ex) { return Fail("solidworks.get_active_document_snapshot", "error", ex.Message, traceId); }
+            catch (Exception ex) { sw.Stop(); return Fail("solidworks.get_active_document_snapshot", "error", ex.Message, traceId); }
         }
 
         private AssistantToolResult WithReceipt(
@@ -457,6 +526,8 @@ namespace BlueBrick.Agent
             string traceId)
         {
             result = result ?? Fail(request?.ToolName, "error", "Tool returned no result.", traceId);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            sw.Stop();
             var receipt = AssistantToolExecutionReceipt.Create(
                 request,
                 policy,
@@ -465,6 +536,27 @@ namespace BlueBrick.Agent
                 result.Status,
                 result.Message,
                 traceId);
+            receipt.CorrelationId = traceId ?? string.Empty;
+            receipt.Mode = "READ_ONLY_ANALYST";
+            receipt.MutationCount = 0;
+            receipt.DurationMs = sw.Elapsed.TotalMilliseconds;
+            if (result.Items != null)
+            {
+                foreach (var it in result.Items)
+                {
+                    if (it.Metadata != null && it.Metadata.ContainsKey("duration_ms"))
+                    {
+                        double d;
+                        if (double.TryParse(it.Metadata["duration_ms"], out d)) receipt.DurationMs = d;
+                    }
+                    if (it.Metadata != null && it.Metadata.ContainsKey("warning") && !receipt.Warnings.Contains(it.Metadata["warning"]))
+                        receipt.Warnings.Add(it.Metadata["warning"]);
+                }
+            }
+            if (result.Status == "partial" && !receipt.Warnings.Contains("READ_FAILURE"))
+                receipt.Warnings.Add("READ_FAILURE");
+            if (result.Status == "partial" && !receipt.ErrorCodes.Contains("READ_FAILURE"))
+                receipt.ErrorCodes.Add("READ_FAILURE");
             result.Receipt = receipt;
             _auditLog.Record(receipt);
             return result;

@@ -15,22 +15,33 @@ namespace BlueBrick.SolidWorks.Runtime
     public sealed class SolidWorksThreadGuard : ISolidWorksMainThreadDispatcher
     {
         private readonly int _mainThreadId;
+        private readonly SynchronizationContext _syncContext;
 
         /// <summary>
         /// Construct the guard from the current managed thread ID. The
         /// caller is expected to invoke this from the SOLIDWORKS/UI
         /// thread. Captures <see cref="Thread.CurrentThread"/>
-        /// <c>ManagedThreadId</c> exactly once.
+        /// <c>ManagedThreadId</c> exactly once and captures
+        /// <see cref="SynchronizationContext.Current"/> for STA dispatch.
         /// </summary>
         public SolidWorksThreadGuard()
         {
             _mainThreadId = Thread.CurrentThread.ManagedThreadId;
+            _syncContext = SynchronizationContext.Current;
         }
 
         /// <summary>Test-friendly constructor allowing an explicit thread ID; used by <c>ThreadGuard_WrongThread_ThrowsTypedViolation</c>.</summary>
         public SolidWorksThreadGuard(int mainThreadId)
         {
             _mainThreadId = mainThreadId;
+            _syncContext = SynchronizationContext.Current;
+        }
+
+        /// <summary>Constructor that captures an explicit <see cref="SynchronizationContext"/> for deterministic tests or Control.Invoke wiring.</summary>
+        public SolidWorksThreadGuard(int mainThreadId, SynchronizationContext syncContext)
+        {
+            _mainThreadId = mainThreadId;
+            _syncContext = syncContext;
         }
 
         /// <inheritdoc />
@@ -52,6 +63,37 @@ namespace BlueBrick.SolidWorks.Runtime
                     "Proven main thread id=" + _mainThreadId + ", caller thread id=" + Thread.CurrentThread.ManagedThreadId + ". " +
                     "Per BB-M001 packet §15 no Task.Run/background-thread COM access is permitted.");
             }
+        }
+
+        /// <inheritdoc />
+        public bool TryInvoke(Action action)
+        {
+            if (action == null) throw new ArgumentNullException(nameof(action));
+            if (CheckAccess())
+            {
+                action();
+                return true;
+            }
+            if (_syncContext != null)
+            {
+                Exception dispatchEx = null;
+                _syncContext.Send(_ =>
+                {
+                    try { action(); } catch (Exception ex) { dispatchEx = ex; }
+                }, null);
+                if (dispatchEx != null) throw dispatchEx;
+                return true;
+            }
+            return false;
+        }
+
+        /// <inheritdoc />
+        public void Invoke(Action action)
+        {
+            if (action == null) throw new ArgumentNullException(nameof(action));
+            if (TryInvoke(action)) return;
+            throw new InvalidOperationException(
+                "Cannot marshal to proven main thread id=" + _mainThreadId + ". No SynchronizationContext was captured at ConnectToSW. Call snapshot on the main STA thread or wire a dispatcher via Control.Invoke.");
         }
     }
 

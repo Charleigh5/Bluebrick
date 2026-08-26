@@ -373,7 +373,7 @@ namespace BlueBrick
                 _agentOverlay = new AgentOverlay(ParseColor(_agentConfig.Agent.OverlayColor));
                 TraceDiagnostic("AgentOverlay created");
                 try { _auditComposition = SwApp != null ? new BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition(SwApp) : null; TraceDiagnostic("AuditComposition wired: " + (_auditComposition?.Runtime?.Classification.ToString() ?? "null")); } catch (Exception ex) { TraceDiagnostic("AuditComposition wire failed: " + ex); }
-                _agentServer = new AgentHttpServer(SwApp, _agentConfig, _agentOverlay);
+                _agentServer = new AgentHttpServer(SwApp, _agentConfig, _agentOverlay, _auditComposition);
                 TraceDiagnostic("AgentHttpServer created");
                 _agentServer.Start();
                 TraceDiagnostic("AgentHttpServer started");

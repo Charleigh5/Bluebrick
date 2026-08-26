@@ -365,6 +365,8 @@ namespace BlueBrick.Agent
         public bool MutatesEpicor { get; set; }
         public bool SendsExternalData { get; set; }
         public bool RequiresCredential { get; set; }
+        public string[] AllowedModes { get; set; } = new[] { "READ_ONLY_ANALYST" };
+        public string FailureMode { get; set; } = "deny_safe";
     }
 
     internal class AssistantToolRequest

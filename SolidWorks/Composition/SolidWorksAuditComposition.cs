@@ -49,8 +49,28 @@ namespace BlueBrick.SolidWorks.Composition
                 errors = new System.Collections.Generic.List<AuditError> { new AuditError { Code = AuditErrorCodes.COM_THREAD_VIOLATION, CorrelationId = cid, Message = ex.Message } };
                 snap = new PropertyAuditSnapshot { Identity = new DocumentIdentitySnapshot { DocumentType = "Unknown" }, State = new DocumentStateSnapshot() };
             }
+            catch (Exception ex) when (!(ex is SolidWorksThreadViolationException))
+            {
+                if (ex is InvalidOperationException && ex.Message != null && ex.Message.IndexOf("main thread", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    errors = new System.Collections.Generic.List<AuditError> { new AuditError { Code = AuditErrorCodes.COM_THREAD_VIOLATION, CorrelationId = cid, Message = ex.Message } };
+                    snap = new PropertyAuditSnapshot { Identity = new DocumentIdentitySnapshot { DocumentType = "Unknown" }, State = new DocumentStateSnapshot() };
+                }
+                else throw;
+            }
+            if (errors == null) errors = new System.Collections.Generic.List<AuditError>();
+            if (_runtime == null || string.IsNullOrWhiteSpace(_runtime.Version?.DisplayVersion))
+            {
+                errors.Add(new AuditError { Code = "BLOCKED", CorrelationId = cid, Message = "Missing runtime — snapshot blocked." });
+                sw.Stop();
+                var blockedReceipt = _receiptFactory.CreateDenied(req, _adapter.AdapterName, "", _runtime?.Classification.ToString() ?? "UnknownReadOnly", "Missing runtime — snapshot blocked.", errors[errors.Count-1]);
+                blockedReceipt.TimestampUtc = DateTime.UtcNow;
+                return new AuditRunResult { Snapshot = snap, Errors = errors, Receipt = blockedReceipt, Evidence = new System.Collections.Generic.List<AuditEvidence>(), Findings = new System.Collections.Generic.List<AuditFinding>() };
+            }
             sw.Stop();
-            var receipt = _receiptFactory.Create(req, _adapter.AdapterName, _runtime.Version?.DisplayVersion ?? "", _runtime.Classification.ToString(), snap?.Identity?.DocumentIdentityHash ?? "", snap?.Identity?.DocumentType ?? "Unknown", snap?.Identity?.ActiveConfiguration ?? "", snap?.State?.DirtyBefore ?? false, snap?.State?.DirtyAfter ?? false, snap?.State?.IsReadOnly ?? false, "", AuditStateVersionBuilder.BuildStateVersion(snap), new string[0], new string[0], new System.Collections.Generic.List<AuditEvidence>(), new System.Collections.Generic.List<AuditFinding>(), errors.Count==0?"Completed":"Partial", errors.Count==0?"Snapshot captured":"Partial with errors", errors, new string[0], "");
+            var status = errors.Count==0?"Completed": "Partial";
+            var message = errors.Count==0?"Snapshot captured": errors.Exists(e => e.Code == AuditErrorCodes.COM_THREAD_VIOLATION) ? "Snapshot partial — COM thread violation (call on main STA thread or marshal via dispatcher)." : "Snapshot partial — some properties unavailable.";
+            var receipt = _receiptFactory.Create(req, _adapter.AdapterName, _runtime.Version?.DisplayVersion ?? "", _runtime.Classification.ToString(), snap?.Identity?.DocumentIdentityHash ?? "", snap?.Identity?.DocumentType ?? "Unknown", snap?.Identity?.ActiveConfiguration ?? "", snap?.State?.DirtyBefore ?? false, snap?.State?.DirtyAfter ?? false, snap?.State?.IsReadOnly ?? false, "", AuditStateVersionBuilder.BuildStateVersion(snap), new string[0], new string[0], new System.Collections.Generic.List<AuditEvidence>(), new System.Collections.Generic.List<AuditFinding>(), status, message, errors, new string[0], "");
             var result = new AuditRunResult { Snapshot = snap, Errors = errors, Receipt = receipt, Evidence = new System.Collections.Generic.List<AuditEvidence>(), Findings = new System.Collections.Generic.List<AuditFinding>() };
             return result;
         }

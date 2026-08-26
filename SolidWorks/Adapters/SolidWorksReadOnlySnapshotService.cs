@@ -91,6 +91,7 @@ namespace BlueBrick.SolidWorks.Adapters
             string docType = snapshot?.Identity?.DocumentType ?? "Unknown";
             string pathHash = snapshot?.Identity?.DocumentIdentityHash ?? string.Empty;
 
+            var isPartial = errors != null && errors.Count > 0;
             var receipt = _receiptFactory.Create(
                 request: request,
                 adapter: _adapter.AdapterName,
@@ -108,8 +109,8 @@ namespace BlueBrick.SolidWorks.Adapters
                 toolsExecuted: request.Mode == AuditOperationMode.MOCK ? new string[] { } : new[] { "custom_property_snapshot" },
                 evidence: new AuditEvidence[0],
                 findings: new AuditFinding[0],
-                resultStatus: "Completed",
-                message: null,
+                resultStatus: isPartial ? "Partial" : "Completed",
+                message: isPartial ? "Partial — some properties unavailable." : null,
                 errors: errors,
                 sideEffects: null,
                 rollbackReason: null);

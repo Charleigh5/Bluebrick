@@ -7,8 +7,17 @@ namespace BlueBrick.Agent
     {
         public string ReceiptId { get; set; }
         public DateTime TimestampUtc { get; set; }
+        public string CorrelationId { get; set; }
         public string TraceId { get; set; }
         public string ToolName { get; set; }
+        public string Mode { get; set; } = "READ_ONLY_ANALYST";
+        public string Version { get; set; } = string.Empty;
+        public string DocumentType { get; set; } = "Unknown";
+        public string State { get; set; } = string.Empty;
+        public List<string> Warnings { get; set; } = new List<string>();
+        public List<string> ErrorCodes { get; set; } = new List<string>();
+        public double DurationMs { get; set; }
+        public int MutationCount { get; set; } = 0;
         public string RiskLevel { get; set; }
         public bool Allowed { get; set; }
         public bool ReadOnly { get; set; }
@@ -32,13 +41,25 @@ namespace BlueBrick.Agent
             request = request ?? new AssistantToolRequest();
             policy = policy ?? AssistantToolPolicyDecision.Deny("unknown_policy", "Policy decision missing.", true);
             authorization = authorization ?? AssistantToolAuthorization.None();
+            var warnings = new List<string>();
+            var errorCodes = new List<string>();
+            if (!policy.Allowed) errorCodes.Add(policy.Code ?? "DENY");
 
             return new AssistantToolExecutionReceipt
             {
                 ReceiptId = Guid.NewGuid().ToString("N"),
                 TimestampUtc = DateTime.UtcNow,
+                CorrelationId = traceId ?? string.Empty,
                 TraceId = traceId,
                 ToolName = request.ToolName ?? string.Empty,
+                Mode = "READ_ONLY_ANALYST",
+                Version = descriptor?.AllowedModes != null && descriptor.AllowedModes.Length > 0 ? string.Join(",", descriptor.AllowedModes) : "READ_ONLY_ANALYST",
+                DocumentType = "Unknown",
+                State = resultStatus ?? "unknown",
+                Warnings = warnings,
+                ErrorCodes = errorCodes,
+                DurationMs = 0,
+                MutationCount = 0,
                 RiskLevel = descriptor == null ? "unknown" : descriptor.RiskLevel ?? "unknown",
                 Allowed = policy.Allowed,
                 ReadOnly = descriptor == null || descriptor.ReadOnly,

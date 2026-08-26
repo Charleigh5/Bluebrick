@@ -40,7 +40,9 @@ namespace BlueBrick.Agent
         private CancellationTokenSource _cts;
         private static readonly HttpClient _httpClient = new HttpClient();
 
-        internal AgentHttpServer(ISldWorks swApp, AgentConfig config, AgentOverlay overlay)
+        internal BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition AuditComposition => _auditComposition;
+
+        internal AgentHttpServer(ISldWorks swApp, AgentConfig config, AgentOverlay overlay, BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition auditComposition = null)
         {
             _swApp = swApp;
             _config = config;
@@ -52,8 +54,8 @@ namespace BlueBrick.Agent
         _telemetry = new TelemetryLogger(logDir, "events", 0.1, 7, 2048, 500);
         _generateReviewJobs = new GenerateReviewJobManager(swApp, _telemetry);
         _assistantService = new OpenAiAssistantService(config);
-        try { _auditComposition = swApp != null ? new BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition(swApp) : null; } catch { _auditComposition = null; }
-        _assistantTools = new AssistantToolService(config, _assistantService);
+        _auditComposition = auditComposition ?? TryCreateAuditComposition(swApp);
+        _assistantTools = new AssistantToolService(config, _assistantService, _auditComposition);
         _chatGptSessions = new ChatGptSessionStore();
         _previewActionPolicy = new PreviewActionPolicy();
         _relayTunnel = new RelayTunnelClient(config, _telemetry, GetKnownSessionIds, HandleRelayInvocationAsync);
@@ -337,6 +339,17 @@ namespace BlueBrick.Agent
             await HandleAssistantScreenshotGet(context, path, traceId).ConfigureAwait(false);
             return;
         }
+        if (path == "/assistant/snapshot/active-document")
+        {
+            if (!IsGet(context.Request))
+            {
+                context.Response.StatusCode = 405;
+                await WriteAssistantError(context, "method_not_allowed", "Method not allowed", traceId).ConfigureAwait(false);
+                return;
+            }
+            await HandleAssistantSnapshotActiveDocument(context, traceId).ConfigureAwait(false);
+            return;
+        }
 
         string body;
         try
@@ -468,9 +481,6 @@ case "/pdm/check_out":
                 return;
             case "/assistant/history":
                 await HandleAssistantHistory(context, traceId);
-                return;
-            case "/assistant/snapshot/active-document":
-                await HandleAssistantSnapshotActiveDocument(context, traceId);
                 return;
             case "/lab/vault/reindex":
                 await HandleVaultReindex(context, traceId);
@@ -1489,9 +1499,48 @@ private string ResolveVaultName()
                 await WriteAssistantError(context, "unavailable", "Snapshot service unavailable", traceId).ConfigureAwait(false);
                 return;
             }
-            var result = _auditComposition.GetActiveDocumentSnapshot(traceId, traceId);
+            BlueBrick.SolidWorks.Snapshots.PropertyAuditSnapshot snapFallback = null;
+            System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> errs = null;
+            string status = "partial";
+            BlueBrick.Audit.Contracts.AuditRunResult result = null;
+            try
+            {
+                result = _auditComposition.GetActiveDocumentSnapshot(traceId, traceId);
+            }
+            catch (BlueBrick.SolidWorks.Runtime.SolidWorksThreadViolationException ex)
+            {
+                errs = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> { new BlueBrick.Audit.Contracts.AuditError { Code = BlueBrick.Audit.Contracts.AuditErrorCodes.COM_THREAD_VIOLATION, CorrelationId = traceId, Message = ex.Message } };
+                snapFallback = new BlueBrick.SolidWorks.Snapshots.PropertyAuditSnapshot { Identity = new BlueBrick.SolidWorks.Snapshots.DocumentIdentitySnapshot { DocumentType = "Unknown" }, State = new BlueBrick.SolidWorks.Snapshots.DocumentStateSnapshot() };
+                status = "partial";
+                await WriteAssistantJson(context, new
+                {
+                    status,
+                    traceId,
+                    runtime = new { classification = _auditComposition.Runtime?.Classification.ToString(), version = _auditComposition.Runtime?.Version?.DisplayVersion, displayVersion = snapFallback?.RuntimeVersion },
+                    snapshot = snapFallback,
+                    errors = errs,
+                    receipt = (object)null,
+                    mainThreadId = _auditComposition.Guard?.MainThreadId,
+                    note = "COM thread violation — snapshot must be called on main STA thread or via ISolidWorksMainThreadDispatcher.Invoke/TryInvoke captured at ConnectToSW."
+                }, traceId).ConfigureAwait(false);
+                return;
+            }
+            catch (Exception ex)
+            {
+                errs = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> { new BlueBrick.Audit.Contracts.AuditError { Code = BlueBrick.Audit.Contracts.AuditErrorCodes.READ_FAILURE, CorrelationId = traceId, Message = ex.Message } };
+                status = "partial";
+                await WriteAssistantJson(context, new
+                {
+                    status,
+                    traceId,
+                    snapshot = (object)null,
+                    errors = errs,
+                    receipt = (object)null
+                }, traceId).ConfigureAwait(false);
+                return;
+            }
             var hasDoc = result.Errors == null || !result.Errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT);
-            var status = hasDoc ? (result.Errors.Count == 0 ? "ok" : "partial") : "empty";
+            status = hasDoc ? (result.Errors.Count == 0 ? "ok" : "partial") : "empty";
             await WriteAssistantJson(context, new
             {
                 status,
@@ -1499,7 +1548,8 @@ private string ResolveVaultName()
                 runtime = new { classification = result.Receipt?.RuntimeClassification, version = result.Receipt?.RuntimeVersion, displayVersion = result.Snapshot?.RuntimeVersion },
                 snapshot = result.Snapshot,
                 errors = result.Errors,
-                receipt = result.Receipt
+                receipt = result.Receipt,
+                mainThreadId = _auditComposition.Guard?.MainThreadId
             }, traceId).ConfigureAwait(false);
         }
 
@@ -1828,6 +1878,11 @@ private string ResolveVaultName()
             return WriteJson(context, AssistantApiEnvelope.Fail(code, message, traceId));
         }
 
+        private static bool IsGet(HttpListenerRequest request)
+        {
+            return string.Equals(request.HttpMethod, "GET", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static async Task WriteRaw(HttpListenerContext context, string body)
         {
             var buffer = Encoding.UTF8.GetBytes(body);
@@ -1852,6 +1907,11 @@ private string ResolveVaultName()
         {
             var tokenPath = EnsureAuthToken();
             return File.ReadAllText(tokenPath).Trim();
+        }
+
+        private static BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition TryCreateAuditComposition(ISldWorks swApp)
+        {
+            try { return swApp != null ? new BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition(swApp) : null; } catch { return null; }
         }
 
         private static string EnsureAuthToken()
