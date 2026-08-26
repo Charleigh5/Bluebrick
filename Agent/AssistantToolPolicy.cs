@@ -17,15 +17,35 @@ namespace BlueBrick.Agent
                 return EvaluateRoute(normalized, "POST", AssistantToolInvocationSource.AssistantTool);
             }
 
-            if (normalized.IndexOf("sw/", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                normalized.IndexOf("pdm/", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                normalized.IndexOf("lab/vault/reset", StringComparison.OrdinalIgnoreCase) >= 0)
+            var lower = normalized.ToLowerInvariant();
+            if (lower.Contains("sw/") || lower.Contains("pdm/") || lower.Contains("lab/vault/reset"))
             {
-                return AssistantToolPolicyDecision.Deny(
-                    "blocked_route_alias",
-                    "Assistant tools cannot invoke CAD, PDM, or destructive lab routes by alias.",
-                    true);
+                return AssistantToolPolicyDecision.Deny("blocked_route_alias", "Assistant tools cannot invoke CAD, PDM, or destructive lab routes by alias.", true);
             }
+            string[] blockedSubstrings = new[] { "save", "save_as", "rebuild", "edit", "write", "config", "drawing", "bom", "checkout", "checkin", "batch" };
+            foreach (var b in blockedSubstrings)
+            {
+                if (lower.Contains(b) && !string.Equals(normalized, "solidworks.get_active_document_snapshot", StringComparison.OrdinalIgnoreCase))
+                {
+                    return AssistantToolPolicyDecision.Deny("DENY", "Blocked mutation tool '" + b + "' denied by read-only policy.", true);
+                }
+            }
+            if (lower.Contains("pdm") && !string.Equals(normalized, "search_pdm", StringComparison.OrdinalIgnoreCase) && !string.Equals(normalized, "solidworks.get_active_document_snapshot", StringComparison.OrdinalIgnoreCase))
+            {
+                return AssistantToolPolicyDecision.Deny("DENY", "Blocked mutation tool 'pdm' denied by read-only policy.", true);
+            }
+            if (!string.Equals(normalized, "solidworks.get_active_document_snapshot", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(normalized, "search_local_vault", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(normalized, "search_pdm", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(normalized, "search_epicor", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(normalized, "capture_screenshot", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(normalized, "create_screenshot_review_report", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(normalized, "search_all", StringComparison.OrdinalIgnoreCase))
+            {
+                return AssistantToolPolicyDecision.Allow("unknown", "Unknown tool will be handled by catalog.", false);
+            }
+
+
 
             return AssistantToolPolicyDecision.Allow("safe_tool_name", "Tool name is not a protected route.", false);
         }
