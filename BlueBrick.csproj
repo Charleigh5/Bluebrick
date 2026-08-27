@@ -71,6 +71,7 @@
         <Compile Include="Agent\AssistantToolExecutionReceipt.cs" />
         <Compile Include="Agent\AssistantToolPolicy.cs" />
         <Compile Include="Agent\AssistantToolService.cs" />
+        <Compile Include="Agent\AssistantWebViewDiagnostics.cs" />
         <Compile Include="Agent\AssistantWebViewSecurity.cs" />
         <Compile Include="Agent\AssistantWebViewHost.cs" />
         <Compile Include="Agent\AgentHttpServer.cs" />
@@ -199,11 +200,21 @@
       <Compile Include="SolidWorks\Adapters\ICustomPropertyReadAdapter.cs" />
       <Compile Include="SolidWorks\Adapters\Internal\ISwCustomPropertySource.cs" />
       <Compile Include="SolidWorks\Adapters\ISolidWorksReadOnlySnapshotService.cs" />
+      <Compile Include="SolidWorks\Adapters\ISelectionReadAdapter.cs" />
+      <Compile Include="SolidWorks\Adapters\Internal\ISwSelectionSource.cs" />
       <Compile Include="SolidWorks\Adapters\SolidWorksCustomPropertyReadAdapter.cs" />
       <Compile Include="SolidWorks\Adapters\SolidWorksReadOnlySnapshotService.cs" />
+      <Compile Include="SolidWorks\Adapters\SolidWorksSelectionReadAdapter.cs" />
       <Compile Include="SolidWorks\Adapters\SwLiveDocumentSource.cs" />
+      <Compile Include="SolidWorks\Adapters\SwLiveSelectionSource.cs" />
+      <Compile Include="SolidWorks\Adapters\SwLiveFeatureSource.cs" />
+      <Compile Include="SolidWorks\Adapters\Internal\ISwFeatureSource.cs" />
+      <Compile Include="SolidWorks\Adapters\IFeatureTreeReadAdapter.cs" />
+      <Compile Include="SolidWorks\Adapters\SolidWorksFeatureTreeReadAdapter.cs" />
       <Compile Include="SolidWorks\Composition\SolidWorksAuditComposition.cs" />
       <Compile Include="SolidWorks\Snapshots\CustomPropertySnapshot.cs" />
+      <Compile Include="SolidWorks\Snapshots\FeatureSnapshot.cs" />
+      <Compile Include="SolidWorks\Snapshots\SelectionSnapshot.cs" />
       <Compile Include="SolidWorks\Snapshots\DocumentIdentitySnapshot.cs" />
       <Compile Include="SolidWorks\Snapshots\DocumentStateSnapshot.cs" />
       <Compile Include="SolidWorks\Snapshots\PropertyAuditSnapshot.cs" />
@@ -307,9 +318,13 @@
         <Content Include="AssistantWeb\dist\index.html">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
+        <Content Include="AssistantWeb\dist\assistant-index.css">
+          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
         <Content Include="AssistantWeb\dist\assistant-web.js">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
+
         <Content Include="config\appsettings.lab.json">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>

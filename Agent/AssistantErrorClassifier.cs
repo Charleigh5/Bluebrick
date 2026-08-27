@@ -5,10 +5,54 @@ using Newtonsoft.Json.Linq;
 
 namespace BlueBrick.Agent
 {
+    /// <summary>
+    /// Thrown when the upstream model provider returns a non-success HTTP
+    /// response. Carries safe provenance metadata (provider, model, HTTP
+    /// status, category) so the failing edge can be identified without
+    /// exposing payloads, API keys, headers, or prompts.
+    /// </summary>
+    internal sealed class AssistantProviderException : Exception
+    {
+        internal AssistantProviderException(
+            string provider,
+            string model,
+            int? httpStatus,
+            string category,
+            string safeMessage)
+            : base(string.IsNullOrWhiteSpace(safeMessage)
+                ? "Assistant request failed."
+                : safeMessage)
+        {
+            Provider = provider;
+            Model = model;
+            HttpStatus = httpStatus;
+            Category = category;
+        }
+
+        internal string Provider { get; private set; }
+        internal string Model { get; private set; }
+        internal int? HttpStatus { get; private set; }
+        internal string Category { get; private set; }
+    }
+
     internal static class AssistantErrorClassifier
     {
         internal static AssistantErrorInfo FromException(Exception ex, bool cancellationRequested = false)
         {
+            var providerException = ex as AssistantProviderException;
+            if (providerException != null)
+            {
+                return new AssistantErrorInfo(
+                    "request_failed",
+                    SanitizeMessage(providerException.Message, "Assistant request failed."),
+                    providerException.Provider,
+                    providerException.Model,
+                    providerException.HttpStatus,
+                    string.IsNullOrWhiteSpace(providerException.Category)
+                        ? "provider_error"
+                        : providerException.Category);
+            }
+
             if (ex is OperationCanceledException)
             {
                 return cancellationRequested
@@ -21,7 +65,12 @@ namespace BlueBrick.Agent
                 return new AssistantErrorInfo("bridge_unavailable", "Assistant bridge is unavailable.");
             }
 
-            return new AssistantErrorInfo("request_failed", SanitizeMessage(ex?.Message, "Assistant request failed."));
+            // Generic exceptions frequently carry empty messages; surface the
+            // exception type so the failure is diagnosable from the transcript.
+            var detail = ex == null
+                ? "unknown error"
+                : string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message;
+            return new AssistantErrorInfo("request_failed", SanitizeMessage(detail, "Assistant request failed."));
         }
 
         internal static AssistantErrorInfo FromHttpFailure(HttpStatusCode statusCode, string body)
@@ -50,9 +99,67 @@ namespace BlueBrick.Agent
             return new AssistantErrorInfo("http_error", ExtractSafeError(body, "Assistant request failed."));
         }
 
-        internal static AssistantErrorInfo FromProviderFailure(string body)
+        // Legacy-compatible overload retained for existing call sites.
+        internal static AssistantErrorInfo FromProviderFailure(string body, string provider, string model, int httpStatus)
         {
-            return new AssistantErrorInfo("provider_error", ExtractSafeError(body, "AI provider request failed."));
+            return FromProviderFailure(provider, model, httpStatus, body);
+        }
+
+        // Route-identity overload: builds a safe provider error with full
+        // provenance (provider/model/status/category) and a sanitized
+        // provider message. Never carries keys, headers, bodies, or prompts.
+        internal static AssistantErrorInfo FromProviderFailure(
+            string provider,
+            string model,
+            int httpStatus,
+            string providerBody)
+        {
+            var safe = ExtractSafeError(providerBody, "Assistant request failed.");
+
+            return new AssistantErrorInfo(
+                "provider_error",
+                safe,
+                provider,
+                model,
+                httpStatus,
+                ClassifyProviderCategory(httpStatus));
+        }
+
+        // Maps an upstream HTTP status to a safe failure category. This only
+        // classifies what the transport actually reported; unknown statuses
+        // fall back to the generic provider_error bucket.
+        internal static string ClassifyProviderCategory(int? httpStatus)
+        {
+            if (!httpStatus.HasValue)
+                return "provider_error";
+
+            switch (httpStatus.Value)
+            {
+                case 400:
+                    return "bad_request";
+
+                case 401:
+                case 403:
+                    return "auth_or_permission";
+
+                case 404:
+                    return "model_or_endpoint";
+
+                case 408:
+                    return "provider_timeout";
+
+                case 413:
+                    return "request_too_large";
+
+                case 429:
+                    return "rate_limit";
+
+                default:
+                    if (httpStatus.Value >= 500)
+                        return "provider_unavailable";
+
+                    return "provider_error";
+            }
         }
 
         internal static AssistantErrorInfo FromJsonParseFailure(string body)
@@ -85,6 +192,63 @@ namespace BlueBrick.Agent
             }
         }
 
+        // Prepends a parseable provenance tag to a wire/transcript error
+        // message. The tag carries only safe fields (provider, model id,
+        // HTTP status, category) and never payload contents, keys, headers,
+        // or prompts. Without provenance the message is returned untouched.
+        internal static string FormatWithProvenance(AssistantErrorInfo error)
+        {
+            if (error == null)
+                return "Assistant request failed.";
+
+            var message = SanitizeMessage(error.Message, "Assistant request failed.");
+
+            var hasProvenance =
+                !string.IsNullOrWhiteSpace(error.Provider) ||
+                !string.IsNullOrWhiteSpace(error.Model) ||
+                error.HttpStatus.HasValue ||
+                !string.IsNullOrWhiteSpace(error.Category);
+
+            if (!hasProvenance)
+                return message;
+
+            var provider = SafeTagValue(error.Provider);
+            var model = SafeTagValue(error.Model);
+            var status = error.HttpStatus.HasValue
+                ? error.HttpStatus.Value.ToString()
+                : "unknown";
+            var category = SafeTagValue(error.Category);
+
+            return string.Format(
+                "[prov provider={0} model={1} httpStatus={2} category={3}] {4}",
+                provider,
+                model,
+                status,
+                category,
+                message);
+        }
+
+        // Flattens a provenance field for safe inclusion inside the bracket
+        // tag: control characters removed, brackets neutralized so the tag
+        // stays parseable, length capped.
+        private static string SafeTagValue(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "unknown";
+
+            var safe = value
+                .Replace("\r", " ")
+                .Replace("\n", " ")
+                .Replace("[", "(")
+                .Replace("]", ")")
+                .Trim();
+
+            if (safe.Length > 120)
+                safe = safe.Substring(0, 120);
+
+            return safe;
+        }
+
         private static string SanitizeMessage(string value, string fallback)
         {
             var text = (value ?? string.Empty).Trim();
@@ -99,11 +263,29 @@ namespace BlueBrick.Agent
     {
         internal AssistantErrorInfo(string code, string message)
         {
-            Code = code;
-            Message = message;
+            Code = code ?? "request_failed";
+            Message = string.IsNullOrWhiteSpace(message)
+                ? "Assistant request failed."
+                : message;
+        }
+
+        internal AssistantErrorInfo(string code, string message, string provider, string model, int? httpStatus, string category)
+            : this(code, message)
+        {
+            Provider = provider;
+            Model = model;
+            HttpStatus = httpStatus;
+            Category = category;
         }
 
         public string Code { get; }
         public string Message { get; }
+
+        // Optional safe provenance for upstream provider failures. These are
+        // metadata only: never keys, headers, bodies, or prompt contents.
+        public string Provider { get; set; }
+        public string Model { get; set; }
+        public int? HttpStatus { get; set; }
+        public string Category { get; set; }
     }
 }

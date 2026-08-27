@@ -23,6 +23,9 @@ namespace BlueBrick.Agent
         private const string AssistantApiKeyValueName = "AssistantApiKey";
         private const string AssistantModelValueName = "AssistantModel";
         private const int MaxToolRounds = 5;
+        private const int NonStreamingChatMaxTokens = 128;
+
+        private static readonly object ChatRequestShapeLogLock = new object();
 
         private static readonly HttpClient Client = new HttpClient
         {
@@ -136,7 +139,24 @@ namespace BlueBrick.Agent
 
         public async Task<AssistantConnectionTestResult> TestConnectionAsync()
         {
-            var status = BuildStatus();
+            // BuildStatus resolves registry/profile state and can throw; keep it
+            // inside the guarded region so /assistant/test always returns a body.
+            AssistantPreviewStatus status;
+            try
+            {
+                status = BuildStatus();
+            }
+            catch (Exception ex)
+            {
+                return new AssistantConnectionTestResult
+                {
+                    Success = false,
+                    Mode = MockMode,
+                    Configured = false,
+                    Message = "Status resolution failed: " + (string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message)
+                };
+            }
+
             if (string.Equals(status.AssistantMode, MockMode, StringComparison.OrdinalIgnoreCase))
             {
                 return new AssistantConnectionTestResult
@@ -161,6 +181,35 @@ namespace BlueBrick.Agent
                 };
             }
 
+            AssistantModelProfile profile;
+            try
+            {
+                profile = ResolveProfile();
+            }
+            catch (Exception ex)
+            {
+                return new AssistantConnectionTestResult
+                {
+                    Success = false,
+                    Mode = status.AssistantMode,
+                    Configured = true,
+                    KeySource = status.KeySource,
+                    Message = "Assistant profile could not be resolved: " + ex.Message
+                };
+            }
+
+            if (profile == null)
+            {
+                return new AssistantConnectionTestResult
+                {
+                    Success = false,
+                    Mode = status.AssistantMode,
+                    Configured = true,
+                    KeySource = status.KeySource,
+                    Message = "Assistant profile is not configured. Select a model in the panel before testing the connection."
+                };
+            }
+
             var messages = new JArray
             {
                 new JObject
@@ -172,7 +221,7 @@ namespace BlueBrick.Agent
 
             var requestBody = new JObject
             {
-                ["model"] = _config.Assistant.Model,
+                ["model"] = profile.Model,
                 ["messages"] = messages,
                 ["max_tokens"] = 50
             }.ToString(Formatting.None);
@@ -180,7 +229,6 @@ namespace BlueBrick.Agent
             var stopwatch = Stopwatch.StartNew();
             try
             {
-                var profile = ResolveProfile();
                 var body = await SendChatCompletionAsync(requestBody, ResolveApiKeyInfo(profile).ApiKey, profile).ConfigureAwait(false);
                 stopwatch.Stop();
                 return new AssistantConnectionTestResult
@@ -210,7 +258,7 @@ namespace BlueBrick.Agent
         }
 
         public async Task<AssistantSessionResponse> SendMessageAsync(string sessionId, string message,
-            IList<string> attachmentPaths)
+            IList<string> attachmentPaths, string scopeId = null)
         {
             var session = _store.Get(sessionId) ?? _store.Create();
             var uploadPaths = _config.Assistant.EnableUploads
@@ -282,7 +330,7 @@ namespace BlueBrick.Agent
                 foreach (var m in callMessages) extraMessages.Add(m);
 
                 var traceId = Guid.NewGuid().ToString("N").Substring(0, 8);
-                var toolResults = await ExecuteToolCallRoundAsync(toolCalls, traceId).ConfigureAwait(false);
+                var toolResults = await ExecuteToolCallRoundAsync(toolCalls, traceId, scopeId).ConfigureAwait(false);
                 var toolResultMessages = toolResults["messages"] as JArray;
                 if (toolResultMessages != null)
                 {
@@ -320,7 +368,7 @@ namespace BlueBrick.Agent
     }
 
     public async Task SendMessageStreamAsync(string sessionId, string message,
-        IList<string> attachmentPaths, Action<AssistantStreamChunk> onChunk, CancellationToken cancellationToken)
+        IList<string> attachmentPaths, Action<AssistantStreamChunk> onChunk, CancellationToken cancellationToken, string scopeId = null)
     {
         var session = _store.Get(sessionId) ?? _store.Create();
         var uploadPaths = _config.Assistant.EnableUploads
@@ -372,6 +420,38 @@ namespace BlueBrick.Agent
             return;
         }
 
+        if (!profile.SupportsStreaming)
+        {
+            try
+            {
+                var fallbackBody = await SendChatCompletionAsync(
+                    BuildChatRequestBody(session, false, null),
+                    keyInfo.ApiKey,
+                    profile).ConfigureAwait(false);
+                var fallbackText = ExtractAssistantText(fallbackBody);
+                onChunk(AssistantStreamChunk.TextDelta(fallbackText));
+                var fallbackMessage = new AssistantMessage
+                {
+                    Role = "assistant",
+                    Text = fallbackText,
+                    CreatedUtc = DateTime.UtcNow
+                };
+                session.Messages.Add(fallbackMessage);
+                TrimHistory(session);
+                _store.Save(session);
+                onChunk(AssistantStreamChunk.Complete());
+            }
+            catch (Exception ex)
+            {
+                var classified = AssistantErrorClassifier.FromException(ex);
+                var safeWireMessage =
+                    AssistantErrorClassifier.FormatWithProvenance(classified);
+                onChunk(AssistantStreamChunk.Error(classified.Code, safeWireMessage));
+                onChunk(AssistantStreamChunk.Complete());
+            }
+            return;
+        }
+
         var fullText = new StringBuilder();
         try
         {
@@ -406,7 +486,7 @@ namespace BlueBrick.Agent
                 foreach (var m in callMessages) extraMessages.Add(m);
 
                 var traceId = Guid.NewGuid().ToString("N").Substring(0, 8);
-                var toolResults = await ExecuteToolCallRoundAsync(pendingToolCalls, traceId).ConfigureAwait(false);
+                var toolResults = await ExecuteToolCallRoundAsync(pendingToolCalls, traceId, scopeId).ConfigureAwait(false);
                 var toolResultMessages = toolResults["messages"] as JArray;
                 if (toolResultMessages != null)
                 {
@@ -451,7 +531,9 @@ namespace BlueBrick.Agent
         catch (Exception ex)
         {
             var classified = AssistantErrorClassifier.FromException(ex);
-            onChunk(AssistantStreamChunk.Error(classified.Code, classified.Message));
+            var safeWireMessage =
+                AssistantErrorClassifier.FormatWithProvenance(classified);
+            onChunk(AssistantStreamChunk.Error(classified.Code, safeWireMessage));
             onChunk(AssistantStreamChunk.Complete());
         }
     }
@@ -556,6 +638,11 @@ namespace BlueBrick.Agent
                 ["stream"] = streaming
             };
 
+            if (!streaming)
+            {
+                requestObj["max_tokens"] = NonStreamingChatMaxTokens;
+            }
+
             if (profile.SupportsTools)
             {
                 var tools = GetToolSchemas();
@@ -619,6 +706,8 @@ namespace BlueBrick.Agent
             foreach (var tool in catalog)
             {
                 if (!tool.Enabled) continue;
+                if (!tool.AllowedInChat) continue;
+                if (tool.ManualOnly) continue;
                 tools.Add(new JObject
                 {
                     ["type"] = "function",
@@ -633,6 +722,11 @@ namespace BlueBrick.Agent
 
             _toolSchemasCache = tools;
             return tools;
+        }
+
+        internal JArray GetToolSchemasForTest()
+        {
+            return GetToolSchemas();
         }
 
         private static JObject BuildToolParameters(AssistantToolDescriptor tool)
@@ -655,6 +749,12 @@ namespace BlueBrick.Agent
             else if (tool.Name == "search_epicor")
             {
                 props["query"] = new JObject { ["type"] = "string", ["description"] = "Search query for Epicor ERP parts." };
+                props["limit"] = new JObject { ["type"] = "integer", ["description"] = "Maximum number of results to return." };
+                required.Add("query");
+            }
+            else if (tool.Name == "search_salesforce")
+            {
+                props["query"] = new JObject { ["type"] = "string", ["description"] = "Search query for Salesforce accounts, contacts, opportunities, tasks, or linked documents." };
                 props["limit"] = new JObject { ["type"] = "integer", ["description"] = "Maximum number of results to return." };
                 required.Add("query");
             }
@@ -699,7 +799,7 @@ namespace BlueBrick.Agent
             return result;
         }
 
-        private async Task<JObject> ExecuteToolCallRoundAsync(List<LlmToolCall> toolCalls, string traceId)
+        private async Task<JObject> ExecuteToolCallRoundAsync(List<LlmToolCall> toolCalls, string traceId, string scopeId = null)
         {
             var toolMessages = new JArray();
             foreach (var tc in toolCalls)
@@ -725,6 +825,7 @@ namespace BlueBrick.Agent
                     ToolName = tc.Name,
                     Query = query,
                     Limit = limit,
+                    ScopeId = scopeId,
                     Parameters = parameters
                 };
 
@@ -773,8 +874,53 @@ namespace BlueBrick.Agent
             return new JArray { assistantMsg };
         }
 
+    // Builds and throws a provenance-carrying provider failure. Only safe
+    // metadata (provider/model/status/category/sanitized message) escapes;
+    // bodies, headers, keys, and prompts never reach diagnostics or the
+    // transcript. Provider label falls back to the host-derived label when
+    // the profile does not declare one explicitly.
+    private static void ThrowProviderFailure(
+        AssistantModelProfile profile,
+        HttpResponseMessage response,
+        string responseBody)
+    {
+        var provider = profile != null ? AssistantProvenance.ResolveProviderLabel(profile) : null;
+        var model = profile != null ? profile.Model : null;
+        var status = response != null ? (int?)response.StatusCode : null;
+
+        AssistantErrorInfo classified;
+
+        if (status.HasValue)
+        {
+            classified = AssistantErrorClassifier.FromProviderFailure(
+                provider,
+                model,
+                status.Value,
+                responseBody);
+        }
+        else
+        {
+            classified = new AssistantErrorInfo(
+                "provider_error",
+                "Assistant request failed.",
+                provider,
+                model,
+                null,
+                "provider_error");
+        }
+
+        throw new AssistantProviderException(
+            classified.Provider,
+            classified.Model,
+            classified.HttpStatus,
+            classified.Category,
+            classified.Message);
+    }
+
     private async Task<string> SendChatCompletionAsync(string requestBody, string apiKey, AssistantModelProfile profile)
     {
+        LogChatRequestShape(requestBody, profile);
+
         using (var request = new HttpRequestMessage(HttpMethod.Post,
             profile.ApiBaseUrl.TrimEnd('/') + "/chat/completions"))
         {
@@ -782,16 +928,121 @@ namespace BlueBrick.Agent
             request.Headers.Add("User-Agent", "BlueBrick-AI-Assistant/1.0");
             request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
 
-            var response = await Client.SendAsync(request).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            try
             {
-                var classified = AssistantErrorClassifier.FromProviderFailure(body);
-                throw new InvalidOperationException(classified.Message);
+                var response = await Client.SendAsync(request).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    ThrowProviderFailure(profile, response, body);
+                }
+
+                return body;
+            }
+            catch (TaskCanceledException)
+            {
+                throw new AssistantProviderException(
+                    profile != null ? profile.Provider : null,
+                    profile != null ? profile.Model : null,
+                    null,
+                    "client_timeout",
+                    "Assistant request timed out after 45 seconds.");
+            }
+        }
+    }
+
+    // Best-effort, content-free diagnostic for outbound chat requests. Records
+    // only safe shape metadata (provider, model, stream flag, token bound,
+    // message count, total character count). Never logs payloads, prompts,
+    // headers, or keys. Failures here must never affect the request path.
+    private static void LogChatRequestShape(string requestBody, AssistantModelProfile profile)
+    {
+        try
+        {
+            var messageCount = 0;
+            long inputChars = 0;
+            int? maxTokens = null;
+            bool? stream = null;
+
+            try
+            {
+                var parsed = JObject.Parse(requestBody);
+                var messages = parsed["messages"] as JArray;
+                if (messages != null)
+                {
+                    messageCount = messages.Count;
+                    foreach (var message in messages)
+                    {
+                        inputChars += CountContentCharacters(message["content"]);
+                    }
+                }
+
+                if (parsed["max_tokens"] != null && parsed["max_tokens"].Type == JTokenType.Integer)
+                {
+                    maxTokens = parsed.Value<int>("max_tokens");
+                }
+
+                if (parsed["stream"] != null && parsed["stream"].Type == JTokenType.Boolean)
+                {
+                    stream = parsed.Value<bool>("stream");
+                }
+            }
+            catch
+            {
+                // Shape extraction is best-effort; the raw body is never logged.
             }
 
-            return body;
+            var line = string.Format(
+                "{0} provider={1} model={2} stream={3} maxTokens={4} messageCount={5} inputChars={6} utc={7}",
+                "CHAT_REQUEST_SHAPE",
+                SanitizeShapeValue(profile != null ? profile.Provider : null),
+                SanitizeShapeValue(profile != null ? profile.Model : null),
+                stream.HasValue ? stream.Value.ToString().ToLowerInvariant() : "unknown",
+                maxTokens.HasValue ? maxTokens.Value.ToString() : "unknown",
+                messageCount,
+                inputChars,
+                DateTime.UtcNow.ToString("o"));
+
+            var dir = Path.Combine(Path.GetTempPath(), "BlueBrick", "AssistantDiagnostics");
+            Directory.CreateDirectory(dir);
+            lock (ChatRequestShapeLogLock)
+            {
+                File.AppendAllText(
+                    Path.Combine(dir, "chat-request-shape.log"),
+                    line + Environment.NewLine,
+                    Encoding.UTF8);
+            }
         }
+        catch
+        {
+            // Diagnostics are best-effort only.
+        }
+    }
+
+    private static long CountContentCharacters(JToken content)
+    {
+        if (content == null) return 0;
+        if (content.Type == JTokenType.String) return ((string)content).Length;
+
+        long total = 0;
+        var array = content as JArray;
+        if (array == null) return 0;
+        foreach (var item in array)
+        {
+            if (item == null) continue;
+            var text = item.Type == JTokenType.String
+                ? (string)item
+                : item.Value<string>("text");
+            if (!string.IsNullOrEmpty(text)) total += text.Length;
+        }
+
+        return total;
+    }
+
+    private static string SanitizeShapeValue(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "unknown";
+        return value.Replace("\r", " ").Replace("\n", " ").Replace(" ", "_");
     }
 
         private async Task StreamChatCompletionAsync(string requestBody, string apiKey,
@@ -811,8 +1062,7 @@ namespace BlueBrick.Agent
                     if (!response.IsSuccessStatusCode)
                     {
                         var errorBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                        var classified = AssistantErrorClassifier.FromProviderFailure(errorBody);
-                        throw new InvalidOperationException(classified.Message);
+                        ThrowProviderFailure(profile, response, errorBody);
                     }
 
                     using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
@@ -1230,6 +1480,38 @@ namespace BlueBrick.Agent
                     Timestamp = timestamp;
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Resolves the provider label used in provenance receipts. Prefers the
+    /// profile's declared provider; otherwise derives a conservative label
+    /// from the configured base URL host. No value is fabricated beyond what
+    /// existing configuration already states.
+    /// </summary>
+    internal static class AssistantProvenance
+    {
+        internal static string ResolveProviderLabel(AssistantModelProfile profile)
+        {
+            if (profile != null && !string.IsNullOrWhiteSpace(profile.Provider))
+            {
+                return profile.Provider.Trim();
+            }
+
+            var baseUrl = profile?.ApiBaseUrl;
+            Uri parsed;
+            if (!string.IsNullOrWhiteSpace(baseUrl) && Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out parsed)
+                && !string.IsNullOrWhiteSpace(parsed.Host))
+            {
+                if (parsed.Host.IndexOf("nvidia", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return "NVIDIA";
+                }
+
+                return parsed.Host;
+            }
+
+            return "unknown-provider";
         }
     }
 }

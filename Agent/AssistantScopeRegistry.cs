@@ -17,6 +17,8 @@ namespace BlueBrick.Agent
             var tools = (catalog ?? Array.Empty<AssistantToolDescriptor>()).ToDictionary(t => t.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase);
             var pdm = tools.TryGetValue("search_pdm", out var pdmTool) ? pdmTool : null;
             var epicor = tools.TryGetValue("search_epicor", out var epicorTool) ? epicorTool : null;
+            var salesforce = tools.TryGetValue("search_salesforce", out var salesforceTool) ? salesforceTool : null;
+            var aionUiDatabase = tools.TryGetValue("search_aionui_database", out var aionUiDatabaseTool) ? aionUiDatabaseTool : null;
 
             return new[]
             {
@@ -62,10 +64,17 @@ namespace BlueBrick.Agent
                 {
                     Id = All,
                     Label = "Both/All",
-                    Description = "Fans out to enabled read-only vault, PDM, and Epicor sources and reports unavailable sources.",
+                    Description = "Fans out to enabled read-only vault, PDM, Epicor, Salesforce, and AionUI_database sources and reports unavailable sources.",
                     Enabled = true,
-                    ToolNames = new[] { "search_local_vault", "search_pdm", "search_epicor" },
-                    ReadOnlyToolNames = new[] { "search_local_vault", "search_pdm", "search_epicor" },
+                    UnavailableReason = salesforce?.Enabled == true && aionUiDatabase?.Enabled == true
+                        ? string.Empty
+                        : string.Join(" ", new[]
+                        {
+                            salesforce?.Enabled == true ? string.Empty : (salesforce?.UnavailableReason ?? "Salesforce search is unavailable."),
+                            aionUiDatabase?.Enabled == true ? string.Empty : (aionUiDatabase?.UnavailableReason ?? "AionUI_database search is unavailable.")
+                        }.Where(x => !string.IsNullOrWhiteSpace(x)).ToArray()),
+                    ToolNames = new[] { "search_local_vault", "search_pdm", "search_epicor", "search_salesforce", "search_aionui_database" },
+                    ReadOnlyToolNames = new[] { "search_local_vault", "search_pdm", "search_epicor", "search_salesforce", "search_aionui_database" },
                     RequiresCredential = true,
                     AllowsMutation = false,
                     RiskLevel = "medium"

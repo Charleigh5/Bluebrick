@@ -52,7 +52,7 @@ namespace BlueBrick
             this.tlpChatMain.Location = new System.Drawing.Point(0, 0);
             this.tlpChatMain.Name = "tlpChatMain";
             this.tlpChatMain.RowCount = 3;
-            this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 118F));
+            this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 72F));
             this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tlpChatMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 48F));
             this.tlpChatMain.Size = new System.Drawing.Size(211, 360);
@@ -60,36 +60,27 @@ namespace BlueBrick
             //
             // tlpChatButtons
             //
-            this.tlpChatButtons.ColumnCount = 3;
-            this.tlpChatButtons.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.33F));
-            this.tlpChatButtons.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.33F));
-            this.tlpChatButtons.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 33.33F));
+            this.tlpChatButtons.ColumnCount = 4;
+            this.tlpChatButtons.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.tlpChatButtons.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.tlpChatButtons.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.tlpChatButtons.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 25F));
             this.tlpChatButtons.Controls.Add(this.cmbModel, 0, 0);
-            this.tlpChatButtons.SetColumnSpan(this.cmbModel, 3);
+            this.tlpChatButtons.SetColumnSpan(this.cmbModel, 4);
             this.tlpChatButtons.Controls.Add(this.cmbSearchTool, 0, 1);
-            this.tlpChatButtons.SetColumnSpan(this.cmbSearchTool, 3);
+            this.tlpChatButtons.SetColumnSpan(this.cmbSearchTool, 4);
             this.tlpChatButtons.Controls.Add(this.btnNewSession, 0, 2);
             this.tlpChatButtons.Controls.Add(this.btnCapture, 1, 2);
-            this.tlpChatButtons.Controls.Add(this.btnAttach, 2, 2);
-            this.tlpChatButtons.Controls.Add(this.btnSearchVault, 0, 3);
-            this.tlpChatButtons.Controls.Add(this.btnReindex, 1, 3);
-            this.tlpChatButtons.Controls.Add(this.btnOpenWorking, 2, 3);
-            this.tlpChatButtons.Controls.Add(this.btnOpenChatGpt, 0, 4);
-            this.tlpChatButtons.Controls.Add(this.btnTestConnection, 1, 4);
-            this.tlpChatButtons.Controls.Add(this.btnToggleMode, 2, 4);
-            this.tlpChatButtons.Controls.Add(this.btnResetVault, 0, 5);
-            this.tlpChatButtons.SetColumnSpan(this.btnResetVault, 3);
+            this.tlpChatButtons.Controls.Add(this.btnSearchVault, 2, 2);
+            this.tlpChatButtons.Controls.Add(this.btnAttach, 3, 2);
             this.tlpChatButtons.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tlpChatButtons.Location = new System.Drawing.Point(2, 2);
             this.tlpChatButtons.Name = "tlpChatButtons";
-            this.tlpChatButtons.RowCount = 6;
+            this.tlpChatButtons.RowCount = 3;
             this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 22F));
             this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 22F));
-            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.tlpChatButtons.Size = new System.Drawing.Size(207, 114);
+            this.tlpChatButtons.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this.tlpChatButtons.Size = new System.Drawing.Size(207, 68);
             this.tlpChatButtons.TabIndex = 1;
             //
             // cmbModel
@@ -128,7 +119,7 @@ namespace BlueBrick
             this.btnNewSession.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
             this.btnNewSession.Location = new System.Drawing.Point(1, 45);
             this.btnNewSession.Name = "btnNewSession";
-            this.btnNewSession.Size = new System.Drawing.Size(62, 18);
+            this.btnNewSession.Size = new System.Drawing.Size(49, 20);
             this.btnNewSession.TabIndex = 0;
             this.btnNewSession.Text = "New";
             this.btnNewSession.UseVisualStyleBackColor = true;
@@ -140,9 +131,9 @@ namespace BlueBrick
             this.btnCapture.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(217)))), ((int)(((byte)(255)))), ((int)(((byte)(90)))));
             this.btnCapture.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnCapture.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnCapture.Location = new System.Drawing.Point(69, 45);
+            this.btnCapture.Location = new System.Drawing.Point(53, 45);
             this.btnCapture.Name = "btnCapture";
-            this.btnCapture.Size = new System.Drawing.Size(68, 18);
+            this.btnCapture.Size = new System.Drawing.Size(45, 20);
             this.btnCapture.TabIndex = 1;
             this.btnCapture.Text = "Capture";
             this.btnCapture.UseVisualStyleBackColor = true;
@@ -154,9 +145,9 @@ namespace BlueBrick
             this.btnAttach.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(245)))), ((int)(((byte)(247)))), ((int)(((byte)(250)))));
             this.btnAttach.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnAttach.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnAttach.Location = new System.Drawing.Point(143, 45);
+            this.btnAttach.Location = new System.Drawing.Point(155, 45);
             this.btnAttach.Name = "btnAttach";
-            this.btnAttach.Size = new System.Drawing.Size(63, 18);
+            this.btnAttach.Size = new System.Drawing.Size(51, 20);
             this.btnAttach.TabIndex = 2;
             this.btnAttach.Text = "Attach";
             this.btnAttach.UseVisualStyleBackColor = true;
@@ -168,9 +159,9 @@ namespace BlueBrick
             this.btnSearchVault.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(235)))), ((int)(((byte)(248)))), ((int)(((byte)(255)))));
             this.btnSearchVault.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnSearchVault.Font = new System.Drawing.Font("Microsoft Sans Serif", 7F);
-            this.btnSearchVault.Location = new System.Drawing.Point(1, 66);
+            this.btnSearchVault.Location = new System.Drawing.Point(104, 45);
             this.btnSearchVault.Name = "btnSearchVault";
-            this.btnSearchVault.Size = new System.Drawing.Size(62, 16);
+            this.btnSearchVault.Size = new System.Drawing.Size(45, 20);
             this.btnSearchVault.TabIndex = 10;
             this.btnSearchVault.Text = "Search";
             this.btnSearchVault.UseVisualStyleBackColor = true;
@@ -188,6 +179,7 @@ namespace BlueBrick
             this.btnReindex.TabIndex = 3;
             this.btnReindex.Text = "Reindex";
             this.btnReindex.UseVisualStyleBackColor = true;
+            this.btnReindex.Visible = false;
             this.btnReindex.Click += new System.EventHandler(this.BtnReindex_Click);
             //
             // btnResetVault
@@ -202,6 +194,7 @@ namespace BlueBrick
             this.btnResetVault.TabIndex = 4;
             this.btnResetVault.Text = "Reset Local Vault";
             this.btnResetVault.UseVisualStyleBackColor = true;
+            this.btnResetVault.Visible = false;
             this.btnResetVault.Click += new System.EventHandler(this.BtnResetVault_Click);
             //
             // btnOpenWorking
@@ -216,6 +209,7 @@ namespace BlueBrick
             this.btnOpenWorking.TabIndex = 5;
             this.btnOpenWorking.Text = "Work Dir";
             this.btnOpenWorking.UseVisualStyleBackColor = true;
+            this.btnOpenWorking.Visible = false;
             this.btnOpenWorking.Click += new System.EventHandler(this.BtnOpenWorking_Click);
             //
             // btnOpenChatGpt
@@ -230,6 +224,7 @@ namespace BlueBrick
             this.btnOpenChatGpt.TabIndex = 6;
             this.btnOpenChatGpt.Text = "ChatGPT";
             this.btnOpenChatGpt.UseVisualStyleBackColor = true;
+            this.btnOpenChatGpt.Visible = false;
             this.btnOpenChatGpt.Click += new System.EventHandler(this.BtnOpenChatGpt_Click);
             //
             // btnTestConnection
@@ -244,6 +239,7 @@ namespace BlueBrick
             this.btnTestConnection.TabIndex = 7;
             this.btnTestConnection.Text = "Test";
             this.btnTestConnection.UseVisualStyleBackColor = true;
+            this.btnTestConnection.Visible = false;
             this.btnTestConnection.Click += new System.EventHandler(this.BtnTestConnection_Click);
             //
             // btnToggleMode
@@ -258,6 +254,7 @@ namespace BlueBrick
             this.btnToggleMode.TabIndex = 8;
             this.btnToggleMode.Text = "Mock";
             this.btnToggleMode.UseVisualStyleBackColor = true;
+            this.btnToggleMode.Visible = false;
             this.btnToggleMode.Click += new System.EventHandler(this.BtnToggleMode_Click);
             //
             // _webView
@@ -266,9 +263,9 @@ namespace BlueBrick
             this._webView.CreationProperties = null;
             this._webView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(((int)(((byte)(15)))), ((int)(((byte)(18)))), ((int)(((byte)(22)))));
             this._webView.Dock = System.Windows.Forms.DockStyle.Fill;
-            this._webView.Location = new System.Drawing.Point(2, 118);
+            this._webView.Location = new System.Drawing.Point(2, 72);
             this._webView.Name = "_webView";
-            this._webView.Size = new System.Drawing.Size(207, 192);
+            this._webView.Size = new System.Drawing.Size(207, 238);
             this._webView.TabIndex = 2;
             this._webView.ZoomFactor = 1D;
             //
@@ -313,7 +310,8 @@ namespace BlueBrick
             //
             // lblChatStatus
             //
-            this.lblChatStatus.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblChatStatus.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.lblChatStatus.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F);
             this.lblChatStatus.ForeColor = System.Drawing.SystemColors.ControlDark;
             this.lblChatStatus.Location = new System.Drawing.Point(0, 0);
@@ -321,6 +319,7 @@ namespace BlueBrick
             this.lblChatStatus.Size = new System.Drawing.Size(211, 20);
             this.lblChatStatus.TabIndex = 4;
             this.lblChatStatus.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.lblChatStatus.Visible = false;
             //
             // AssistantPanel
             //

@@ -142,20 +142,6 @@ namespace BlueBrick.Agent
                             }
                         }
                     }
-
-                    var remaining = lineBuffer.ToString().Trim();
-                    if (remaining.Length > 0)
-                    {
-                        if (remaining.StartsWith("data:"))
-                        {
-                            var data = remaining.Substring(5).Trim();
-                            if (data != "[DONE]") onChunk(data);
-                        }
-                        else if (remaining.StartsWith("{"))
-                        {
-                            onChunk(remaining);
-                        }
-                    }
                 }
             }
         }
@@ -181,6 +167,20 @@ namespace BlueBrick.Agent
             {
                 var result = await GetJsonAsync("/assistant/tools").ConfigureAwait(false);
                 if (result.Ok && result.Data["tools"] is JArray arr) return arr;
+                return new JArray();
+            }
+            catch
+            {
+                return new JArray();
+            }
+        }
+
+        internal static async Task<JArray> FetchScopesAsync()
+        {
+            try
+            {
+                var result = await GetJsonAsync("/assistant/scopes").ConfigureAwait(false);
+                if (result.Ok && result.Data["scopes"] is JArray arr) return arr;
                 return new JArray();
             }
             catch
@@ -245,6 +245,18 @@ namespace BlueBrick.Agent
             return PostJsonAsync("/assistant/tool", payload);
         }
 
+        internal static Task<ApiResult<JObject>> ExecuteToolAsync(string toolName, string query, int limit, string scopeId)
+        {
+            var payload = new JObject
+            {
+                ["toolName"] = toolName,
+                ["query"] = query ?? string.Empty,
+                ["limit"] = limit,
+                ["scopeId"] = scopeId ?? string.Empty
+            };
+            return PostJsonAsync("/assistant/tool", payload);
+        }
+
         internal static Task<ApiResult<JObject>> ExecuteToolAsync(string toolName, string query, int limit, JObject parameters)
         {
             var payload = new JObject
@@ -255,6 +267,42 @@ namespace BlueBrick.Agent
                 ["parameters"] = parameters ?? new JObject()
             };
             return PostJsonAsync("/assistant/tool", payload);
+        }
+
+        internal static Task<ApiResult<JObject>> ReviewScreenshotItemAsync(
+            string screenshotId,
+            string targetType,
+            string targetId,
+            string reviewStatus,
+            string reviewNote = null)
+        {
+            var payload = new JObject
+            {
+                ["screenshotId"] = screenshotId ?? string.Empty,
+                ["targetType"] = targetType ?? string.Empty,
+                ["targetId"] = targetId ?? string.Empty,
+                ["reviewStatus"] = reviewStatus ?? string.Empty,
+                ["reviewedBy"] = "BlueBrick task pane",
+                ["reviewNote"] = reviewNote ?? string.Empty
+            };
+            return PostJsonAsync("/assistant/review", payload);
+        }
+
+        internal static Task<ApiResult<JObject>> SaveScreenshotAnnotationsAsync(
+            string screenshotId,
+            JArray annotations,
+            int imageWidth = 0,
+            int imageHeight = 0)
+        {
+            var payload = new JObject
+            {
+                ["schemaVersion"] = AssistantApiEnvelope.CurrentSchemaVersion,
+                ["screenshotId"] = screenshotId ?? string.Empty,
+                ["imageWidth"] = Math.Max(0, imageWidth),
+                ["imageHeight"] = Math.Max(0, imageHeight),
+                ["annotations"] = annotations ?? new JArray()
+            };
+            return PostJsonAsync("/assistant/annotations", payload);
         }
 
         private static HttpRequestMessage CreateRequest(HttpMethod method, string url)
@@ -299,12 +347,14 @@ namespace BlueBrick.Agent
             try
             {
                 var parsed = JObject.Parse(body);
-                if (parsed["ok"] != null && parsed["data"] != null)
+                var okToken = parsed["ok"] ?? parsed["Ok"];
+                var dataToken = parsed["data"] ?? parsed["Data"];
+                if (okToken != null && dataToken != null)
                 {
-                    var ok = parsed.Value<bool?>("ok") ?? false;
+                    var ok = okToken.Value<bool?>() ?? false;
                     if (ok)
                     {
-                        var dataObject = parsed["data"] as JObject;
+                        var dataObject = dataToken as JObject;
                         if (dataObject != null)
                         {
                             dataObject["ok"] = true;
@@ -316,7 +366,7 @@ namespace BlueBrick.Agent
                         return parsed;
                     }
 
-                    var error = parsed["error"] as JObject;
+                    var error = parsed["error"] as JObject ?? parsed["Error"] as JObject;
                     return new JObject
                     {
                         ["ok"] = false,

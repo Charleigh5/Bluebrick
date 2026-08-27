@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -24,16 +25,72 @@ namespace BlueBrick
         private JArray _toolCatalog = new JArray();
         private JArray _toolReceipts = new JArray();
         private JArray _modelCatalog = new JArray();
+        private JArray _scopeCatalog = new JArray();
         private JArray _integrationCatalog = new JArray();
         private JArray _documentCatalog = new JArray();
+        private string _selectedScopeId = AssistantScopeRegistry.LocalVault;
         private bool _initialized;
         private bool _initFailed;
         private bool _isStreaming;
         private bool _loadingModels;
         private readonly object _initLock = new object();
         private readonly object _errorLogLock = new object();
+        private readonly ConcurrentDictionary<string, CancellationTokenSource> _sdkStreamRequests = new ConcurrentDictionary<string, CancellationTokenSource>();
         private CancellationTokenSource _streamCts;
         private AssistantWebViewHost _webHost;
+        private static readonly int _diagPid = Process.GetCurrentProcess().Id;
+        private static readonly object _diagLogLock = new object();
+
+        private const int ReactBridgeReadyMaxAttempts = 40;
+        private const int ReactBridgeReadyDelayMilliseconds = 250;
+
+        private static readonly string ReactBridgeReadyProbeScript = @"
+(() => {
+    const required = [
+        'bbReset',
+        'bbAppend',
+        'bbTypingStart',
+        'bbAppendChunk',
+        'bbTypingStop',
+        'bbSetModel',
+        'bbSetModels',
+        'bbSetScope',
+        'bbSetScopes',
+        'bbSetStatus',
+        'bbSetTools',
+        'bbSetToolReceipts',
+        'bbSetProductCatalogs',
+        'bbAppendToolResult',
+        'bbAppendScreenshotArtifact',
+        'bbUpdateScreenshotArtifact',
+        'bbGetTranscript'
+    ];
+
+    return required.every(
+        name => typeof window[name] === 'function'
+    );
+})()";
+
+        internal enum AssistantStreamEventKind
+        {
+            Unknown,
+            Text,
+            ToolCall,
+            ToolResult,
+            Screenshot,
+            Error,
+            Final
+        }
+
+        internal sealed class AssistantStreamEvent
+        {
+            internal AssistantStreamEventKind Kind { get; set; }
+            internal string Text { get; set; }
+            internal JObject Payload { get; set; }
+            internal string Id { get; set; }
+            internal string Status { get; set; }
+            internal bool IsFinal => Kind == AssistantStreamEventKind.Final;
+        }
 
         public AssistantPanel()
         {
@@ -48,6 +105,13 @@ namespace BlueBrick
             txtChatInput.LostFocus += (s, e) =>
             {
                 if (string.IsNullOrWhiteSpace(txtChatInput.Text)) txtChatInput.Text = "Chat";
+            };
+            lblChatStatus.VisibleChanged += (s, e) =>
+            {
+                if (IsReactShellActive() && lblChatStatus.Visible)
+                {
+                    lblChatStatus.Visible = false;
+                }
             };
         }
 
@@ -68,15 +132,39 @@ namespace BlueBrick
                 }
 
                 _webView.Visible = true;
+                AttachWebViewMessageBridge();
+                ConfigureNativeChromeForShell();
                 lblChatStatus.Visible = false;
+
+                // NavigationCompleted only proves that the document finished navigation.
+                // React installs the legacy window.bb* compatibility surface later from its
+                // mount effect. Do not emit authoritative state until that surface exists.
+                bool browserBridgeReady =
+                    await WaitForReactBridgeReadyAsync();
 
                 _initialized = true;
 
-                await RefreshStatusAsync();
-                await LoadModelsAsync();
-                await LoadToolsAsync();
-                await LoadToolAuditAsync();
-                await LoadProductCatalogsAsync();
+                if (browserBridgeReady)
+                {
+                    // Deterministic initial-state replay after all 17 host callbacks exist.
+                    await ReplayAuthoritativeWebViewStateAsync();
+                }
+                else
+                {
+                    // Preserve the historical fail-soft behavior if the React bridge never
+                    // reaches ready state. Do not turn a renderer timing issue into an add-in
+                    // initialization failure.
+                    await RefreshStatusAsync();
+                    await LoadModelsAsync();
+                    await LoadToolsAsync();
+                    await LoadScopesAsync();
+                    await LoadToolAuditAsync();
+                    await LoadProductCatalogsAsync();
+                }
+
+                // Start/reset the assistant session only after the browser callback surface
+                // has had its readiness opportunity. StartSessionAsync retains its existing
+                // bbReset/status behavior.
                 await StartSessionAsync();
             }
             catch (Exception)
@@ -86,6 +174,214 @@ namespace BlueBrick
             _webView.Visible = false;
                 lblChatStatus.Visible = true;
                 DisableAllButtons();
+            }
+        }
+
+        private async Task<bool> WaitForReactBridgeReadyAsync()
+        {
+            if (!IsReactShellActive())
+            {
+                // The fallback shell installs its window.bb* callbacks inline and
+                // synchronously, so its existing initialization behavior remains valid.
+                return true;
+            }
+
+            for (int attempt = 0;
+                 attempt < ReactBridgeReadyMaxAttempts;
+                 attempt++)
+            {
+                if (_webView == null ||
+                    _webView.IsDisposed ||
+                    _webView.CoreWebView2 == null)
+                {
+                    return false;
+                }
+
+                try
+                {
+                    string result =
+                        await _webView.CoreWebView2.ExecuteScriptAsync(
+                            ReactBridgeReadyProbeScript);
+
+                    if (string.Equals(
+                        result == null
+                            ? string.Empty
+                            : result.Trim(),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // The renderer can briefly reject script execution while the
+                    // navigated React document finishes committing.
+                }
+                catch (System.Runtime.InteropServices.COMException)
+                {
+                    // Treat transient WebView2 COM timing failure as "not ready"
+                    // instead of failing SOLIDWORKS initialization.
+                }
+
+                await Task.Delay(
+                    ReactBridgeReadyDelayMilliseconds);
+            }
+
+            return false;
+        }
+
+        private async Task ReplayAuthoritativeWebViewStateAsync()
+        {
+            if (!_initialized)
+            {
+                return;
+            }
+
+            await RefreshStatusAsync();
+            await LoadModelsAsync();
+            await LoadToolsAsync();
+            await LoadScopesAsync();
+            await LoadToolAuditAsync();
+            await LoadProductCatalogsAsync();
+        }
+
+        private async Task<Newtonsoft.Json.Linq.JObject> ExecuteHostCallbackWithAckAsync(
+            string callbackName,
+            string argumentListExpression)
+        {
+            if (_webView == null || _webView.IsDisposed || _webView.CoreWebView2 == null)
+            {
+                var unavailable = new Newtonsoft.Json.Linq.JObject();
+                unavailable["ok"] = false;
+                unavailable["stage"] = "webview-unavailable";
+                unavailable["callback"] = callbackName ?? string.Empty;
+                RecordHostCallbackDispatchAck(unavailable);
+                return unavailable;
+            }
+
+            string callbackNameJson = Newtonsoft.Json.JsonConvert.SerializeObject(
+                callbackName ?? string.Empty);
+            string arguments = argumentListExpression ?? string.Empty;
+
+            string script = @"(() => {" +
+                @"const name = " + callbackNameJson + @";" +
+                @"const fn = window[name];" +
+                @"const meta = {" +
+                @"href:String(window.location.href)," +
+                @"readyState:String(document.readyState)," +
+                @"rootPresent:!!document.getElementById('root')" +
+                @"};" +
+                @"if(typeof fn !== 'function'){" +
+                @"return Object.assign({" +
+                @"ok:false," +
+                @"stage:'missing'," +
+                @"callback:name" +
+                @"},meta);" +
+                @"}" +
+                @"try{" +
+                @"fn(" + arguments + @");" +
+                @"return Object.assign({" +
+                @"ok:true," +
+                @"stage:'invoked'," +
+                @"callback:name" +
+                @"},meta);" +
+                @"}catch(e){" +
+                @"return Object.assign({" +
+                @"ok:false," +
+                @"stage:'threw'," +
+                @"callback:name," +
+                @"error:String(" +
+                @"e && (e.stack || e.message) ? " +
+                @"(e.stack || e.message) : e" +
+                @")" +
+                @"},meta);" +
+                @"}" +
+                @"})()";
+
+            string result;
+            try
+            {
+                result = await _webView.CoreWebView2.ExecuteScriptAsync(
+                    script);
+            }
+            catch (Exception ex)
+            {
+                var transportFailure = new Newtonsoft.Json.Linq.JObject();
+                transportFailure["ok"] = false;
+                transportFailure["stage"] = "execute-script-exception";
+                transportFailure["callback"] = callbackName ?? string.Empty;
+                transportFailure["error"] = ex.GetType().FullName + ": " + ex.Message;
+                RecordHostCallbackDispatchAck(
+                    transportFailure);
+                return transportFailure;
+            }
+
+            if (string.IsNullOrWhiteSpace(result) ||
+                string.Equals(
+                    result.Trim(),
+                    "null",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var nullResult = new Newtonsoft.Json.Linq.JObject();
+                nullResult["ok"] = false;
+                nullResult["stage"] = "null-result";
+                nullResult["callback"] = callbackName ?? string.Empty;
+                RecordHostCallbackDispatchAck(
+                    nullResult);
+                return nullResult;
+            }
+
+            Newtonsoft.Json.Linq.JObject ack;
+            try
+            {
+                ack = Newtonsoft.Json.Linq.JObject.Parse(
+                    result);
+            }
+            catch (Exception ex)
+            {
+                ack = new Newtonsoft.Json.Linq.JObject();
+                ack["ok"] = false;
+                ack["stage"] = "invalid-result-json";
+                ack["callback"] = callbackName ?? string.Empty;
+                ack["error"] = ex.GetType().FullName + ": " + ex.Message;
+                ack["rawResult"] = result.Length > 512 ? result.Substring(0, 512) : result;
+            }
+
+            RecordHostCallbackDispatchAck(
+                ack);
+            return ack;
+        }
+
+        private static void RecordHostCallbackDispatchAck(
+            Newtonsoft.Json.Linq.JObject ack)
+        {
+            try
+            {
+                string directory = System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(),
+                    "BlueBrick",
+                    "WebViewDiagnostics");
+                System.IO.Directory.CreateDirectory(
+                    directory);
+
+                string path = System.IO.Path.Combine(
+                    directory,
+                    "host_callback_dispatch.jsonl");
+
+                var row = new Newtonsoft.Json.Linq.JObject();
+                row["utc"] = DateTime.UtcNow.ToString(
+                    "o",
+                    System.Globalization.CultureInfo.InvariantCulture);
+                row["ack"] = ack;
+
+                System.IO.File.AppendAllText(
+                    path,
+                    row.ToString(Newtonsoft.Json.Formatting.None) + Environment.NewLine);
+            }
+            catch
+            {
+                // Diagnostic receipt failure must never crash SOLIDWORKS.
             }
         }
 
@@ -107,13 +403,347 @@ namespace BlueBrick
             btnSend.Enabled = false;
         }
 
+        private bool IsReactShellActive()
+        {
+            return _webHost != null && _webHost.LoadedReactShell;
+        }
+
+        private void ConfigureNativeChromeForShell()
+        {
+            var react = IsReactShellActive();
+            tlpChatButtons.Visible = !react;
+            pnlChatInput.Visible = !react;
+            if (tlpChatMain.RowStyles.Count > 2)
+            {
+                tlpChatMain.RowStyles[0].Height = react ? 0F : 72F;
+                tlpChatMain.RowStyles[2].Height = react ? 0F : 46F;
+            }
+            cmbModel.Visible = !react;
+            cmbSearchTool.Visible = !react;
+            lblChatStatus.Visible = false;
+        }
+
+        private void AttachWebViewMessageBridge()
+        {
+            if (_webView.CoreWebView2 == null) return;
+            _webView.CoreWebView2.WebMessageReceived -= WebView_WebMessageReceived;
+            _webView.CoreWebView2.WebMessageReceived += WebView_WebMessageReceived;
+        }
+
+        private void WebView_WebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            var rawJson = e.WebMessageAsJson;
+            TraceBridgeDiagnostic("WEBMESSAGE_ENTRY", "rawLength=" + (rawJson == null ? 0 : rawJson.Length));
+            _ = HandleWebViewMessageAsync(rawJson);
+        }
+
+        internal static void TraceBridgeDiagnostic(string eventName, string detail)
+        {
+            try
+            {
+                var dir = AppIdentity.AssistantHistoryRoot;
+                Directory.CreateDirectory(dir);
+                var entry = new JObject
+                {
+                    ["timestamp"] = DateTime.UtcNow.ToString("o"),
+                    ["pid"] = _diagPid,
+                    ["event"] = eventName ?? "",
+                    ["detail"] = detail ?? ""
+                };
+                var path = Path.Combine(dir, "bridge-diag-" + _diagPid + ".log");
+                var line = entry.ToString(Formatting.None);
+                lock (_diagLogLock)
+                {
+                    File.AppendAllText(path, line + Environment.NewLine);
+                }
+            }
+            catch { }
+        }
+
+        private async Task HandleWebViewMessageAsync(string rawJson)
+        {
+            try
+            {
+                var msg = JObject.Parse(rawJson ?? "{}");
+                var type = msg.Value<string>("type") ?? string.Empty;
+                TraceBridgeDiagnostic("WEBMESSAGE_PARSED", "type=" + type);
+                if (string.Equals(type, "selectModel", StringComparison.OrdinalIgnoreCase))
+                {
+                    await SelectModelAsync(msg.Value<string>("modelId")).ConfigureAwait(true);
+                }
+                else if (string.Equals(type, "selectScope", StringComparison.OrdinalIgnoreCase))
+                {
+                    await SelectScopeAsync(msg.Value<string>("scopeId")).ConfigureAwait(true);
+                }
+                else if (string.Equals(type, "newSession", StringComparison.OrdinalIgnoreCase))
+                {
+                    await StartSessionAsync().ConfigureAwait(true);
+                }
+                else if (string.Equals(type, "captureScreenshot", StringComparison.OrdinalIgnoreCase))
+                {
+                    await CaptureAsync().ConfigureAwait(true);
+                }
+                else if (string.Equals(type, "attach", StringComparison.OrdinalIgnoreCase))
+                {
+                    Attach_Click(this, EventArgs.Empty);
+                }
+                else if (string.Equals(type, "search", StringComparison.OrdinalIgnoreCase))
+                {
+                    var requestedScopeId = msg.Value<string>("scopeId");
+                    if (!string.IsNullOrWhiteSpace(requestedScopeId))
+                    {
+                        await SelectScopeAsync(requestedScopeId).ConfigureAwait(true);
+                    }
+                    var message = msg.Value<string>("message");
+                    if (!string.IsNullOrWhiteSpace(message))
+                    {
+                        txtChatInput.Text = message;
+                    }
+                    await SearchSelectedToolAsync().ConfigureAwait(true);
+                }
+                else if (string.Equals(type, "sendMessage", StringComparison.OrdinalIgnoreCase))
+                {
+                    var message = msg.Value<string>("message") ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(message))
+                    {
+                        txtChatInput.Text = message;
+                        await SendAsync().ConfigureAwait(true);
+                    }
+                }
+                else if (string.Equals(type, "sdkSendMessage", StringComparison.OrdinalIgnoreCase))
+                {
+                    await HandleSdkSendMessageAsync(msg).ConfigureAwait(true);
+                }
+                else if (string.Equals(type, "sdkCancelMessage", StringComparison.OrdinalIgnoreCase))
+                {
+                    CancelSdkSendMessage(msg.Value<string>("requestId"));
+                }
+                else if (string.Equals(type, "cancelMessage", StringComparison.OrdinalIgnoreCase))
+                {
+                    _streamCts?.Cancel();
+                }
+                else if (string.Equals(type, "reviewScreenshotItem", StringComparison.OrdinalIgnoreCase))
+                {
+                    await ReviewScreenshotItemAsync(
+                        msg.Value<string>("screenshotId"),
+                        msg.Value<string>("targetType"),
+                        msg.Value<string>("targetId"),
+                        msg.Value<string>("reviewStatus"),
+                        msg.Value<string>("reviewNote")).ConfigureAwait(true);
+                }
+                else if (string.Equals(type, "saveScreenshotAnnotation", StringComparison.OrdinalIgnoreCase))
+                {
+                    await SaveScreenshotAnnotationAsync(msg).ConfigureAwait(true);
+                }
+            }
+            catch
+            {
+                // Ignore malformed shell messages. The bridge is intentionally allowlisted.
+            }
+        }
+
+        private async Task HandleSdkSendMessageAsync(JObject msg)
+        {
+            var requestId = msg.Value<string>("requestId");
+            if (string.IsNullOrWhiteSpace(requestId))
+            {
+                requestId = Guid.NewGuid().ToString("N");
+            }
+
+            var payload = msg["payload"] as JObject ?? new JObject();
+            var requestCts = new CancellationTokenSource();
+            if (!_sdkStreamRequests.TryAdd(requestId, requestCts))
+            {
+                EmitSdkStreamError(requestId, "duplicate_request", "A BlueBrick SDK stream request with the same id is already running.");
+                requestCts.Dispose();
+                return;
+            }
+
+            try
+            {
+                await AgentPanelClient.PostStreamingAsync("/assistant/message/stream", payload, chunk =>
+                {
+                    EmitSdkStreamEvent(requestId, ParseSdkStreamChunk(chunk), false);
+                }, requestCts.Token).ConfigureAwait(false);
+
+                EmitSdkStreamEvent(requestId, null, true);
+            }
+            catch (OperationCanceledException)
+            {
+                EmitSdkStreamError(requestId, "aborted", "BlueBrick SDK stream request was canceled.");
+            }
+            catch (Exception ex)
+            {
+                var classified = AssistantErrorClassifier.FromException(ex);
+                EmitSdkStreamError(requestId, classified.Code, classified.Message);
+            }
+            finally
+            {
+                CancelSdkSendMessage(requestId, cancel: false);
+                requestCts.Dispose();
+            }
+        }
+
+        private void CancelSdkSendMessage(string requestId, bool cancel = true)
+        {
+            if (string.IsNullOrWhiteSpace(requestId)) return;
+            if (_sdkStreamRequests.TryRemove(requestId, out var requestCts) && cancel)
+            {
+                requestCts.Cancel();
+            }
+        }
+
+        private static JToken ParseSdkStreamChunk(string chunk)
+        {
+            if (string.IsNullOrWhiteSpace(chunk))
+            {
+                return new JObject
+                {
+                    ["type"] = "error",
+                    ["errorCode"] = "empty_chunk",
+                    ["errorMessage"] = "Assistant stream returned an empty event."
+                };
+            }
+
+            try
+            {
+                return JToken.Parse(chunk);
+            }
+            catch
+            {
+                return new JObject
+                {
+                    ["type"] = "error",
+                    ["errorCode"] = "malformed_sse",
+                    ["errorMessage"] = "Assistant stream returned a malformed event."
+                };
+            }
+        }
+
+        private void EmitSdkStreamEvent(string requestId, JToken eventToken, bool done)
+        {
+            var envelope = new JObject
+            {
+                ["requestId"] = requestId ?? string.Empty
+            };
+            if (eventToken != null) envelope["event"] = eventToken;
+            if (done) envelope["done"] = true;
+            ExecuteSdkStreamCallback(envelope);
+        }
+
+        private void EmitSdkStreamError(string requestId, string code, string message)
+        {
+            var envelope = new JObject
+            {
+                ["requestId"] = requestId ?? string.Empty,
+                ["error"] = new JObject
+                {
+                    ["code"] = string.IsNullOrWhiteSpace(code) ? "request_failed" : code,
+                    ["message"] = string.IsNullOrWhiteSpace(message) ? "BlueBrick SDK stream request failed." : message
+                }
+            };
+            ExecuteSdkStreamCallback(envelope);
+        }
+
+        private void ExecuteSdkStreamCallback(JObject envelope)
+        {
+            if (_webView?.CoreWebView2 == null) return;
+            var json = envelope.ToString(Formatting.None);
+            var script = "window.bbSdkStreamEvent&&window.bbSdkStreamEvent(" + json + ");";
+            _ = _webView.ExecuteScriptAsync(script);
+        }
+
+        private async Task SaveScreenshotAnnotationAsync(JObject msg)
+        {
+            var screenshotId = msg.Value<string>("screenshotId");
+            if (string.IsNullOrWhiteSpace(screenshotId))
+            {
+                return;
+            }
+
+            var annotation = msg["annotation"] as JObject ?? new JObject();
+            var annotations = new JArray { annotation };
+            var result = await AgentPanelClient.SaveScreenshotAnnotationsAsync(
+                screenshotId,
+                annotations,
+                msg.Value<int?>("imageWidth") ?? 0,
+                msg.Value<int?>("imageHeight") ?? 0).ConfigureAwait(true);
+
+            if (result.Ok)
+            {
+                var artifact = result.Data?["artifact"] as JObject;
+                if (artifact != null && _webView != null)
+                {
+                    var payload = NormalizeScreenshotArtifact(artifact);
+                    await _webView.ExecuteScriptAsync("if(window.bbUpdateScreenshotArtifact)window.bbUpdateScreenshotArtifact(" + payload.ToString(Formatting.None) + ");").ConfigureAwait(true);
+                }
+
+                await AppendMessageAsync(
+                    "assistant",
+                    "Annotation saved locally for review. It will remain pending until approved.",
+                    null).ConfigureAwait(true);
+                return;
+            }
+
+            await AppendMessageAsync(
+                "assistant",
+                "Annotation save failed: " + (result.Error ?? "unknown error"),
+                null).ConfigureAwait(true);
+        }
+
+        private async Task ReviewScreenshotItemAsync(
+            string screenshotId,
+            string targetType,
+            string targetId,
+            string reviewStatus,
+            string reviewNote)
+        {
+            if (string.IsNullOrWhiteSpace(screenshotId) ||
+                string.IsNullOrWhiteSpace(targetType) ||
+                string.IsNullOrWhiteSpace(targetId) ||
+                string.IsNullOrWhiteSpace(reviewStatus))
+            {
+                return;
+            }
+
+            var result = await AgentPanelClient.ReviewScreenshotItemAsync(
+                screenshotId,
+                targetType,
+                targetId,
+                reviewStatus,
+                reviewNote).ConfigureAwait(true);
+
+            if (result.Ok)
+            {
+                var artifact = result.Data?["artifact"] as JObject;
+                if (artifact != null && _webView != null)
+                {
+                    var payload = NormalizeScreenshotArtifact(artifact);
+                    await _webView.ExecuteScriptAsync("if(window.bbUpdateScreenshotArtifact)window.bbUpdateScreenshotArtifact(" + payload.ToString(Formatting.None) + ");").ConfigureAwait(true);
+                }
+
+                await AppendMessageAsync(
+                    "assistant",
+                    "Review updated locally: " + targetType + " " + targetId + " -> " + reviewStatus + ".",
+                    null).ConfigureAwait(true);
+                return;
+            }
+
+            await AppendMessageAsync(
+                "assistant",
+                "Review update failed: " + (result.Error ?? "unknown error"),
+                null).ConfigureAwait(true);
+        }
+
         internal async Task StartSessionAsync()
         {
+            TraceBridgeDiagnostic("STARTSESSION_BEGIN", "initialized=" + _initialized);
             if (!_initialized) return;
 
             var result = await AgentPanelClient.PostJsonAsync("/assistant/session", new JObject());
             if (!result.Ok)
             {
+                TraceBridgeDiagnostic("STARTSESSION_END", "ok=false; errorCode=" + (result.ErrorCode ?? ""));
                 lblChatStatus.Text = result.Error;
                 lblChatStatus.Visible = true;
                 return;
@@ -125,6 +755,7 @@ namespace BlueBrick
             lblChatStatus.Visible = false;
             await ResetTranscriptAsync();
             await RefreshStatusAsync();
+            TraceBridgeDiagnostic("STARTSESSION_END", "ok=true");
         }
 
         private async Task RefreshStatusAsync()
@@ -167,23 +798,25 @@ namespace BlueBrick
 
             if (_webView.CoreWebView2 != null)
             {
-                try
+                await ExecuteHostCallbackWithAckAsync(
+                    "bbSetModel",
+                    JsonConvert.SerializeObject(_activeModel));
+                var uiState = new JObject
                 {
-                    await _webView.ExecuteScriptAsync("if(window.bbSetModel)window.bbSetModel(" + JsonConvert.SerializeObject(_activeModel) + ");");
-                    var uiState = new JObject
-                    {
-                        ["mode"] = _assistantMode,
-                        ["model"] = _activeModel,
-                        ["configured"] = configured,
-                        ["bridge"] = "127.0.0.1:" + bridgePort,
-                        ["relayConnected"] = relayConnected,
-                        ["activeModel"] = activeModel,
-                        ["toolAvailability"] = toolAvailability,
-                        ["status"] = lblChatStatus.Text
-                    };
-                    await _webView.ExecuteScriptAsync("if(window.bbSetStatus)window.bbSetStatus(" + uiState.ToString(Formatting.None) + ");");
-                }
-                catch { }
+                    ["mode"] = _assistantMode,
+                    ["model"] = _activeModel,
+                    ["scopeId"] = _selectedScopeId,
+                    ["configured"] = configured,
+                    ["bridge"] = "127.0.0.1:" + bridgePort,
+                    ["relayConnected"] = relayConnected,
+                    ["activeModel"] = activeModel,
+                    ["scopes"] = _scopeCatalog,
+                    ["toolAvailability"] = toolAvailability,
+                    ["status"] = lblChatStatus.Text
+                };
+                await ExecuteHostCallbackWithAckAsync(
+                    "bbSetStatus",
+                    uiState.ToString(Formatting.None));
             }
 
             UpdateSelectedModel();
@@ -209,6 +842,12 @@ namespace BlueBrick
 
                 cmbModel.Enabled = cmbModel.Items.Count > 0;
                 UpdateSelectedModel();
+                if (_webView.CoreWebView2 != null)
+                {
+                    await ExecuteHostCallbackWithAckAsync(
+                        "bbSetModels",
+                        _modelCatalog.ToString(Formatting.None));
+                }
             }
             finally
             {
@@ -231,11 +870,28 @@ namespace BlueBrick
 
             if (_webView.CoreWebView2 != null)
             {
-                try
-                {
-                    await _webView.ExecuteScriptAsync("if(window.bbSetTools)window.bbSetTools(" + _toolCatalog.ToString(Formatting.None) + ");");
-                }
-                catch { }
+                await ExecuteHostCallbackWithAckAsync(
+                    "bbSetModels",
+                    _modelCatalog.ToString(Formatting.None));
+                await ExecuteHostCallbackWithAckAsync(
+                    "bbSetTools",
+                    _toolCatalog.ToString(Formatting.None));
+            }
+        }
+
+        private async Task LoadScopesAsync()
+        {
+            if (!_initialized) return;
+
+            _scopeCatalog = await AgentPanelClient.FetchScopesAsync().ConfigureAwait(true);
+            if (_webView.CoreWebView2 != null)
+            {
+                await ExecuteHostCallbackWithAckAsync(
+                    "bbSetScopes",
+                    _scopeCatalog.ToString(Formatting.None));
+                await ExecuteHostCallbackWithAckAsync(
+                    "bbSetScope",
+                    JsonConvert.SerializeObject(_selectedScopeId));
             }
         }
 
@@ -246,11 +902,9 @@ namespace BlueBrick
             _toolReceipts = await AgentPanelClient.FetchToolAuditAsync(6).ConfigureAwait(true);
             if (_webView.CoreWebView2 != null)
             {
-                try
-                {
-                    await _webView.ExecuteScriptAsync("if(window.bbSetToolReceipts)window.bbSetToolReceipts(" + _toolReceipts.ToString(Formatting.None) + ");");
-                }
-                catch { }
+                await ExecuteHostCallbackWithAckAsync(
+                    "bbSetToolReceipts",
+                    _toolReceipts.ToString(Formatting.None));
             }
         }
 
@@ -262,16 +916,14 @@ namespace BlueBrick
             _documentCatalog = await AgentPanelClient.FetchDocumentCatalogAsync().ConfigureAwait(true);
             if (_webView.CoreWebView2 != null)
             {
-                try
+                var payload = new JObject
                 {
-                    var payload = new JObject
-                    {
-                        ["integrations"] = _integrationCatalog,
-                        ["documents"] = _documentCatalog
-                    };
-                    await _webView.ExecuteScriptAsync("if(window.bbSetProductCatalogs)window.bbSetProductCatalogs(" + payload.ToString(Formatting.None) + ");");
-                }
-                catch { }
+                    ["integrations"] = _integrationCatalog,
+                    ["documents"] = _documentCatalog
+                };
+                await ExecuteHostCallbackWithAckAsync(
+                    "bbSetProductCatalogs",
+                    payload.ToString(Formatting.None));
             }
         }
 
@@ -308,8 +960,14 @@ namespace BlueBrick
             if (!_initialized || _loadingModels) return;
             var item = cmbModel.SelectedItem as ModelListItem;
             if (item == null) return;
+            await SelectModelAsync(item.Id);
+        }
 
-            var result = await AgentPanelClient.PostJsonAsync("/assistant/model", new JObject { ["modelId"] = item.Id });
+        private async Task SelectModelAsync(string modelId)
+        {
+            if (!_initialized || _loadingModels || string.IsNullOrWhiteSpace(modelId)) return;
+
+            var result = await AgentPanelClient.PostJsonAsync("/assistant/model", new JObject { ["modelId"] = modelId });
             if (!result.Ok)
             {
                 lblChatStatus.Text = result.Error;
@@ -317,9 +975,24 @@ namespace BlueBrick
                 return;
             }
 
-            _activeModel = result.Data.Value<string>("model") ?? item.Text;
+            _activeModel = result.Data.Value<string>("model") ?? modelId;
             lblChatStatus.Text = "Model set: " + _activeModel;
             lblChatStatus.Visible = false;
+            await RefreshStatusAsync();
+        }
+
+        private async Task SelectScopeAsync(string scopeId)
+        {
+            var normalized = AssistantScopeRegistry.Normalize(scopeId);
+            _selectedScopeId = normalized;
+            if (_webView.CoreWebView2 != null)
+            {
+                try
+                {
+                    await _webView.ExecuteScriptAsync("if(window.bbSetScope)window.bbSetScope(" + JsonConvert.SerializeObject(_selectedScopeId) + ");");
+                }
+                catch { }
+            }
             await RefreshStatusAsync();
         }
 
@@ -367,7 +1040,9 @@ namespace BlueBrick
         {
             return GetToolDescriptor("search_local_vault") != null ||
                    GetToolDescriptor("search_pdm") != null ||
-                   GetToolDescriptor("search_epicor") != null;
+                   GetToolDescriptor("search_epicor") != null ||
+                   GetToolDescriptor("search_salesforce") != null ||
+                   GetToolDescriptor("search_aionui_database") != null;
         }
 
         private JObject GetToolDescriptor(string toolName)
@@ -407,7 +1082,11 @@ namespace BlueBrick
                 var tool = token as JObject;
                 if (tool == null) continue;
                 var name = tool.Value<string>("Name") ?? tool.Value<string>("name");
-                if (name != "search_local_vault" && name != "search_pdm" && name != "search_epicor") continue;
+                if (name != "search_local_vault" &&
+                    name != "search_pdm" &&
+                    name != "search_epicor" &&
+                    name != "search_salesforce" &&
+                    name != "search_aionui_database") continue;
                 var display = tool.Value<string>("DisplayName") ?? tool.Value<string>("displayName") ?? name;
                 var enabled = tool.Value<bool?>("Enabled") ?? tool.Value<bool?>("enabled") ?? false;
                 var unavailable = tool.Value<string>("UnavailableReason") ?? tool.Value<string>("unavailableReason") ?? string.Empty;
@@ -450,11 +1129,11 @@ namespace BlueBrick
             var query = txtChatInput.Text.Trim();
             if (query == "Chat") query = string.Empty;
             var selected = cmbSearchTool.SelectedItem as ToolListItem;
-            var command = ResolveSearchCommand(query, selected?.ToolName);
+            var command = ResolveSearchCommand(query, ToolNameForScope(_selectedScopeId) ?? selected?.ToolName);
             query = command.Query;
             if (string.IsNullOrWhiteSpace(query))
             {
-                await AppendMessageAsync("assistant", "Type a search query, optionally prefixed with /vault, /pdm, or /epicor, then click Search.", null);
+                await AppendMessageAsync("assistant", "Type a search query, optionally prefixed with /vault, /pdm, /epicor, /salesforce, or /aionui, then click Search.", null);
                 return;
             }
 
@@ -463,9 +1142,27 @@ namespace BlueBrick
             var enabled = descriptor?.Value<bool?>("Enabled") ?? descriptor?.Value<bool?>("enabled") ?? selected?.Enabled ?? false;
 
             lblChatStatus.Text = enabled ? "Searching " + label + "..." : label + " unavailable";
-            lblChatStatus.Visible = true;
+            lblChatStatus.Visible = enabled ? false : !IsReactShellActive();
+            if (!enabled)
+            {
+                var unavailable = descriptor?.Value<string>("UnavailableReason") ??
+                    descriptor?.Value<string>("unavailableReason") ??
+                    selected?.UnavailableReason ??
+                    "This search source is not available in the current assistant mode.";
+                await AppendToolResultAsync(label, query, "unavailable", label + " unavailable: " + unavailable, new JArray(), new JObject
+                {
+                    ["ToolName"] = command.ToolName,
+                    ["RiskLevel"] = "read-only",
+                    ["Allowed"] = false,
+                    ["ApprovalRequired"] = false,
+                    ["PolicyCode"] = "tool_unavailable",
+                    ["ResultStatus"] = "unavailable"
+                });
+                await SaveSessionAsync();
+                return;
+            }
 
-            var result = await AgentPanelClient.ExecuteToolAsync(command.ToolName, query, 8);
+            var result = await AgentPanelClient.ExecuteToolAsync(command.ToolName, query, 8, ScopeIdForSearchCommand(command.ToolName, _selectedScopeId));
             if (!result.Ok)
             {
                 lblChatStatus.Text = result.Error;
@@ -510,6 +1207,30 @@ namespace BlueBrick
             {
                 return new AssistantSearchCommand("search_epicor", "Epicor", string.Empty);
             }
+            if (query.StartsWith("/salesforce ", StringComparison.OrdinalIgnoreCase))
+            {
+                return new AssistantSearchCommand("search_salesforce", "Salesforce", query.Substring(12).Trim());
+            }
+            if (string.Equals(query, "/salesforce", StringComparison.OrdinalIgnoreCase))
+            {
+                return new AssistantSearchCommand("search_salesforce", "Salesforce", string.Empty);
+            }
+            if (query.StartsWith("/sf ", StringComparison.OrdinalIgnoreCase))
+            {
+                return new AssistantSearchCommand("search_salesforce", "Salesforce", query.Substring(4).Trim());
+            }
+            if (string.Equals(query, "/sf", StringComparison.OrdinalIgnoreCase))
+            {
+                return new AssistantSearchCommand("search_salesforce", "Salesforce", string.Empty);
+            }
+            if (query.StartsWith("/aionui ", StringComparison.OrdinalIgnoreCase))
+            {
+                return new AssistantSearchCommand("search_aionui_database", "AionUI DB", query.Substring(8).Trim());
+            }
+            if (string.Equals(query, "/aionui", StringComparison.OrdinalIgnoreCase))
+            {
+                return new AssistantSearchCommand("search_aionui_database", "AionUI DB", string.Empty);
+            }
             if (query.StartsWith("/vault ", StringComparison.OrdinalIgnoreCase))
             {
                 return new AssistantSearchCommand("search_local_vault", "Local vault", query.Substring(7).Trim());
@@ -527,7 +1248,34 @@ namespace BlueBrick
             {
                 return new AssistantSearchCommand("search_epicor", "Epicor", query);
             }
+            if (string.Equals(selected, "search_salesforce", StringComparison.OrdinalIgnoreCase))
+            {
+                return new AssistantSearchCommand("search_salesforce", "Salesforce", query);
+            }
+            if (string.Equals(selected, "search_aionui_database", StringComparison.OrdinalIgnoreCase))
+            {
+                return new AssistantSearchCommand("search_aionui_database", "AionUI DB", query);
+            }
             return new AssistantSearchCommand("search_local_vault", "Local vault", query);
+        }
+
+        internal static string ToolNameForScope(string scopeId)
+        {
+            var scope = AssistantScopeRegistry.Normalize(scopeId);
+            if (scope == AssistantScopeRegistry.Pdm) return "search_pdm";
+            if (scope == AssistantScopeRegistry.Epicor) return "search_epicor";
+            if (scope == AssistantScopeRegistry.All) return "search_local_vault";
+            return null;
+        }
+
+        internal static string ScopeIdForSearchCommand(string toolName, string selectedScopeId)
+        {
+            var scope = AssistantScopeRegistry.Normalize(selectedScopeId);
+            if (scope == AssistantScopeRegistry.All) return AssistantScopeRegistry.All;
+            if (scope == AssistantScopeRegistry.Pdm && string.Equals(toolName, "search_pdm", StringComparison.OrdinalIgnoreCase)) return AssistantScopeRegistry.Pdm;
+            if (scope == AssistantScopeRegistry.Epicor && string.Equals(toolName, "search_epicor", StringComparison.OrdinalIgnoreCase)) return AssistantScopeRegistry.Epicor;
+            if (scope == AssistantScopeRegistry.LocalVault && string.Equals(toolName, "search_local_vault", StringComparison.OrdinalIgnoreCase)) return AssistantScopeRegistry.LocalVault;
+            return string.Empty;
         }
 
         private async Task AppendToolResultAsync(string label, string query, string status, string message, JArray items, JObject receipt)
@@ -739,6 +1487,205 @@ namespace BlueBrick
             };
         }
 
+        internal static AssistantStreamEvent NormalizeAssistantStreamEvent(JObject chunk)
+        {
+            if (chunk == null)
+            {
+                return new AssistantStreamEvent { Kind = AssistantStreamEventKind.Unknown, Payload = new JObject() };
+            }
+
+            var rawType = chunk.Value<string>("type") ?? chunk.Value<string>("kind") ?? string.Empty;
+            var type = rawType.Trim().ToLowerInvariant();
+
+            if (type == "done" || type == "final")
+            {
+                return new AssistantStreamEvent
+                {
+                    Kind = AssistantStreamEventKind.Final,
+                    Text = ExtractStreamText(chunk),
+                    Payload = chunk,
+                    Status = type
+                };
+            }
+
+            if (type == "error" || chunk["error"] != null || chunk["errorMessage"] != null)
+            {
+                return new AssistantStreamEvent
+                {
+                    Kind = AssistantStreamEventKind.Error,
+                    Id = ExtractStreamErrorCode(chunk),
+                    Text = ExtractStreamErrorMessage(chunk),
+                    Payload = chunk,
+                    Status = "error"
+                };
+            }
+
+            if (type == "tool_call" || type == "tool_call_start")
+            {
+                var toolName = FirstString(chunk, "toolName", "ToolName", "name", "Name", "tool", "Tool");
+                var label = string.IsNullOrWhiteSpace(toolName) ? "Tool" : toolName;
+                var toolCallId = FirstString(chunk, "toolCallId", "ToolCallId", "id", "Id");
+                return new AssistantStreamEvent
+                {
+                    Kind = AssistantStreamEventKind.ToolCall,
+                    Id = toolCallId,
+                    Text = label,
+                    Status = "pending",
+                    Payload = new JObject
+                    {
+                        ["label"] = label,
+                        ["query"] = string.Empty,
+                        ["status"] = "pending",
+                        ["message"] = "Calling " + label + "...",
+                        ["items"] = new JArray(),
+                        ["receipt"] = NormalizeToolReceipt(chunk["receipt"] as JObject ?? chunk["Receipt"] as JObject)
+                    }
+                };
+            }
+
+            if (type == "tool_result" || chunk["toolResultContent"] != null || chunk["ToolResultContent"] != null)
+            {
+                return NormalizeToolResultStreamEvent(chunk);
+            }
+
+            if (type == "screenshot_receipt" || type == "screenshot_artifact" || type == "artifact" || chunk["artifact"] != null || chunk["Artifact"] != null)
+            {
+                var artifact = chunk["artifact"] as JObject ?? chunk["Artifact"] as JObject ?? chunk;
+                return new AssistantStreamEvent
+                {
+                    Kind = AssistantStreamEventKind.Screenshot,
+                    Id = artifact.Value<string>("artifactId") ?? artifact.Value<string>("ArtifactId") ?? artifact.Value<string>("screenshotId") ?? artifact.Value<string>("ScreenshotId"),
+                    Text = "Screenshot captured",
+                    Status = "local-only",
+                    Payload = NormalizeScreenshotArtifact(artifact)
+                };
+            }
+
+            var text = ExtractStreamText(chunk);
+            if (type == "text_delta" || type == "text" || !string.IsNullOrEmpty(text))
+            {
+                return new AssistantStreamEvent
+                {
+                    Kind = AssistantStreamEventKind.Text,
+                    Text = text,
+                    Payload = chunk,
+                    Status = type
+                };
+            }
+
+            return new AssistantStreamEvent
+            {
+                Kind = AssistantStreamEventKind.Unknown,
+                Payload = chunk,
+                Status = type
+            };
+        }
+
+        internal static bool ShouldAppendFinalAssistantMessage(bool streamedAnyText, bool finalAppended, string streamedText, string finalText)
+        {
+            if (finalAppended || string.IsNullOrWhiteSpace(finalText)) return false;
+            if (!streamedAnyText) return true;
+
+            var streamed = (streamedText ?? string.Empty).Trim();
+            var final = finalText.Trim();
+            if (string.Equals(streamed, final, StringComparison.Ordinal)) return false;
+            if (streamed.IndexOf(final, StringComparison.Ordinal) >= 0) return false;
+            if (final.IndexOf(streamed, StringComparison.Ordinal) >= 0) return false;
+            return true;
+        }
+
+        private static AssistantStreamEvent NormalizeToolResultStreamEvent(JObject chunk)
+        {
+            var resultContent = chunk.Value<string>("toolResultContent") ?? chunk.Value<string>("ToolResultContent") ?? string.Empty;
+            JObject resultObj = null;
+            if (!string.IsNullOrWhiteSpace(resultContent))
+            {
+                try
+                {
+                    resultObj = JObject.Parse(resultContent);
+                }
+                catch
+                {
+                    resultObj = null;
+                }
+            }
+
+            var source = resultObj ?? chunk;
+            var toolName = FirstString(chunk, "toolName", "ToolName", "name", "Name", "tool", "Tool") ??
+                FirstString(source, "toolName", "ToolName", "name", "Name", "label", "Label");
+            var label = string.IsNullOrWhiteSpace(toolName) ? "Tool" : toolName;
+            var status = FirstString(source, "status", "Status", "resultStatus", "ResultStatus") ?? "ok";
+            var message = FirstString(source, "message", "Message", "summary", "Summary") ?? "Tool completed.";
+            var items = source["items"] as JArray ?? source["Items"] as JArray ?? new JArray();
+            var receipt = source["receipt"] as JObject ?? source["Receipt"] as JObject ?? chunk["receipt"] as JObject ?? chunk["Receipt"] as JObject;
+
+            return new AssistantStreamEvent
+            {
+                Kind = AssistantStreamEventKind.ToolResult,
+                Id = FirstString(chunk, "toolCallId", "ToolCallId", "id", "Id"),
+                Text = message,
+                Status = status,
+                Payload = new JObject
+                {
+                    ["label"] = label,
+                    ["query"] = FirstString(source, "query", "Query") ?? string.Empty,
+                    ["status"] = status,
+                    ["message"] = message,
+                    ["items"] = items,
+                    ["receipt"] = NormalizeToolReceipt(receipt)
+                }
+            };
+        }
+
+        private static string ExtractStreamText(JObject chunk)
+        {
+            if (chunk == null) return string.Empty;
+            var direct = FirstString(chunk, "text", "Text", "content", "Content");
+            if (!string.IsNullOrEmpty(direct)) return direct;
+
+            var delta = chunk["delta"] as JObject ?? chunk["Delta"] as JObject;
+            if (delta != null)
+            {
+                var deltaText = FirstString(delta, "content", "Content", "text", "Text");
+                if (!string.IsNullOrEmpty(deltaText)) return deltaText;
+            }
+
+            var message = chunk["message"] as JObject ?? chunk["Message"] as JObject;
+            if (message != null)
+            {
+                return FirstString(message, "text", "Text", "content", "Content") ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        private static string ExtractStreamErrorCode(JObject chunk)
+        {
+            var error = chunk?["error"] as JObject ?? chunk?["Error"] as JObject;
+            return FirstString(chunk, "errorCode", "ErrorCode", "code", "Code") ??
+                FirstString(error, "errorCode", "ErrorCode", "code", "Code") ??
+                "request_failed";
+        }
+
+        private static string ExtractStreamErrorMessage(JObject chunk)
+        {
+            var error = chunk?["error"] as JObject ?? chunk?["Error"] as JObject;
+            return FirstString(chunk, "errorMessage", "ErrorMessage", "message", "Message") ??
+                FirstString(error, "errorMessage", "ErrorMessage", "message", "Message") ??
+                "Assistant request failed.";
+        }
+
+        private static string FirstString(JObject source, params string[] names)
+        {
+            if (source == null || names == null) return null;
+            foreach (var name in names)
+            {
+                var value = source.Value<string>(name);
+                if (!string.IsNullOrWhiteSpace(value)) return value;
+            }
+            return null;
+        }
+
         private static string BuildToolSearchMessage(string label, string query, string status, string message, JArray items)
         {
             var builder = new StringBuilder();
@@ -766,8 +1713,141 @@ namespace BlueBrick
             return builder.ToString().Trim();
         }
 
+        private void QueueWebViewScript(string script)
+        {
+            if (!_initialized || _webView.CoreWebView2 == null || string.IsNullOrWhiteSpace(script)) return;
+            try
+            {
+                _webView.ExecuteScriptAsync(script);
+            }
+            catch
+            {
+                // WebView teardown during cancellation should not hide the stream cleanup path.
+            }
+        }
+
+        private Task StopWebViewTypingAsync()
+        {
+            if (!_initialized || _webView.CoreWebView2 == null) return Task.CompletedTask;
+            return _webView.ExecuteScriptAsync("if(window.bbTypingStop)window.bbTypingStop();");
+        }
+
+        // Delivers a final assistant text so exactly ONE assistant transcript record
+        // exists per logical request. When the React shell owns the transcript, the
+        // pending record created by handleSend is completed in place using only the
+        // frozen callback set (bbAppendChunk + bbTypingStop); the legacy shell keeps
+        // its original append behavior behind explicit gating.
+        private async Task DeliverFinalAssistantTextAsync(string text)
+        {
+            var safeText = text ?? string.Empty;
+            if (!_initialized || _webView.CoreWebView2 == null) return;
+
+            if (IsReactShellActive())
+            {
+                QueueWebViewScript("if(window.bbAppendChunk)window.bbAppendChunk(" + JsonConvert.SerializeObject(safeText) + ");");
+                await StopWebViewTypingAsync();
+                return;
+            }
+
+            await StopWebViewTypingAsync();
+            await AppendMessageAsync("assistant", safeText, null);
+        }
+
+        // Builds a safe PROVIDER_FAILURE receipt from an error message carrying a
+        // "[prov provider=... model=... httpStatus=... category=...]" tag. Only the
+        // provenance fields are written to diagnostics; sanitized message contents
+        // are never logged here.
+        private static string BuildProviderFailureReceipt(string errorMessage)
+        {
+            if (string.IsNullOrWhiteSpace(errorMessage)) return "provenance=absent";
+            var text = errorMessage.Trim();
+            if (!text.StartsWith("[prov ", StringComparison.Ordinal)) return "provenance=absent";
+            var end = text.IndexOf(']');
+            if (end < 0) return "provenance=malformed";
+            return text.Substring("[prov ".Length, end - "[prov ".Length).Trim();
+        }
+
+        private void RenderNormalizedAssistantStreamEvent(
+            AssistantStreamEvent streamEvent,
+            StringBuilder streamedText,
+            ref bool streamedAnyText,
+            ref bool renderedStreamEvent,
+            ref bool finalAppended,
+            ref string finalText)
+        {
+            if (streamEvent == null) return;
+
+            if (streamEvent.Kind == AssistantStreamEventKind.Text)
+            {
+                var textChunk = streamEvent.Text ?? string.Empty;
+                if (textChunk.Length == 0) return;
+
+                streamedText.Append(textChunk);
+                streamedAnyText = true;
+                QueueWebViewScript("if(window.bbAppendChunk)window.bbAppendChunk(" + JsonConvert.SerializeObject(textChunk) + ");");
+                return;
+            }
+
+            if (streamEvent.Kind == AssistantStreamEventKind.ToolCall || streamEvent.Kind == AssistantStreamEventKind.ToolResult)
+            {
+                var payload = streamEvent.Payload ?? new JObject();
+                renderedStreamEvent = true;
+                QueueWebViewScript("if(window.bbAppendToolResult)window.bbAppendToolResult(" + payload.ToString(Formatting.None) + ");");
+                return;
+            }
+
+            if (streamEvent.Kind == AssistantStreamEventKind.Screenshot)
+            {
+                var payload = streamEvent.Payload ?? new JObject();
+                renderedStreamEvent = true;
+                QueueWebViewScript("if(window.bbAppendScreenshotArtifact)window.bbAppendScreenshotArtifact(" + payload.ToString(Formatting.None) + ");");
+                return;
+            }
+
+            if (streamEvent.Kind == AssistantStreamEventKind.Error)
+            {
+                var errorText = BuildUserFacingError(streamEvent.Id, streamEvent.Text);
+                TraceBridgeDiagnostic("STREAM_ERROR_EVENT",
+                    "code=" + (streamEvent.Id ?? "") +
+                    "; messageLength=" + (streamEvent.Text == null ? 0 : streamEvent.Text.Length));
+                TraceBridgeDiagnostic("PROVIDER_FAILURE", BuildProviderFailureReceipt(streamEvent.Text));
+                var payload = new JObject
+                {
+                    ["role"] = "assistant",
+                    ["text"] = errorText,
+                    ["attachment"] = string.Empty
+                };
+                finalText = errorText;
+                finalAppended = true;
+                renderedStreamEvent = true;
+                if (IsReactShellActive())
+                {
+                    // React owns the transcript: deliver the failure text into the pending
+                    // assistant record created by handleSend, then let bbTypingStop finalize
+                    // that same record. Exactly one assistant record per logical request;
+                    // no second record may be appended while the React shell is active.
+                    QueueWebViewScript("if(window.bbAppendChunk)window.bbAppendChunk(" + JsonConvert.SerializeObject(errorText) + ");");
+                    QueueWebViewScript("if(window.bbTypingStop)window.bbTypingStop();");
+                }
+                else
+                {
+                    QueueWebViewScript("if(window.bbTypingStop)window.bbTypingStop();if(window.bbAppend)window.bbAppend(" + payload.ToString(Formatting.None) + ");");
+                }
+                return;
+            }
+
+            if (streamEvent.Kind == AssistantStreamEventKind.Final)
+            {
+                if (!string.IsNullOrWhiteSpace(streamEvent.Text))
+                {
+                    finalText = streamEvent.Text;
+                }
+            }
+        }
+
         private async Task SendAsync()
         {
+            TraceBridgeDiagnostic("SENDASYNC_ENTRY", "initialized=" + _initialized);
             if (!_initialized) return;
 
             var text = txtChatInput.Text.Trim();
@@ -776,13 +1856,19 @@ namespace BlueBrick
             if (string.IsNullOrWhiteSpace(_sessionId)) await StartSessionAsync();
 
             var userText = text;
-            await AppendMessageAsync("user", userText, _pendingAttachment);
+            if (!IsReactShellActive())
+            {
+                // React already appends the user message optimistically in
+                // handleSend; echoing it here duplicates the transcript entry.
+                await AppendMessageAsync("user", userText, _pendingAttachment);
+            }
             txtChatInput.Text = "";
 
             var payload = new JObject
             {
                 ["sessionId"] = _sessionId,
                 ["message"] = userText,
+                ["scopeId"] = _selectedScopeId,
                 ["attachmentPaths"] = _pendingAttachment == null
                 ? new JArray()
                 : new JArray(_pendingAttachment)
@@ -795,67 +1881,53 @@ namespace BlueBrick
             var requestCts = new CancellationTokenSource();
             _streamCts = requestCts;
 
-            lblChatStatus.Text = _activeModel;
-            lblChatStatus.Visible = true;
-            await _webView.ExecuteScriptAsync("window.bbTypingStart();");
+            lblChatStatus.Text = "Ready";
+            lblChatStatus.Visible = false;
+            if (!IsReactShellActive())
+            {
+                // React handleSend already created the streaming placeholder.
+                await _webView.ExecuteScriptAsync("if(window.bbTypingStart)window.bbTypingStart();");
+            }
 
-            var fullResponse = new StringBuilder();
+            var streamedText = new StringBuilder();
+            var streamedAnyText = false;
+            var renderedStreamEvent = false;
+            var finalAppended = false;
+            var finalText = string.Empty;
             try
             {
-            await AgentPanelClient.PostStreamingAsync("/assistant/message/stream", payload, chunk =>
-            {
-                try
+                TraceBridgeDiagnostic("SEND_REQUEST_BEGIN", "route=/assistant/message/stream sessionId=" + (_sessionId ?? "none"));
+                await AgentPanelClient.PostStreamingAsync("/assistant/message/stream", payload, chunk =>
                 {
-                    var jObj = JObject.Parse(chunk);
-                    var chunkType = jObj.Value<string>("type");
-                    if (chunkType == "text_delta")
+                    JObject jObj;
+                    try
                     {
-                        var textChunk = jObj.Value<string>("text") ?? string.Empty;
-                        if (textChunk.Length > 0)
+                        jObj = JObject.Parse(chunk);
+                    }
+                    catch
+                    {
+                        jObj = new JObject
                         {
-                            fullResponse.Append(textChunk);
-                            _webView.ExecuteScriptAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject(textChunk) + ");");
-                        }
+                            ["type"] = "error",
+                            ["errorCode"] = "malformed_sse",
+                            ["errorMessage"] = "Assistant stream returned a malformed event."
+                        };
                     }
-                    else if (chunkType == "error")
-                    {
-                        var errorCode = jObj.Value<string>("errorCode") ?? "unknown";
-                        var errorMessage = jObj.Value<string>("errorMessage") ?? "Unknown error";
-                        fullResponse.Clear();
-                        fullResponse.Append(BuildUserFacingError(errorCode, errorMessage));
-                    }
-                    else if (chunkType == "tool_call")
-                    {
-                        var toolName = jObj.Value<string>("toolName") ?? "unknown";
-                        var toolCallId = jObj.Value<string>("toolCallId") ?? "";
-                        var toolLabel = string.IsNullOrWhiteSpace(toolName) ? "tool" : toolName;
-                        _webView.ExecuteScriptAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject("[Calling " + toolLabel + "...]") + ");");
-                    }
-                    else if (chunkType == "tool_result")
-                    {
-                        var resultContent = jObj.Value<string>("toolResultContent") ?? "";
-                        string summaryText;
-                        try
-                        {
-                            var resultObj = JObject.Parse(resultContent);
-                            summaryText = resultObj.Value<string>("message") ?? "Tool completed.";
-                        }
-                        catch
-                        {
-                            summaryText = "Tool completed.";
-                        }
-                        _webView.ExecuteScriptAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject("[" + summaryText + "]") + ");");
-                    }
-                }
-                catch
-                {
-                    fullResponse.Append(chunk);
-                    _webView.ExecuteScriptAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject(chunk) + ");");
-                }
-            }, requestCts.Token);
 
-                var finalText = fullResponse.ToString();
+                    var streamEvent = NormalizeAssistantStreamEvent(jObj);
+                    RenderNormalizedAssistantStreamEvent(streamEvent, streamedText, ref streamedAnyText, ref renderedStreamEvent, ref finalAppended, ref finalText);
+                }, requestCts.Token);
+
                 if (string.IsNullOrWhiteSpace(finalText))
+                {
+                    finalText = streamedText.ToString();
+                }
+                TraceBridgeDiagnostic("SEND_REQUEST_END",
+                    "finalTextLength=" + (finalText == null ? 0 : finalText.Length) +
+                    "; streamedAnyText=" + streamedAnyText +
+                    "; renderedStreamEvent=" + renderedStreamEvent);
+
+                if (string.IsNullOrWhiteSpace(finalText) && !renderedStreamEvent && !streamedAnyText)
                 {
                     var fallback = await AgentPanelClient.PostJsonAsync("/assistant/message", payload, requestCts.Token);
                     if (fallback.Ok)
@@ -870,10 +1942,7 @@ namespace BlueBrick
                         {
                             finalText = fallback.Data["message"]?["Text"]?.ToString()
                                 ?? fallback.Data["message"]?["text"]?.ToString()
-                                ?? fallback.Data["message"]?["content"]?.ToString()
-                                ?? fallback.Data.Value<string>("text")
                                 ?? fallback.Data.Value<string>("message")
-                                ?? fallback.Data.Value<string>("content")
                                 ?? "No response text returned.";
                         }
                     }
@@ -884,19 +1953,38 @@ namespace BlueBrick
                     }
                 }
 
-                await _webView.ExecuteScriptAsync("window.bbTypingStop();");
-                await AppendMessageAsync("assistant", finalText, null);
+                if (ShouldAppendFinalAssistantMessage(streamedAnyText, finalAppended, streamedText.ToString(), finalText))
+                {
+                    await DeliverFinalAssistantTextAsync(finalText);
+                    finalAppended = true;
+                }
+                else
+                {
+                    await StopWebViewTypingAsync();
+                }
             }
             catch (OperationCanceledException)
             {
-                await _webView.ExecuteScriptAsync("window.bbTypingStop();");
-                await AppendMessageAsync("assistant", "Request canceled.", null);
+                await StopWebViewTypingAsync();
+                if (!finalAppended)
+                {
+                    await DeliverFinalAssistantTextAsync("Request canceled.");
+                    finalAppended = true;
+                }
             }
             catch (Exception ex)
             {
-                await _webView.ExecuteScriptAsync("window.bbTypingStop();");
+                TraceBridgeDiagnostic("SEND_EXCEPTION",
+                    "type=" + ex.GetType().Name +
+                    "; messageLength=" + (ex.Message == null ? 0 : ex.Message.Length));
                 var classified = AssistantErrorClassifier.FromException(ex);
-                await AppendMessageAsync("assistant", BuildUserFacingError(classified.Code, classified.Message), null);
+                TraceBridgeDiagnostic("PROVIDER_FAILURE", BuildProviderFailureReceipt(AssistantErrorClassifier.FormatWithProvenance(classified)));
+                await StopWebViewTypingAsync();
+                if (!finalAppended)
+                {
+                    await DeliverFinalAssistantTextAsync(BuildUserFacingError(classified.Code, AssistantErrorClassifier.FormatWithProvenance(classified)));
+                    finalAppended = true;
+                }
                 await LogErrorAsync(ex.Message, ex.StackTrace, "SendAsync-streaming");
             }
             finally
@@ -1044,7 +2132,9 @@ namespace BlueBrick
         private async Task ResetTranscriptAsync()
         {
             if (!_initialized || _webView.CoreWebView2 == null) return;
-            await _webView.ExecuteScriptAsync("window.bbReset();");
+            await ExecuteHostCallbackWithAckAsync(
+                "bbReset",
+                string.Empty);
         }
 
         private async Task AppendMessageAsync(string role, string text, string attachmentPath)
@@ -1498,12 +2588,18 @@ var confidence=contact.Confidence||contact.confidence||0;
 var source=contact.SourceAnnotationId||contact.sourceAnnotationId||'';
 var reviewStatus=contact.ReviewStatus||contact.reviewStatus||'pending';
 var reviewNote=contact.ReviewNote||contact.reviewNote||'';
+var extractionSource=contact.ExtractionSource||contact.extractionSource||'local candidate';
+var requiresReviewReason=contact.RequiresReviewReason||contact.requiresReviewReason||'';
+var sourceText=contact.SourceText||contact.sourceText||'';
 html+='<div class=""contact-row""><strong>'+esc(name)+'<span class=""contact-status"">'+esc(reviewStatus)+'</span></strong>';
 if(company)html+='<br>'+esc(company);
 if(email)html+='<br>'+esc(email);
 if(phone)html+=' · '+esc(phone);
 html+='<br>Confidence '+esc(Math.round(confidence*100))+'%';
 if(source)html+=' · Source '+esc(source);
+html+='<div class=""contact-note"">'+esc(extractionSource)+'</div>';
+if(requiresReviewReason)html+='<div class=""contact-note"">'+esc(requiresReviewReason)+'</div>';
+if(sourceText)html+='<div class=""contact-note"">Source: '+esc(sourceText)+'</div>';
 if(reviewNote)html+='<div class=""contact-note"">'+esc(reviewNote)+'</div>';
 html+='</div>';
 });
@@ -1660,6 +2756,8 @@ return msgs;
                 {
                     if (string.Equals(ToolName, "search_pdm", StringComparison.OrdinalIgnoreCase)) return "PDM";
                     if (string.Equals(ToolName, "search_epicor", StringComparison.OrdinalIgnoreCase)) return "Epicor";
+                    if (string.Equals(ToolName, "search_salesforce", StringComparison.OrdinalIgnoreCase)) return "SF";
+                    if (string.Equals(ToolName, "search_aionui_database", StringComparison.OrdinalIgnoreCase)) return "AionUI";
                     return "Vault";
                 }
             }

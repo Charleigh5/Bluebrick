@@ -1,0 +1,516 @@
+:root {
+  --vl-bg: #071116;
+  --vl-panel: #0d1a21;
+  --vl-panel-strong: #12242c;
+  --vl-line: #24404b;
+  --vl-text: #e8f1f2;
+  --vl-muted: #91a9b1;
+  --vl-accent: #5ce1c4;
+  --vl-accent-strong: #21b99c;
+  --vl-warning: #ffca72;
+  --vl-danger: #ff8d82;
+}
+
+.vira-lab-shell {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 20px;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  background:
+    linear-gradient(rgba(92, 225, 196, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(92, 225, 196, 0.025) 1px, transparent 1px),
+    var(--vl-bg);
+  background-size: 28px 28px;
+  color: var(--vl-text);
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+.vira-lab-shell *,
+.vira-lab-shell *::before,
+.vira-lab-shell *::after {
+  box-sizing: border-box;
+}
+
+.vira-lab-header {
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.vira-lab-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.vira-lab-mark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--vl-accent);
+  color: var(--vl-bg);
+  background: var(--vl-accent);
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.vira-lab-brand h1,
+.vira-lab-panel-heading h2 {
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.vira-lab-brand h1 {
+  font-size: 24px;
+}
+
+.vira-lab-brand p {
+  margin: 3px 0 0;
+  color: var(--vl-muted);
+  font-size: 12px;
+}
+
+.vira-lab-runtime-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vira-lab-runtime,
+.vira-lab-state,
+.diagnostic-count {
+  border: 1px solid var(--vl-line);
+  padding: 5px 9px;
+  color: var(--vl-muted);
+  background: rgba(13, 26, 33, 0.9);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.vira-lab-state.packet {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vira-lab-runtime.fixture {
+  border-color: var(--vl-accent-strong);
+  color: var(--vl-accent);
+}
+
+.vira-lab-runtime.localhost-relay,
+.vira-lab-runtime.embedded-host,
+.vira-lab-runtime.unavailable {
+  border-color: #76552d;
+  color: var(--vl-warning);
+}
+
+.vira-lab-boundary {
+  min-height: 42px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-left: 3px solid var(--vl-accent);
+  background: rgba(92, 225, 196, 0.08);
+}
+
+.vira-lab-boundary strong {
+  white-space: nowrap;
+}
+
+.vira-lab-boundary span {
+  color: var(--vl-muted);
+  font-size: 12px;
+}
+
+.vira-lab-stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--vl-line);
+  background: rgba(13, 26, 33, 0.82);
+}
+
+.vira-lab-stages > div {
+  min-width: 0;
+  min-height: 70px;
+  padding: 11px 12px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 9px;
+  align-content: center;
+  border-right: 1px solid var(--vl-line);
+  color: #6f878f;
+}
+
+.vira-lab-stages > div:last-child {
+  border-right: 0;
+}
+
+.vira-lab-stages > div.active {
+  background: rgba(92, 225, 196, 0.08);
+  color: var(--vl-text);
+}
+
+.vira-lab-stages > div.complete {
+  background: rgba(33, 185, 156, 0.13);
+  color: var(--vl-text);
+}
+
+.vira-lab-stages span {
+  grid-row: 1 / 3;
+  align-self: center;
+  color: var(--vl-accent);
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
+
+.vira-lab-stages strong {
+  font-size: 13px;
+}
+
+.vira-lab-stages small {
+  color: var(--vl-muted);
+  font-size: 10px;
+}
+
+.vira-lab-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  gap: 14px;
+}
+
+.vira-lab-main,
+.vira-lab-side {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.vira-lab-panel {
+  min-width: 0;
+  padding: 14px;
+  display: grid;
+  gap: 13px;
+  border: 1px solid var(--vl-line);
+  background: rgba(13, 26, 33, 0.94);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+}
+
+.vira-lab-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vira-lab-panel-heading span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--vl-accent);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.vira-lab-panel-heading h2 {
+  font-size: 17px;
+}
+
+.vira-lab-panel-heading button {
+  min-height: 34px;
+  border: 1px solid var(--vl-accent-strong);
+  background: transparent;
+  color: var(--vl-accent);
+  padding: 0 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.vira-lab-panel-heading button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.vira-lab-panel-heading button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.vira-lab-shell .active-document-card {
+  padding: 14px;
+  border-color: var(--vl-line);
+  border-left-width: 3px;
+  border-radius: 0;
+  background: var(--vl-panel-strong);
+}
+
+.vira-lab-shell .active-document-card-title {
+  color: var(--vl-text);
+  font-size: 15px;
+}
+
+.vira-lab-shell .active-document-card-subtitle,
+.vira-lab-shell .active-document-card-message,
+.vira-lab-shell .active-document-card-boundary,
+.vira-lab-shell .active-document-card-metric small {
+  color: var(--vl-muted);
+  font-size: 11px;
+}
+
+.vira-lab-shell .active-document-card-message {
+  margin: 10px 0 12px;
+  line-height: 1.5;
+}
+
+.vira-lab-shell .active-document-card-metrics {
+  gap: 8px;
+}
+
+.vira-lab-shell .active-document-card-metric {
+  border-color: var(--vl-line);
+  border-radius: 0;
+  padding: 9px;
+  background: rgba(7, 17, 22, 0.55);
+}
+
+.vira-lab-shell .active-document-card-metric span {
+  color: var(--vl-text);
+  font-size: 12px;
+}
+
+.vira-lab-checks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vira-lab-checks article {
+  min-width: 0;
+  padding: 12px;
+  border-top: 2px solid var(--vl-accent-strong);
+  background: rgba(18, 36, 44, 0.72);
+}
+
+.vira-lab-checks strong {
+  font-size: 13px;
+}
+
+.vira-lab-checks p,
+.diagnostic-entry p,
+.diagnostic-empty {
+  margin: 7px 0 0;
+  color: var(--vl-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.vira-lab-checks code {
+  color: var(--vl-accent);
+}
+
+.packet-workflow-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.vira-lab-shell .packet-review-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.vira-lab-shell .packet-cancel-button {
+  min-height: 34px;
+  border: 1px solid #76552d;
+  background: rgba(118, 85, 45, 0.18);
+  color: var(--vl-warning);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.vira-lab-shell .packet-cancel-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.session-panel dl {
+  margin: 0;
+  display: grid;
+  gap: 1px;
+  background: var(--vl-line);
+}
+
+.session-panel dl > div {
+  min-width: 0;
+  padding: 9px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 10px;
+  background: var(--vl-panel-strong);
+}
+
+.session-panel dt {
+  color: var(--vl-muted);
+  font-size: 11px;
+}
+
+.session-panel dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--vl-text);
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.vira-lab-export-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.vira-lab-export-actions button {
+  min-height: 36px;
+  border: 1px solid var(--vl-accent-strong);
+  background: transparent;
+  color: var(--vl-accent);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.vira-lab-export-actions button:disabled {
+  border-color: var(--vl-line);
+  color: var(--vl-muted);
+  opacity: 0.55;
+}
+
+.vira-lab-export-actions button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.vira-lab-export-status {
+  margin: 0;
+  color: var(--vl-muted);
+  font-size: 11px;
+}
+
+.diagnostic-count {
+  margin: 0 !important;
+}
+
+.diagnostic-entry {
+  padding: 11px;
+  border-left: 3px solid var(--vl-accent);
+  background: var(--vl-panel-strong);
+}
+
+.diagnostic-entry.warning {
+  border-left-color: var(--vl-warning);
+}
+
+.diagnostic-entry.error {
+  border-left-color: var(--vl-danger);
+}
+
+.diagnostic-entry strong {
+  font-family: Consolas, monospace;
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .vira-lab-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .vira-lab-side {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .vira-lab-shell {
+    padding: 10px;
+  }
+
+  .vira-lab-header,
+  .vira-lab-boundary,
+  .vira-lab-panel-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .vira-lab-runtime-cluster {
+    align-self: stretch;
+    justify-content: space-between;
+  }
+
+  .vira-lab-boundary {
+    gap: 5px;
+  }
+
+  .vira-lab-boundary strong {
+    white-space: normal;
+  }
+
+  .vira-lab-stages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vira-lab-stages > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .vira-lab-stages > div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--vl-line);
+  }
+
+  .vira-lab-checks,
+  .vira-lab-side {
+    grid-template-columns: 1fr;
+  }
+
+  .vira-lab-export-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .vira-lab-panel-heading button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 360px) {
+  .vira-lab-shell {
+    padding: 8px;
+  }
+
+  .vira-lab-stages {
+    grid-template-columns: 1fr;
+  }
+
+  .vira-lab-stages > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--vl-line);
+  }
+
+  .vira-lab-stages > div:last-child {
+    border-bottom: 0;
+  }
+
+  .vira-lab-shell .active-document-card-metrics {
+    grid-template-columns: 1fr;
+  }
+}

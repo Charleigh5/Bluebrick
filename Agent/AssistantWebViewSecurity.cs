@@ -4,6 +4,13 @@ namespace BlueBrick.Agent
 {
     internal static class AssistantWebViewSecurity
     {
+        internal const string ReactVirtualHostName = "bluebrick-ui.invalid";
+
+        internal static readonly Uri ReactVirtualEntryUri =
+            new Uri(
+                "https://" + ReactVirtualHostName + "/index.html",
+                UriKind.Absolute);
+
         internal static bool IsNavigationAllowed(string uri)
         {
             if (string.IsNullOrWhiteSpace(uri)) return true;
@@ -12,6 +19,12 @@ namespace BlueBrick.Agent
             if (!Uri.TryCreate(uri, UriKind.Absolute, out parsed))
             {
                 return false;
+            }
+
+            if (string.Equals(parsed.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(parsed.Host, ReactVirtualHostName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
             }
 
             if (string.Equals(parsed.Scheme, "about", StringComparison.OrdinalIgnoreCase) &&
