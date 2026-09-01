@@ -290,6 +290,10 @@
   line-height: 1.45;
 }
 
+.action-preview {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .eb-blocked {
   display: grid;
   gap: 3px;
@@ -422,5 +426,35 @@
 
   .eb-header h1 {
     font-size: 28px;
+  }
+}
+
+@media (max-width: 340px) {
+  .execution-board-shell {
+    padding: 8px;
+    gap: 10px;
+  }
+
+  .eb-command-band,
+  .eb-section,
+  .eb-receipt-summary {
+    padding: 10px;
+  }
+
+  .eb-state-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .eb-card {
+    padding: 9px;
+  }
+
+  .eb-card-head {
+    flex-direction: column;
+  }
+
+  .eb-lock {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }

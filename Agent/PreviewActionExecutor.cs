@@ -29,6 +29,12 @@ namespace BlueBrick.Agent
         {
             var actionName = (request.ActionName ?? string.Empty).Trim().ToLowerInvariant();
 
+            var boundary = ExecutionBoundaryPolicy.EvaluatePreviewAction(actionName);
+            if (!boundary.Allowed)
+            {
+                return Build(session?.SessionId, request?.ActionName, "denied", boundary.Message + " [" + boundary.Code + "]", traceId);
+            }
+
             try
             {
                 switch (actionName)

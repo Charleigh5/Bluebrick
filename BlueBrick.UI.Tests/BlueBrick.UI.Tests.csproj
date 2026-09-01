@@ -49,13 +49,23 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.Resources.Extensions">
+      <HintPath>..\packages\System.Resources.Extensions.8.0.0\lib\net462\System.Resources.Extensions.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe">
+      <HintPath>..\packages\System.Runtime.CompilerServices.Unsafe.4.5.3\lib\net461\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Net.Http" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="App.config" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="GenerateReviewContractsTests.cs" />
     <Compile Include="LabWorkspaceTests.cs" />
+    <Compile Include="CollapsePanelTests.cs" />
     <Compile Include="Stubs\TestHttpServer.cs" />
     <Compile Include="TraceViewerControlTests.cs" />
     <Compile Include="HotsetControlTests.cs" />
@@ -67,14 +77,19 @@
     <Compile Include="SolidWorks\SnapshotAdapterTests.cs" />
     <Compile Include="SolidWorks\ThreadGuardTests.cs" />
     <Compile Include="SolidWorks\WiringTests.cs" />
+    <Compile Include="SolidWorks\SelectionSnapshotAdapterTests.cs" />
     <!-- Hardening slice tests: signed manifests, provider expiry, injection guard, integrity scanner, chained receipts, promotion gate -->
     <Compile Include="Agent\AssistantManifestTests.cs" />
+    <Compile Include="Agent\AssistantWebViewActivationStateTests.cs" />
     <Compile Include="Agent\AssistantProviderExpiryTests.cs" />
     <Compile Include="Agent\AssistantInjectionGuardTests.cs" />
     <Compile Include="Agent\AssistantIntegrityScannerTests.cs" />
     <Compile Include="Agent\AssistantChainedReceiptTests.cs" />
     <Compile Include="Agent\AssistantPromotionGateTests.cs" />
+    <Compile Include="Agent\NativePortAndStartupTests.cs" />
+    <Compile Include="Agent\ProtectedRouteIngressTests.cs" />
     <Compile Include="SolidWorks\T5LiveEvidenceTests.cs" />
+    <Compile Include="SolidWorks\FeatureTreeSnapshotTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BlueBrick.csproj">

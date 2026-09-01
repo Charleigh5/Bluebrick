@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace BlueBrick.Agent
 {
@@ -348,6 +349,7 @@ namespace BlueBrick.Agent
     internal class AssistantToolDescriptor
     {
         public string Name { get; set; }
+        public string CapabilityId { get; set; }
         public string DisplayName { get; set; }
         public string Category { get; set; }
         public string Description { get; set; }
@@ -365,6 +367,12 @@ namespace BlueBrick.Agent
         public bool MutatesEpicor { get; set; }
         public bool SendsExternalData { get; set; }
         public bool RequiresCredential { get; set; }
+        public bool FilesystemAccess { get; set; }
+        public bool GenerationCapability { get; set; }
+        public string ApprovalPolicy { get; set; } = "none_read_only";
+        public string[] AllowedEnvironments { get; set; } = new[] { "Lab", "Production" };
+        public bool ProductionAllowed { get; set; } = true;
+        public string ExecutionBoundary { get; set; } = "assistant_tool_service";
         public string[] AllowedModes { get; set; } = new[] { "READ_ONLY_ANALYST" };
         public string FailureMode { get; set; } = "deny_safe";
     }
@@ -375,6 +383,12 @@ namespace BlueBrick.Agent
         public string Query { get; set; }
         public int Limit { get; set; }
         public string ScopeId { get; set; }
+        public string SessionId { get; set; }
+        [JsonIgnore]
+        public string RequestId { get; set; }
+        [JsonIgnore]
+        public string Environment { get; set; }
+        [JsonIgnore]
         public AssistantToolAuthorization Authorization { get; set; } = AssistantToolAuthorization.None();
         public Dictionary<string, string> Parameters { get; set; } = new Dictionary<string, string>();
     }

@@ -236,6 +236,50 @@ namespace BlueBrick.Agent
             return receipt;
         }
 
+        internal static bool IsReactBootstrapReady(
+            JObject receipt,
+            out string failureReason)
+        {
+            failureReason = null;
+            var readback = receipt == null ? null : receipt["readback"] as JObject;
+            if (readback == null)
+            {
+                failureReason = "bootstrap readback was unavailable.";
+                return false;
+            }
+
+            if ((readback.Value<int?>("rootChildCount") ?? 0) < 1)
+            {
+                failureReason = "React root did not mount content.";
+                return false;
+            }
+
+            if (readback.Value<bool?>("blueBrickHeaderPresent") != true)
+            {
+                failureReason = "BlueBrick React shell header was not present.";
+                return false;
+            }
+
+            var callbacks = readback["bbCallbacks"] as JArray;
+            if (callbacks == null || callbacks.Count != 17)
+            {
+                failureReason = "17 callback bridge was not mounted.";
+                return false;
+            }
+
+            var telemetry = readback["telemetry"] as JObject;
+            if (telemetry != null &&
+                ((telemetry["errors"] as JArray)?.Count > 0 ||
+                 (telemetry["resourceErrors"] as JArray)?.Count > 0 ||
+                 (telemetry["unhandledRejections"] as JArray)?.Count > 0))
+            {
+                failureReason = "React bootstrap telemetry reported a script or resource failure.";
+                return false;
+            }
+
+            return true;
+        }
+
         internal static async Task<JObject> CaptureAsync(
             WebView2 webView,
             string reason)

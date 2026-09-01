@@ -1,12 +1,12 @@
 # BlueBrick Assistant Route Manifest
 
-Last updated: 2026-05-28
+Last updated: 2026-09-01
 
 ## Purpose
 
 This manifest records the local agent bridge routes currently declared in `Agent/AgentHttpServer.cs`. It separates low-risk assistant/catalog endpoints from CAD, PDM, lab, relay, and job routes that need explicit policy, approval, tests, and execution receipts before assistant-driven use.
 
-All routes require `X-Agent-Auth` at the bridge layer. `/sw/*` and `/pdm/*` also have an Origin guard for non-local origins. Authentication is necessary but not sufficient for mutation safety.
+All routes require `X-Agent-Auth` at the bridge layer. `/sw/*` and `/pdm/*` also have an Origin guard for non-local origins. Authentication is necessary but not sufficient for mutation safety. The execution boundary independently denies native CAD/PDM routes and protected local side effects until a trusted native approval lifecycle exists.
 
 ## Route Summary
 
@@ -23,6 +23,7 @@ All routes require `X-Agent-Auth` at the bridge layer. `/sw/*` and `/pdm/*` also
 | `/assistant/status` | GET | Low | Implemented | Allowed | status/auth test |
 | `/assistant/models` | GET | Low | Implemented | Allowed | profile catalog test |
 | `/assistant/tools` | GET | Low | Implemented | Allowed | tool catalog test |
+| `/assistant/capabilities` | GET | Low | Implemented | Allowed; server-owned capability metadata only | capability schema/environment test |
 | `/assistant/tool-audit` | GET | Low/Privacy | Implemented | Allowed after receipt redaction | persisted receipt schema/redaction test |
 | `/assistant/integrations` | GET | Low | Implemented | Allowed | disabled-state catalog test |
 | `/assistant/document-catalog` | GET | Low | Implemented | Allowed | descriptor schema test |
@@ -50,8 +51,8 @@ All routes require `X-Agent-Auth` at the bridge layer. `/sw/*` and `/pdm/*` also
 | `/sw/jobs/{id}` | GET/POST override variant | High/Critical | Implemented dynamic route | Read-only GET allowed only after redaction; POST blocked | get schema + override deny test |
 | `/pdm/check_out` | POST | Critical | Implemented | Blocked from assistant until explicit approval + receipt | deny from chat test |
 | `/pdm/check_in` | POST | Critical | Implemented | Blocked from assistant until explicit approval + receipt | deny from chat test |
-| `/pdm/search` | POST | Medium/Privacy | Implemented | Read-only search allowed only through safe wrapper | config-gated wrapper test |
-| `/pdm/get_props` | POST | Medium/Privacy | Implemented | Read-only allowed only through safe wrapper | path validation + schema test |
+| `/pdm/search` | POST | Medium/Privacy | Implemented | Native route blocked at execution boundary; assistant wrapper is disabled by default and requires existing PDM login plus server permission | config/auth-no-login test |
+| `/pdm/get_props` | POST | Medium/Privacy | Implemented | Native route blocked at execution boundary; no assistant direct path | execution-boundary deny test |
 | `/pdm/get_file` | POST | High/Privacy | Implemented | Block until file-scope policy exists | deny from chat test |
 | `/qa/run` | POST | Medium | Implemented | Developer/test only | no production side-effect test |
 | `/lab/vault/reindex` | POST | Medium | Implemented | User-triggered only | index receipt test |
@@ -71,8 +72,8 @@ All routes require `X-Agent-Auth` at the bridge layer. `/sw/*` and `/pdm/*` also
 
 ## Immediate Required Hardening
 
-1. Extend `Agent/AssistantToolPolicy.cs` into full route-level policy metadata instead of maintaining safety only in prose.
-2. Add broader integration tests proving assistant chat cannot invoke `/sw/*`, native `/pdm/*`, destructive `/pdm/*`, or `/lab/vault/reset`.
+1. Add a trusted native approval lifecycle before enabling any mutating CAD, local, external-review, or PDM capability.
+2. Add runtime evidence for the Lab WebView2 source/nonce gate, Lab registration, SolidWorks read-only bridge, and automatic Lab rollback.
 3. Continue expanding persisted execution receipt visibility for every approved medium/high/critical tool action in the UI.
 4. Add redaction tests for telemetry, history, screenshots, and PDM metadata.
 5. Keep read-only wrappers separate from bridge-native mutation routes.
@@ -80,4 +81,4 @@ All routes require `X-Agent-Auth` at the bridge layer. `/sw/*` and `/pdm/*` also
 
 ## Current Enforcement Evidence
 
-`Agent/AssistantToolPolicy.cs` now denies assistant-driven CAD, native PDM, destructive lab reset, unknown mutation routes, and route-shaped tool aliases before `AssistantToolService` catalog execution. `AssistantToolExecutionReceipt` metadata is attached to allowed and denied assistant tool results, and `AssistantToolAuditLog` records process-local plus redacted JSONL receipts when a vault log root is configured. `/assistant/tool-audit` exposes recent redacted receipts, and `AssistantPanel` now renders an Activity Receipts section plus receipt metadata on tool result cards. Unit coverage exists in `BlueBrick.UI.Tests/LabWorkspaceTests.cs` for the first policy, receipt, persisted-audit, and receipt-normalization slices.
+`Agent/AssistantToolPolicy.cs` and `ExecutionBoundaryPolicy.cs` now deny assistant-driven CAD, native PDM, destructive Lab reset, protected local side effects, unknown mutation routes, and route-shaped tool aliases before execution. `AssistantToolExecutionReceipt` metadata is attached to allowed and denied assistant tool results, and `AssistantToolAuditLog` records process-local plus redacted JSONL receipts when a vault log root is configured. `/assistant/capabilities` exposes server-owned capability metadata; `/assistant/tool-audit` exposes recent redacted receipts; and `AssistantPanel` renders an Activity Receipts section plus receipt metadata on tool result cards. Client-supplied confirmation/authorization is not trusted, and relay invocations must pass the trusted-channel and preview-policy gates. Unit coverage exists in `BlueBrick.UI.Tests/LabWorkspaceTests.cs` for the document trust, capability, boundary, authorization, deployment-isolation, receipt, and persisted-audit slices.

@@ -88,11 +88,16 @@ export interface BlueBrickBridge {
   isHostAvailable(): boolean;
 }
 
+export interface BlueBrickBridgeOptions {
+  onTransportError?: (error: unknown) => void;
+}
+
 // ---------------------------------------------------------------------------
 // Host availability detection
 // ---------------------------------------------------------------------------
 declare global {
   interface Window {
+    __blueBrickDocumentNonce?: string;
     chrome?: {
       webview?: {
         postMessage: (message: unknown) => void;
@@ -102,7 +107,10 @@ declare global {
 }
 
 function detectHostTransport(): "webview2" | "none" {
-  if (typeof window !== "undefined" && window.chrome?.webview?.postMessage) {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.chrome?.webview?.postMessage === "function"
+  ) {
     return "webview2";
   }
   return "none";
@@ -140,6 +148,7 @@ export interface BlueBrickBridgeHandlers {
 // ---------------------------------------------------------------------------
 export function createBlueBrickWindowBridge(
   handlers: BlueBrickBridgeHandlers,
+  options: BlueBrickBridgeOptions = {},
 ): BlueBrickBridge {
   if (typeof window === "undefined") {
     return {
@@ -174,12 +183,22 @@ export function createBlueBrickWindowBridge(
     _name: TName,
     payload: PayloadFor<TName>,
   ): void => {
-    if (transport === "webview2" && window.chrome?.webview?.postMessage) {
-      try {
-        window.chrome.webview.postMessage(payload);
-      } catch {
-        /* host transport errors are swallowed by policy */
-      }
+    if (transport !== "webview2") return;
+    if (typeof window.chrome?.webview?.postMessage !== "function") {
+      options.onTransportError?.(new Error("WebView2 postMessage is unavailable."));
+      return;
+    }
+    try {
+      const nonce = typeof w.__blueBrickDocumentNonce === "string"
+        ? w.__blueBrickDocumentNonce
+        : "";
+      const enrichedPayload = nonce && typeof payload === "object" && payload !== null
+        ? { ...(payload as Record<string, unknown>), documentNonce: nonce }
+        : payload;
+      window.chrome.webview.postMessage(enrichedPayload);
+    } catch (error) {
+      /* host transport errors are swallowed by policy */
+      options.onTransportError?.(error);
     }
   };
 

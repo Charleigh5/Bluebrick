@@ -108,6 +108,15 @@ namespace BlueBrick
                     await EnsureAssistantPanelAsync();
                 }
             };
+            try
+            {
+                var _assistantAutoExpandConfig = Agent.AgentConfig.Load();
+                if (_assistantAutoExpandConfig.Assistant != null && _assistantAutoExpandConfig.Assistant.UseReactWebView)
+                {
+                    cplMainChat.Expand();
+                }
+            }
+            catch { }
 
             SetPaneVisible();
             SfSetState();

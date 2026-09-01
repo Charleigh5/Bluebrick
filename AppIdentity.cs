@@ -33,6 +33,10 @@ namespace BlueBrick
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 TelemetryFolderName, "assistant");
 
+        internal static string WebViewUserDataRoot =>
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                TelemetryFolderName, "webview2");
+
         internal static string ConfigPath(string baseDirectory)
         {
             return Path.Combine(baseDirectory, "config", IsLabBuild ? "appsettings.lab.json" : "appsettings.json");

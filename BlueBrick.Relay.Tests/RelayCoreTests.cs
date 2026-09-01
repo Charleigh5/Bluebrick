@@ -61,4 +61,19 @@ public class RelayCoreTests
 
         Assert.AreEqual("offline", result.Result.Status);
     }
+
+    [TestMethod]
+    public void ExecutionBoardFixtureRouter_Returns_Typed_Local_And_Gated_Results()
+    {
+        var local = ExecutionBoardFixtureRouter.Route("Need PDM availability for bb src 1001 before lunch", "session-3");
+        var pdm = ExecutionBoardFixtureRouter.Route("Find PDM part 12345 availability", "session-3");
+        var cad = ExecutionBoardFixtureRouter.Route("Route a SOLIDWORKS metadata request safely", "session-3");
+
+        Assert.AreEqual("LOCAL_FIXTURE_RESULT", local.Status);
+        CollectionAssert.Contains(local.MatchedIds.ToArray(), "BB-SRC-1001");
+        Assert.AreEqual("NOT_CONNECTED", pdm.Status);
+        Assert.AreEqual("NOT_CONNECTED", pdm.CapabilityStates.Single().State);
+        Assert.AreEqual("APPROVAL_REQUIRED", cad.Status);
+        Assert.AreEqual("APPROVAL_REQUIRED", cad.CapabilityStates.Single().State);
+    }
 }

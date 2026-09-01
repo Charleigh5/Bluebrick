@@ -8,6 +8,7 @@ namespace BlueBrick.Agent
     {
         internal PdmConfig Pdm { get; set; }
         internal TemplateConfig Templates { get; set; }
+        [JsonProperty("Agent")]
         internal AgentSettings Agent { get; set; }
         internal UISettings UI { get; set; }
         internal MemorySettings Memory { get; set; }
@@ -23,11 +24,18 @@ namespace BlueBrick.Agent
             var baseDir = Path.GetDirectoryName(typeof(AgentConfig).Assembly.Location)
                 ?? AppDomain.CurrentDomain.BaseDirectory;
             var root = FindRepoRoot(baseDir);
+            return LoadFrom(root);
+        }
+
+        internal static AgentConfig LoadFrom(string root)
+        {
             var cfgPath = AppIdentity.ConfigPath(root);
             if (!File.Exists(cfgPath)) return CreateDefault(root);
 
             var json = File.ReadAllText(cfgPath);
-            var config = JsonConvert.DeserializeObject<AgentConfig>(json) ?? CreateDefault(root);
+            var config = JsonConvert.DeserializeObject<AgentConfig>(json);
+            if (config == null) return CreateDefault(root);
+
             config.ApplyDefaults(root);
             return config;
         }
@@ -72,7 +80,7 @@ namespace BlueBrick.Agent
             AssistantTools ??= new AssistantToolSettings();
             Relay ??= new RelaySettings();
 
-            Agent.BridgePort = Agent.BridgePort == 0 ? AppIdentity.BridgePort : Agent.BridgePort;
+            Agent.BridgePort = ResolveBridgePort(Agent.BridgePort, AppIdentity.BridgePort);
             Agent.OverlayColor = DefaultIfEmpty(Agent.OverlayColor, "#D9FF5A");
 
             Memory.LocalPath = DefaultIfEmpty(Memory.LocalPath, Path.Combine(
@@ -130,6 +138,11 @@ namespace BlueBrick.Agent
             Relay.HandoffPath = DefaultIfEmpty(Relay.HandoffPath, "chatgpt/handoff");
             Relay.RegistrationToken = DefaultIfEmpty(Relay.RegistrationToken, string.Empty);
             Relay.HeartbeatIntervalSeconds = Relay.HeartbeatIntervalSeconds <= 0 ? 30 : Relay.HeartbeatIntervalSeconds;
+        }
+
+        internal static int ResolveBridgePort(int configuredPort, int fallbackPort)
+        {
+            return configuredPort >= 1 && configuredPort <= 65535 ? configuredPort : fallbackPort;
         }
 
         private static string DefaultIfEmpty(string current, string fallback)
@@ -209,6 +222,7 @@ namespace BlueBrick.Agent
     {
         internal string VaultRoot { get; set; }
         internal string VaultName { get; set; }
+        internal bool AllowAssistantReadOnlySearch { get; set; }
         internal string EngineeringDbRoot { get; set; }
         internal string[] ProjectFolders { get; set; }
     }
@@ -230,6 +244,7 @@ namespace BlueBrick.Agent
 
     internal class AgentSettings
     {
+        [JsonProperty("BridgePort")]
         internal int BridgePort { get; set; }
         internal string OverlayColor { get; set; }
     }

@@ -34,10 +34,12 @@ namespace BlueBrick
         private bool _isStreaming;
         private bool _loadingModels;
         private readonly object _initLock = new object();
+        private readonly AssistantInitializationGate _initializationGate = new AssistantInitializationGate();
         private readonly object _errorLogLock = new object();
         private readonly ConcurrentDictionary<string, CancellationTokenSource> _sdkStreamRequests = new ConcurrentDictionary<string, CancellationTokenSource>();
         private CancellationTokenSource _streamCts;
         private AssistantWebViewHost _webHost;
+        private readonly AssistantFallbackDiagnostic _fallbackDiagnostic = new AssistantFallbackDiagnostic();
         private static readonly int _diagPid = Process.GetCurrentProcess().Id;
         private static readonly object _diagLogLock = new object();
 
@@ -115,16 +117,23 @@ namespace BlueBrick
             };
         }
 
-        internal async Task EnsureInitializedAsync()
+        internal Task EnsureInitializedAsync()
         {
             lock (_initLock)
             {
-                if (_initialized || _initFailed) return;
+                if (_initialized || _initFailed) return Task.CompletedTask;
             }
 
+            return _initializationGate.GetOrStart(EnsureInitializedCoreAsync);
+        }
+
+        private async Task EnsureInitializedCoreAsync()
+        {
             try
             {
-                _webHost = new AssistantWebViewHost(_webView, AgentConfig.Load());
+                var config = AgentConfig.Load();
+                AgentPanelClient.Configure(config);
+                _webHost = new AssistantWebViewHost(_webView, config);
                 var webViewReady = await _webHost.InitializeAsync(BuildShellHtml);
                 if (!webViewReady)
                 {
@@ -134,7 +143,10 @@ namespace BlueBrick
                 _webView.Visible = true;
                 AttachWebViewMessageBridge();
                 ConfigureNativeChromeForShell();
-                lblChatStatus.Visible = false;
+                if (!IsReactShellActive())
+                {
+                    ShowReactFallbackStatus();
+                }
 
                 // NavigationCompleted only proves that the document finished navigation.
                 // React installs the legacy window.bb* compatibility surface later from its
@@ -166,6 +178,7 @@ namespace BlueBrick
                 // has had its readiness opportunity. StartSessionAsync retains its existing
                 // bbReset/status behavior.
                 await StartSessionAsync();
+                RestoreReactFallbackStatus();
             }
             catch (Exception)
             {
@@ -408,6 +421,28 @@ namespace BlueBrick
             return _webHost != null && _webHost.LoadedReactShell;
         }
 
+        private void ShowReactFallbackStatus()
+        {
+            var reason = _webHost == null ? null : _webHost.LastLoadError;
+            _fallbackDiagnostic.Activate(reason);
+            RestoreReactFallbackStatus();
+        }
+
+        private void RestoreReactFallbackStatus()
+        {
+            string text;
+            bool visible;
+            if (_fallbackDiagnostic.TryRestore(
+                    lblChatStatus.Text,
+                    lblChatStatus.Visible,
+                    out text,
+                    out visible))
+            {
+                lblChatStatus.Text = text;
+                lblChatStatus.Visible = visible;
+            }
+        }
+
         private void ConfigureNativeChromeForShell()
         {
             var react = IsReactShellActive();
@@ -434,7 +469,7 @@ namespace BlueBrick
         {
             var rawJson = e.WebMessageAsJson;
             TraceBridgeDiagnostic("WEBMESSAGE_ENTRY", "rawLength=" + (rawJson == null ? 0 : rawJson.Length));
-            _ = HandleWebViewMessageAsync(rawJson);
+            _ = HandleWebViewMessageAsync(rawJson, e.Source);
         }
 
         internal static void TraceBridgeDiagnostic(string eventName, string detail)
@@ -460,11 +495,20 @@ namespace BlueBrick
             catch { }
         }
 
-        private async Task HandleWebViewMessageAsync(string rawJson)
+        private async Task HandleWebViewMessageAsync(string rawJson, string sourceUri)
         {
             try
             {
                 var msg = JObject.Parse(rawJson ?? "{}");
+                if (_webHost == null ||
+                    !_webHost.IsTrustedDocumentMessage(
+                        sourceUri,
+                        _webView?.Source == null ? null : _webView.Source.AbsoluteUri,
+                        msg.Value<string>("documentNonce")))
+                {
+                    TraceBridgeDiagnostic("WEBMESSAGE_REJECTED", "reason=untrusted_document");
+                    return;
+                }
                 var type = msg.Value<string>("type") ?? string.Empty;
                 TraceBridgeDiagnostic("WEBMESSAGE_PARSED", "type=" + type);
                 if (string.Equals(type, "selectModel", StringComparison.OrdinalIgnoreCase))
@@ -746,6 +790,7 @@ namespace BlueBrick
                 TraceBridgeDiagnostic("STARTSESSION_END", "ok=false; errorCode=" + (result.ErrorCode ?? ""));
                 lblChatStatus.Text = result.Error;
                 lblChatStatus.Visible = true;
+                RestoreReactFallbackStatus();
                 return;
             }
 
@@ -767,6 +812,7 @@ namespace BlueBrick
             {
                 lblChatStatus.Text = result.Error;
                 lblChatStatus.Visible = true;
+                RestoreReactFallbackStatus();
                 return;
             }
 
@@ -820,6 +866,7 @@ namespace BlueBrick
             }
 
             UpdateSelectedModel();
+            RestoreReactFallbackStatus();
         }
 
         private async Task LoadModelsAsync()
@@ -2347,7 +2394,10 @@ _streamingNode=null;
 _streamingText='';
 };
 window.bbAppend=function(raw){
-var payload=JSON.parse(raw);
+var payload;
+if(raw==null||raw==='')return;
+try{payload=typeof raw==='string'?JSON.parse(raw):raw;}catch(e){return;}
+if(!payload||typeof payload!=='object'||Array.isArray(payload))return;
 var empty=document.querySelector('.empty');
 if(empty)empty.remove();
 var node=document.createElement('div');

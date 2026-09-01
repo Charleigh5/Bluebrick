@@ -33,3 +33,6 @@ tmp-snapshot.txt
 TestResults/
 Forms/_write_test.txt
 Forms/hello2.txt
+
+## AssistantWeb dependencies
+AssistantWeb/node_modules/

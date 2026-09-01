@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import "./styles.css";
 import {
   createBlueBrickWindowBridge,
@@ -6,6 +6,8 @@ import {
   type BlueBrickBridgeHandlers,
 } from "./bridge/blueBrickWebViewBridge";
 import { HardwareCadPanel } from "./hardware-cad/HardwareCadPanel";
+import { ExecutionBoardApp } from "./execution-board/ExecutionBoardApp";
+import { ViraLabApp } from "./vira-lab/ViraLabApp";
 import { resolveAssistantSurface } from "./surfaceRouting";
 
 // ---------------------------------------------------------------------------
@@ -58,6 +60,8 @@ type ToolResult = {
   receipt?: unknown;
 };
 
+type BridgeStatus = "offline" | "connecting" | "connected" | "error";
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
@@ -76,6 +80,7 @@ export function App() {
   const [screenshots, setScreenshots] = useState<ScreenshotArtifact[]>([]);
   const [toolResults, setToolResults] = useState<ToolResult[]>([]);
   const [screenshotReviews, setScreenshotReviews] = useState<Record<string, string>>({});
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>("offline");
 
   const bridgeRef = useRef<BlueBrickBridge | null>(null);
   const streamingIdRef = useRef<string | null>(null);
@@ -322,15 +327,50 @@ export function App() {
     },
   };
 
+  const finalizePendingBridgeFailure = useCallback(() => {
+    const pendingId = streamingIdRef.current;
+    streamingIdRef.current = null;
+    setStreaming(false);
+    if (!pendingId) return;
+
+    commitMessages((current) =>
+      current.map((m) =>
+        m.id === pendingId
+          ? { ...m, text: "Bridge transport failed. Please try again.", streaming: false }
+          : m,
+      ),
+    );
+  }, [commitMessages]);
+
   // -------------------------------------------------------------------------
   // Install bridge on mount
   // -------------------------------------------------------------------------
-  useEffect(() => {
-    bridgeRef.current = createBlueBrickWindowBridge(handlers);
+  useLayoutEffect(() => {
+    let mounted = true;
+    setBridgeStatus("connecting");
+
+    try {
+      const bridge = createBlueBrickWindowBridge(handlers, {
+        onTransportError: () => {
+          if (!mounted) return;
+          setBridgeStatus("error");
+          finalizePendingBridgeFailure();
+        },
+      });
+      bridgeRef.current = bridge;
+      setBridgeStatus(bridge.isHostAvailable() ? "connected" : "offline");
+    } catch {
+      bridgeRef.current = null;
+      setBridgeStatus("error");
+    }
+
+    return () => {
+      bridgeRef.current = null;
+      setBridgeStatus("offline");
+      mounted = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const bridge = bridgeRef.current;
 
   // -------------------------------------------------------------------------
   // Actions
@@ -339,32 +379,32 @@ export function App() {
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const id = e.target.value;
       setModelId(id);
-      bridge?.post("selectModel", { type: "selectModel", modelId: id });
+      bridgeRef.current?.post("selectModel", { type: "selectModel", modelId: id });
     },
-    [bridge],
+    [],
   );
 
   const handleSelectScope = useCallback(
     (s: Scope) => {
       if (!s.enabled) return;
       setScopeId(s.id);
-      bridge?.post("selectScope", { type: "selectScope", scopeId: s.id });
+      bridgeRef.current?.post("selectScope", { type: "selectScope", scopeId: s.id });
     },
-    [bridge],
+    [],
   );
 
   const handleCapture = useCallback(() => {
-    bridge?.post("captureScreenshot", { type: "captureScreenshot" });
-  }, [bridge]);
+    bridgeRef.current?.post("captureScreenshot", { type: "captureScreenshot" });
+  }, []);
 
-  const handleAttach = useCallback(() => bridge?.post("attach", { type: "attach" }), [bridge]);
+  const handleAttach = useCallback(() => bridgeRef.current?.post("attach", { type: "attach" }), []);
 
   const handleSearch = useCallback(() => {
     const msg = input.trim();
     if (msg) {
-      bridge?.post("search", { type: "search", message: msg, scopeId });
+      bridgeRef.current?.post("search", { type: "search", message: msg, scopeId });
     }
-  }, [bridge, input, scopeId]);
+  }, [input, scopeId]);
 
   const handleSend = useCallback(() => {
     const msg = input.trim();
@@ -378,13 +418,13 @@ export function App() {
       { id: cryptoId(), role: "user", text: msg },
       { id: pendingAssistantId, role: "assistant", text: "", streaming: true },
     ]);
-    bridge?.post("sendMessage", { type: "sendMessage", message: msg, scopeId });
     setInput("");
     setStreaming(true);
-  }, [bridge, input, scopeId, commitMessages]);
+    bridgeRef.current?.post("sendMessage", { type: "sendMessage", message: msg, scopeId });
+  }, [input, scopeId, commitMessages]);
 
   const handleStop = useCallback(() => {
-    bridge?.post("cancelMessage", { type: "cancelMessage" });
+    bridgeRef.current?.post("cancelMessage", { type: "cancelMessage" });
     setStreaming(false);
     const sid = streamingIdRef.current;
     if (sid) {
@@ -393,27 +433,27 @@ export function App() {
       );
       streamingIdRef.current = null;
     }
-  }, [bridge, commitMessages]);
+  }, [commitMessages]);
 
   const handleNewSession = useCallback(() => {
-    bridge?.post("newSession", { type: "newSession" });
+    bridgeRef.current?.post("newSession", { type: "newSession" });
     streamingIdRef.current = null;
     screenshotsRef.current = [];
     commitMessages([]);
     syncScreenshots();
     setToolResults([]);
-  }, [bridge, commitMessages, syncScreenshots]);
+  }, [commitMessages, syncScreenshots]);
 
   const handleApprove = useCallback(
     (screenshotId: string) => {
       setScreenshotReviews((prev) => ({ ...prev, [screenshotId]: "approved" }));
-      bridge?.post("reviewScreenshotItem", {
+      bridgeRef.current?.post("reviewScreenshotItem", {
         type: "reviewScreenshotItem",
         screenshotId,
         reviewStatus: "approved",
       });
     },
-    [bridge],
+    [],
   );
 
   // -------------------------------------------------------------------------
@@ -434,6 +474,12 @@ export function App() {
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
+  if (surface === "execution-board") {
+    return <ExecutionBoardApp />;
+  }
+  if (surface === "vira-lab") {
+    return <ViraLabApp search={typeof window !== "undefined" ? window.location.search : ""} />;
+  }
   if (surface === "hardware-cad") {
     return (
       <main className="shell vira-command-surface">
@@ -691,10 +737,10 @@ export function App() {
           className="safety-footer"
           title="Local-first: screenshots stay local unless explicitly approved. Bridge status reflects the local host connection."
         >
-          <span className={"safety-dot" + (bridge?.isHostAvailable() ? "" : " off")} aria-hidden="true">●</span>
+          <span className={"safety-dot" + (bridgeStatus === "connected" ? "" : " off")} aria-hidden="true">●</span>
           <span className="safety-label">Local-first</span>
           <span className="safety-spacer" aria-hidden="true" />
-          <span className="safety-bridge">Bridge {bridge?.isHostAvailable() ? "connected" : "offline"}</span>
+          <span className="safety-bridge">Bridge {bridgeStatus}</span>
         </div>
       </footer>
     </main>

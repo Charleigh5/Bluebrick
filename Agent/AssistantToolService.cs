@@ -49,9 +49,10 @@ namespace BlueBrick.Agent
 
         internal IReadOnlyList<AssistantToolDescriptor> GetCatalog()
         {
-            var pdmEnabled = _config.AssistantTools?.EnablePdmSearch ?? false;
+            var pdmPermission = _config.Pdm?.AllowAssistantReadOnlySearch ?? false;
+            var pdmEnabled = (_config.AssistantTools?.EnablePdmSearch ?? false) && pdmPermission;
             var epicorEnabled = IsEpicorSearchConfigured();
-            return new[]
+            var catalog = new[]
             {
                 new AssistantToolDescriptor
                 {
@@ -82,7 +83,9 @@ namespace BlueBrick.Agent
                     RequiresCredential = true,
                     UnavailableReason = pdmEnabled
                         ? string.Empty
-                        : "PDM search is disabled until AssistantTools.EnablePdmSearch is explicitly enabled for this machine."
+                        : !pdmPermission
+                            ? "PDM capability is unavailable: explicit server-side read-only permission is disabled. No PDM login is attempted."
+                            : "PDM search is disabled until AssistantTools.EnablePdmSearch is explicitly enabled for this machine."
                 },
                 new AssistantToolDescriptor
                 {
@@ -145,8 +148,55 @@ namespace BlueBrick.Agent
                     RequiresCredential = false,
                     AllowedModes = new[] { "READ_ONLY_ANALYST" },
                     FailureMode = "deny_safe"
+                },
+                new AssistantToolDescriptor
+                {
+                    Name = "solidworks.get_selection_snapshot",
+                    DisplayName = "Get Selection Snapshot",
+                    Category = "read",
+                    Description = "Read-only bounded selection snapshot (count, types, safe names, marks). Max 100, truncated with SELECTION_LIMIT_REACHED. Never mutates selection.",
+                    ReadOnly = true,
+                    RequiresConfirmation = false,
+                    Enabled = true,
+                    RiskLevel = "low",
+                    AuditRequired = true,
+                    AllowedInChat = true,
+                    RequiresCredential = false,
+                    AllowedModes = new[] { "READ_ONLY_ANALYST" },
+                    FailureMode = "deny_safe"
+                },
+                new AssistantToolDescriptor
+                {
+                    Name = "solidworks.get_feature_tree",
+                    DisplayName = "Get Feature Tree",
+                    Category = "read",
+                    Description = "Read-only bounded feature tree snapshot (id, name, type, depth, parent, suppression, state). Max 500 nodes depth 20, partial + FEATURE_LIMIT_REACHED on overflow. Never mutates.",
+                    ReadOnly = true,
+                    RequiresConfirmation = false,
+                    Enabled = true,
+                    RiskLevel = "low",
+                    AuditRequired = true,
+                    AllowedInChat = true,
+                    RequiresCredential = false,
+                    AllowedModes = new[] { "READ_ONLY_ANALYST" },
+                    FailureMode = "deny_safe"
                 }
             };
+
+            foreach (var descriptor in catalog)
+            {
+                descriptor.CapabilityId = descriptor.Name;
+                descriptor.AllowedEnvironments = new[] { "Lab", "Production" };
+                descriptor.ProductionAllowed = !descriptor.Mutating && !descriptor.MutatesCad && !descriptor.MutatesPdm && !descriptor.MutatesEpicor;
+                descriptor.ExecutionBoundary = "assistant_tool_service";
+                descriptor.ApprovalPolicy = descriptor.ReadOnly ? "none_read_only" : "trusted_native_single_use";
+                descriptor.FilesystemAccess = string.Equals(descriptor.Name, "search_local_vault", StringComparison.OrdinalIgnoreCase) ||
+                                              string.Equals(descriptor.Name, "capture_screenshot", StringComparison.OrdinalIgnoreCase) ||
+                                              string.Equals(descriptor.Name, "create_screenshot_review_report", StringComparison.OrdinalIgnoreCase);
+                descriptor.GenerationCapability = false;
+            }
+
+            return catalog;
         }
 
         internal IReadOnlyList<AssistantToolExecutionReceipt> GetAuditTail(int limit)
@@ -162,6 +212,10 @@ namespace BlueBrick.Agent
         internal async Task<AssistantToolResult> ExecuteAsync(AssistantToolRequest request, string traceId)
         {
             request = request ?? new AssistantToolRequest();
+            request.RequestId = string.IsNullOrWhiteSpace(request.RequestId) ? traceId : request.RequestId;
+            request.Environment = string.IsNullOrWhiteSpace(request.Environment)
+                ? (AppIdentity.IsLabBuild ? "Lab" : "Production")
+                : request.Environment;
             var toolName = Normalize(request.ToolName);
             if (string.IsNullOrWhiteSpace(toolName))
             {
@@ -188,6 +242,25 @@ namespace BlueBrick.Agent
                     request,
                     AssistantToolPolicyDecision.Deny("unknown", "Unknown assistant tool.", true),
                     null,
+                    traceId);
+            }
+
+            var capabilityPolicy = _policy.EvaluateCapability(
+                descriptor,
+                request,
+                AssistantToolInvocationSource.AssistantTool,
+                null,
+                traceId,
+                request.SessionId,
+                AppIdentity.IsLabBuild ? "Lab" : "Production",
+                DateTime.UtcNow);
+            if (!capabilityPolicy.Allowed)
+            {
+                return WithReceipt(
+                    Fail(toolName, capabilityPolicy.Code, capabilityPolicy.Message, traceId),
+                    request,
+                    capabilityPolicy,
+                    descriptor,
                     traceId);
             }
 
@@ -264,6 +337,16 @@ namespace BlueBrick.Agent
         if (toolName == "solidworks.get_active_document_snapshot")
         {
             result = GetActiveDocumentSnapshot(request, traceId);
+            return WithReceipt(result, request, policy, descriptor, traceId);
+        }
+        if (toolName == "solidworks.get_selection_snapshot")
+        {
+            result = GetSelectionSnapshot(request, traceId);
+            return WithReceipt(result, request, policy, descriptor, traceId);
+        }
+        if (toolName == "solidworks.get_feature_tree")
+        {
+            result = GetFeatureTreeSnapshot(request, traceId);
             return WithReceipt(result, request, policy, descriptor, traceId);
         }
 
@@ -518,6 +601,124 @@ namespace BlueBrick.Agent
             catch (Exception ex) { sw.Stop(); return Fail("solidworks.get_active_document_snapshot", "error", ex.Message, traceId); }
         }
 
+        private AssistantToolResult GetSelectionSnapshot(AssistantToolRequest request, string traceId)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                if (_auditComposition != null)
+                {
+                    System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> errors;
+                    var snap = _auditComposition.GetSelectionSnapshot(traceId, traceId, out errors);
+                    if (errors == null) errors = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError>();
+                    var hasNoDoc = errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT);
+                    var hasReadFailure = errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.READ_FAILURE);
+                    var truncated = snap.Limitations != null && snap.Limitations.Contains(BlueBrick.SolidWorks.Snapshots.SelectionSnapshot.LimitReachedCode);
+                    var status = hasNoDoc ? "empty" : (truncated || hasReadFailure || errors.Count > 0 ? "partial" : snap.Status ?? "ok");
+                    if (snap.Count == 0 && !hasNoDoc && errors.Count == 0) status = "empty";
+                    sw.Stop();
+                    var metadata = new System.Collections.Generic.Dictionary<string,string>
+                    {
+                        ["mutation_count"]="0",
+                        ["duration_ms"]=sw.ElapsedMilliseconds.ToString(),
+                        ["correlation"]=traceId ?? "",
+                        ["mode"]="READ_ONLY_ANALYST",
+                        ["status"]=status,
+                        ["count"]=snap.Count.ToString(),
+                        ["selectionType"]=snap.SelectionType ?? "",
+                        ["safeName"]=snap.SafeName ?? "",
+                        ["documentIdentityHash"]=snap.DocumentIdentityHash ?? ""
+                    };
+                    if (snap.Limitations != null && snap.Limitations.Count>0) metadata["limitations"]=string.Join(",", snap.Limitations);
+                    if (status=="partial") metadata["warning"]="READ_FAILURE";
+                    var payload = Newtonsoft.Json.JsonConvert.SerializeObject(snap);
+                    var result = new AssistantToolResult
+                    {
+                        ToolName = "solidworks.get_selection_snapshot",
+                        Status = status,
+                        Message = status=="empty"?"No selection.": truncated?"Selection truncated to 100.": status=="partial"?"Selection partial.":"Selection captured.",
+                        ReadOnly = true,
+                        TraceId = traceId,
+                        Items = new System.Collections.Generic.List<AssistantToolResultItem> { new AssistantToolResultItem { Id = "selection", Title = snap.SelectionType ?? "None", Subtitle = payload, Metadata = metadata } }
+                    };
+                    return result;
+                }
+                var fallbackAdapter = new BlueBrick.SolidWorks.Adapters.SolidWorksSelectionReadAdapter(new BlueBrick.SolidWorks.Runtime.SolidWorksThreadGuard(), BlueBrick.SolidWorks.Runtime.SolidWorksRuntimeInfoFactory.ForMock(), new BlueBrick.Audit.Core.AuditReceiptFactory(), () => null);
+                System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> fallbackErrors;
+                BlueBrick.SolidWorks.Snapshots.SelectionSnapshot fallbackSnap;
+                try { fallbackSnap = fallbackAdapter.ReadSelection(new BlueBrick.Audit.Contracts.AuditRunRequest { CorrelationId = traceId, Mode = BlueBrick.Audit.Contracts.AuditOperationMode.READ_ONLY_ANALYST }, out fallbackErrors); }
+                catch (BlueBrick.SolidWorks.Runtime.SolidWorksThreadViolationException ex) { fallbackErrors = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> { new BlueBrick.Audit.Contracts.AuditError { Code = BlueBrick.Audit.Contracts.AuditErrorCodes.READ_FAILURE, CorrelationId = traceId, Message = ex.Message } }; fallbackSnap = new BlueBrick.SolidWorks.Snapshots.SelectionSnapshot { Count = 0, SelectionType = "None", SafeName = string.Empty, SelectionMark = -1, DocumentIdentityHash = string.Empty, Limitations = new System.Collections.Generic.List<string>(), Status = "partial", Items = new System.Collections.Generic.List<BlueBrick.SolidWorks.Snapshots.SelectionEntry>() }; }
+                if (fallbackErrors==null) fallbackErrors=new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError>();
+                var fbNoDoc = fallbackErrors.Exists(e=>e.Code==BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT);
+                var fbStatus = fbNoDoc?"empty": fallbackErrors.Count>0?"partial": fallbackSnap.Status ?? "ok";
+                sw.Stop();
+                var fbMeta = new System.Collections.Generic.Dictionary<string,string>{ ["mutation_count"]="0",["duration_ms"]=sw.ElapsedMilliseconds.ToString(),["correlation"]=traceId??"",["mode"]="READ_ONLY_ANALYST",["status"]=fbStatus,["count"]=fallbackSnap.Count.ToString() };
+                if (fbStatus=="partial") fbMeta["warning"]="READ_FAILURE";
+                return new AssistantToolResult{ ToolName="solidworks.get_selection_snapshot", Status=fbStatus, Message=fbStatus=="empty"?"No selection.":"Selection captured.", ReadOnly=true, TraceId=traceId, Items=new System.Collections.Generic.List<AssistantToolResultItem>{ new AssistantToolResultItem{ Id="selection", Title=fallbackSnap.SelectionType??"None", Subtitle=Newtonsoft.Json.JsonConvert.SerializeObject(fallbackSnap), Metadata=fbMeta } } };
+            }
+            catch (Exception ex) { sw.Stop(); return Fail("solidworks.get_selection_snapshot","error",ex.Message,traceId); }
+        }
+
+        private AssistantToolResult GetFeatureTreeSnapshot(AssistantToolRequest request, string traceId)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                if (_auditComposition != null)
+                {
+                    System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> errors;
+                    var snap = _auditComposition.GetFeatureTreeSnapshot(traceId, traceId, out errors);
+                    if (errors == null) errors = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError>();
+                    var hasNoDoc = errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT);
+                    var hasReadFailure = errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.READ_FAILURE);
+                    var truncated = snap.Limitations != null && snap.Limitations.Contains(BlueBrick.SolidWorks.Snapshots.FeatureTreeSnapshot.LimitReachedCode);
+                    if (snap.Truncated) truncated = true;
+                    var status = hasNoDoc ? "empty" : (truncated || hasReadFailure || errors.Count > 0 ? "partial" : snap.Status ?? "ok");
+                    if (snap.Features.Count == 0 && !hasNoDoc && errors.Count == 0) status = "empty";
+                    sw.Stop();
+                    var metadata = new System.Collections.Generic.Dictionary<string,string>
+                    {
+                        ["mutation_count"]="0",
+                        ["duration_ms"]=sw.ElapsedMilliseconds.ToString(),
+                        ["correlation"]=traceId ?? "",
+                        ["mode"]="READ_ONLY_ANALYST",
+                        ["status"]=status,
+                        ["totalCount"]=snap.TotalCount.ToString(),
+                        ["featureCount"]=snap.Features.Count.ToString(),
+                        ["documentIdentityHash"]=snap.DocumentIdentityHash ?? "",
+                        ["truncated"]=snap.Truncated.ToString().ToLowerInvariant()
+                    };
+                    if (snap.Limitations != null && snap.Limitations.Count>0) metadata["limitations"]=string.Join(",", snap.Limitations);
+                    if (status=="partial") metadata["warning"]=BlueBrick.SolidWorks.Snapshots.FeatureTreeSnapshot.LimitReachedCode;
+                    var payload = Newtonsoft.Json.JsonConvert.SerializeObject(snap);
+                    var result = new AssistantToolResult
+                    {
+                        ToolName = "solidworks.get_feature_tree",
+                        Status = status,
+                        Message = status=="empty"?"No feature tree.": truncated?"Feature tree truncated to 500.": status=="partial"?"Feature tree partial.":"Feature tree captured.",
+                        ReadOnly = true,
+                        TraceId = traceId,
+                        Items = new System.Collections.Generic.List<AssistantToolResultItem> { new AssistantToolResultItem { Id = "feature-tree", Title = "Feature Tree", Subtitle = payload, Metadata = metadata } }
+                    };
+                    return result;
+                }
+                var fallbackAdapter = new BlueBrick.SolidWorks.Adapters.SolidWorksFeatureTreeReadAdapter(new BlueBrick.SolidWorks.Runtime.SolidWorksThreadGuard(), BlueBrick.SolidWorks.Runtime.SolidWorksRuntimeInfoFactory.ForMock(), new BlueBrick.Audit.Core.AuditReceiptFactory(), () => null);
+                System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> fallbackErrors;
+                BlueBrick.SolidWorks.Snapshots.FeatureTreeSnapshot fallbackSnap;
+                try { fallbackSnap = fallbackAdapter.ReadFeatureTree(new BlueBrick.Audit.Contracts.AuditRunRequest { CorrelationId = traceId, Mode = BlueBrick.Audit.Contracts.AuditOperationMode.READ_ONLY_ANALYST }, out fallbackErrors); }
+                catch (BlueBrick.SolidWorks.Runtime.SolidWorksThreadViolationException ex) { fallbackErrors = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> { new BlueBrick.Audit.Contracts.AuditError { Code = BlueBrick.Audit.Contracts.AuditErrorCodes.READ_FAILURE, CorrelationId = traceId, Message = ex.Message } }; fallbackSnap = new BlueBrick.SolidWorks.Snapshots.FeatureTreeSnapshot { Features = new System.Collections.Generic.List<BlueBrick.SolidWorks.Snapshots.FeatureSnapshot>(), Status = "partial", Limitations = new System.Collections.Generic.List<string>(), DocumentIdentityHash = string.Empty, TotalCount = 0, Truncated = false }; }
+                if (fallbackErrors==null) fallbackErrors=new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError>();
+                var fbNoDoc = fallbackErrors.Exists(e=>e.Code==BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT);
+                var fbTrunc = fallbackSnap.Limitations != null && fallbackSnap.Limitations.Contains(BlueBrick.SolidWorks.Snapshots.FeatureTreeSnapshot.LimitReachedCode);
+                var fbStatus = fbNoDoc?"empty": fallbackErrors.Count>0 || fbTrunc ?"partial": fallbackSnap.Status ?? "ok";
+                sw.Stop();
+                var fbMeta = new System.Collections.Generic.Dictionary<string,string>{ ["mutation_count"]="0",["duration_ms"]=sw.ElapsedMilliseconds.ToString(),["correlation"]=traceId??"",["mode"]="READ_ONLY_ANALYST",["status"]=fbStatus,["totalCount"]=fallbackSnap.TotalCount.ToString(),["featureCount"]=fallbackSnap.Features.Count.ToString() };
+                if (fbStatus=="partial") fbMeta["warning"]=BlueBrick.SolidWorks.Snapshots.FeatureTreeSnapshot.LimitReachedCode;
+                return new AssistantToolResult{ ToolName="solidworks.get_feature_tree", Status=fbStatus, Message=fbStatus=="empty"?"No feature tree.":"Feature tree captured.", ReadOnly=true, TraceId=traceId, Items=new System.Collections.Generic.List<AssistantToolResultItem>{ new AssistantToolResultItem{ Id="feature-tree", Title="Feature Tree", Subtitle=Newtonsoft.Json.JsonConvert.SerializeObject(fallbackSnap), Metadata=fbMeta } } };
+            }
+            catch (Exception ex) { sw.Stop(); return Fail("solidworks.get_feature_tree","error",ex.Message,traceId); }
+        }
+
         private AssistantToolResult WithReceipt(
             AssistantToolResult result,
             AssistantToolRequest request,
@@ -637,9 +838,17 @@ namespace BlueBrick.Agent
 
             try
             {
+                if ((_config.Pdm?.AllowAssistantReadOnlySearch ?? false) != true)
+                {
+                    return Fail("search_pdm", "disabled", "PDM capability is unavailable because server-side read-only permission is disabled. No PDM login was attempted.", traceId);
+                }
+
                 var vaultName = string.IsNullOrWhiteSpace(_config.Pdm?.VaultName) ? "_PDMVault" : _config.Pdm.VaultName;
                 var vault = new EdmVault5();
-                if (!vault.IsLoggedIn) vault.LoginAuto(vaultName, 0);
+                if (!vault.IsLoggedIn)
+                {
+                    return Fail("search_pdm", "auth_required", "PDM read-only search requires an already authenticated PDM session. No login was attempted.", traceId);
+                }
 
                 var search = (IEdmSearch6)vault.CreateUtility(EdmUtility.EdmUtil_Search);
                 search.SetToken(EdmSearchToken.Edmstok_FindFiles, true);

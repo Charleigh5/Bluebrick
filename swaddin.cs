@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using SolidWorks.Interop.sldworks;
@@ -70,6 +71,19 @@ namespace BlueBrick
 
         private BitmapHandler iBmp;
         //private int registerID;
+
+        internal static TServer StartAgentBridge<TServer>(
+            Func<AgentConfig> loadConfig,
+            Action<AgentConfig> configurePort,
+            Func<AgentConfig, TServer> createServer,
+            Action<TServer> startServer)
+        {
+            var config = loadConfig();
+            configurePort(config);
+            var server = createServer(config);
+            startServer(server);
+            return server;
+        }
 
 #if LAB_BUILD
         public const int mainCmdGroupID = 3215;
@@ -350,33 +364,67 @@ namespace BlueBrick
 
             try
             {
-                _agentConfig = AgentConfig.Load();
-                TraceDiagnostic("AgentConfig.Load complete");
+                _agentServer = StartAgentBridge(
+                    () =>
+                    {
+                        _agentConfig = AgentConfig.Load();
+                        return _agentConfig;
+                    },
+                    config =>
+                    {
+                        AgentPanelClient.Configure(config);
+                        TraceDiagnostic("AgentConfig.Load complete");
+                    },
+                    config =>
+                    {
+                        // Initialize the font loader with fonts from the configured path
+                        try
+                        {
+                            var assemblyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                            if (assemblyPath != null && config.UI?.Fonts?.FontsPath != null)
+                            {
+                                AgentFontLoader.Initialize(config);
+                                TraceDiagnostic("AgentFontLoader initialized");
+                            }
+                        }
+                        catch (Exception fontEx)
+                        {
+                            // Log font loading errors but don't block add-in startup
+                            Console.WriteLine("Font loader initialization failed: " + fontEx.Message);
+                            TraceDiagnostic("AgentFontLoader failed: " + fontEx);
+                        }
 
-                // Initialize the font loader with fonts from the configured path
-                try
-                {
-                var assemblyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                if (assemblyPath != null && _agentConfig.UI?.Fonts?.FontsPath != null)
-                {
-                    AgentFontLoader.Initialize(_agentConfig);
-                    TraceDiagnostic("AgentFontLoader initialized");
-                }
-                }
-                catch (Exception fontEx)
-                {
-                    // Log font loading errors but don't block add-in startup
-                    Console.WriteLine("Font loader initialization failed: " + fontEx.Message);
-                    TraceDiagnostic("AgentFontLoader failed: " + fontEx);
-                }
+                        _agentOverlay = new AgentOverlay(ParseColor(config.Agent.OverlayColor));
+                        TraceDiagnostic("AgentOverlay created");
+                        try
+                        {
+                            var dispatcherControl = TaskPanWinFormControl;
+                            var dispatcher = new BlueBrick.SolidWorks.Runtime.SolidWorksThreadGuard(
+                                Thread.CurrentThread.ManagedThreadId,
+                                action =>
+                                {
+                                    if (dispatcherControl == null || dispatcherControl.IsDisposed || !dispatcherControl.IsHandleCreated)
+                                    {
+                                        return false;
+                                    }
 
-                _agentOverlay = new AgentOverlay(ParseColor(_agentConfig.Agent.OverlayColor));
-                TraceDiagnostic("AgentOverlay created");
-                try { _auditComposition = SwApp != null ? new BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition(SwApp) : null; TraceDiagnostic("AuditComposition wired: " + (_auditComposition?.Runtime?.Classification.ToString() ?? "null")); } catch (Exception ex) { TraceDiagnostic("AuditComposition wire failed: " + ex); }
-                _agentServer = new AgentHttpServer(SwApp, _agentConfig, _agentOverlay, _auditComposition);
-                TraceDiagnostic("AgentHttpServer created");
-                _agentServer.Start();
-                TraceDiagnostic("AgentHttpServer started");
+                                    dispatcherControl.Invoke(action);
+                                    return true;
+                                });
+                            _auditComposition = SwApp != null ? new BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition(SwApp, dispatcher) : null;
+                            TraceDiagnostic("AuditComposition dispatcher control ready: " + (dispatcherControl != null && !dispatcherControl.IsDisposed && dispatcherControl.IsHandleCreated));
+                            TraceDiagnostic("AuditComposition wired: " + (_auditComposition?.Runtime?.Classification.ToString() ?? "null"));
+                        }
+                        catch (Exception ex) { TraceDiagnostic("AuditComposition wire failed: " + ex); }
+                        _agentServer = new AgentHttpServer(SwApp, config, _agentOverlay, _auditComposition);
+                        TraceDiagnostic("AgentHttpServer created");
+                        return _agentServer;
+                    },
+                    server =>
+                    {
+                        server.Start();
+                        TraceDiagnostic("AgentHttpServer started");
+                    });
 #if LAB_BUILD
                 if (_assistantWindow == null || _assistantWindow.IsDisposed)
                 {

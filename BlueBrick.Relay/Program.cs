@@ -12,6 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<RelayOptions>(builder.Configuration.GetSection("Relay"));
 builder.Services.Configure<OAuthOptions>(builder.Configuration.GetSection("OAuth"));
+builder.Services.Configure<ExecutionBoardOptions>(builder.Configuration.GetSection("ExecutionBoard"));
 builder.Services.AddSingleton<IRelayRepository, SqliteRelayRepository>();
 builder.Services.AddSingleton<DeviceTunnelRegistry>();
 builder.Services.AddSingleton<McpToolCatalog>();
@@ -38,6 +39,45 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+app.MapMethods("/execution-board/query", new[] { "OPTIONS", "POST" }, async (HttpContext context, IOptions<ExecutionBoardOptions> executionBoard, IRelayRepository repo) =>
+{
+    var options = executionBoard.Value;
+    if (!options.Enabled)
+    {
+        return Results.NotFound(new { error = "Local execution-board fixture is disabled." });
+    }
+
+    if (context.Connection.RemoteIpAddress is not null && !System.Net.IPAddress.IsLoopback(context.Connection.RemoteIpAddress))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var origin = context.Request.Headers.Origin.ToString();
+    if (options.AllowedOrigins.Length > 0 && !options.AllowedOrigins.Contains(origin, StringComparer.Ordinal))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    if (!string.IsNullOrWhiteSpace(origin))
+    {
+        context.Response.Headers.AccessControlAllowOrigin = origin;
+        context.Response.Headers.AccessControlAllowMethods = "POST, OPTIONS";
+        context.Response.Headers.AccessControlAllowHeaders = "content-type";
+        context.Response.Headers.Vary = "Origin";
+    }
+
+    if (HttpMethods.IsOptions(context.Request.Method))
+    {
+        return Results.NoContent();
+    }
+
+    var request = await context.Request.ReadFromJsonAsync<ExecutionBoardFixtureRequest>(context.RequestAborted) ?? new ExecutionBoardFixtureRequest();
+    var response = ExecutionBoardFixtureRouter.Route(request.Query, request.SessionId);
+    await repo.WriteAuditAsync("execution-board", "fixture-query", request.SessionId, response.Status, "local-fixture", context.RequestAborted);
+    response.PersistedReceipt = true;
+    return Results.Ok(response);
+});
 
 app.MapGet("/.well-known/oauth-protected-resource", (IOptions<RelayOptions> relay, IOptions<OAuthOptions> oauth) =>
 {

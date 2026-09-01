@@ -16,6 +16,7 @@ namespace BlueBrick.SolidWorks.Runtime
     {
         private readonly int _mainThreadId;
         private readonly SynchronizationContext _syncContext;
+        private readonly Func<Action, bool> _mainThreadInvoker;
 
         /// <summary>
         /// Construct the guard from the current managed thread ID. The
@@ -42,6 +43,19 @@ namespace BlueBrick.SolidWorks.Runtime
         {
             _mainThreadId = mainThreadId;
             _syncContext = syncContext;
+        }
+
+        /// <summary>
+        /// Construct a guard with an explicit synchronous UI-thread invoker.
+        /// The invoker must return <c>true</c> only after the action has run on
+        /// the proven SOLIDWORKS/UI thread. A WinForms <c>Control.Invoke</c>
+        /// bridge captured during <c>ConnectToSW</c> is the production use.
+        /// </summary>
+        public SolidWorksThreadGuard(int mainThreadId, Func<Action, bool> mainThreadInvoker)
+        {
+            _mainThreadId = mainThreadId;
+            _syncContext = null;
+            _mainThreadInvoker = mainThreadInvoker;
         }
 
         /// <inheritdoc />
@@ -74,6 +88,10 @@ namespace BlueBrick.SolidWorks.Runtime
                 action();
                 return true;
             }
+            if (_mainThreadInvoker != null)
+            {
+                return _mainThreadInvoker(action);
+            }
             if (_syncContext != null)
             {
                 Exception dispatchEx = null;
@@ -92,8 +110,8 @@ namespace BlueBrick.SolidWorks.Runtime
         {
             if (action == null) throw new ArgumentNullException(nameof(action));
             if (TryInvoke(action)) return;
-            throw new InvalidOperationException(
-                "Cannot marshal to proven main thread id=" + _mainThreadId + ". No SynchronizationContext was captured at ConnectToSW. Call snapshot on the main STA thread or wire a dispatcher via Control.Invoke.");
+            throw new SolidWorksThreadViolationException(
+                "Cannot marshal to proven main thread id=" + _mainThreadId + ". No usable SynchronizationContext or Control.Invoke dispatcher was captured at ConnectToSW.");
         }
     }
 

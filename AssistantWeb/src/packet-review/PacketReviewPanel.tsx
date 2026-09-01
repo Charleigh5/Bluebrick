@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from "pdfjs-dist";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+// Keep the legacy add-in package to its fixed index/CSS/JS triplet. Vite
+// embeds the PDF worker URL in assistant-web.js instead of emitting a fourth
+// dist member that the WebView host would not package.
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url&inline";
 import type { ActiveDocumentContext } from "../activeDocumentContext";
 import { comparePacketEvidenceToActiveDocument, type PhaseAComparison } from "../cad-compare/phaseAComparison";
 import { comparePacketBomToAssembly, type PhaseBComparisonReport } from "../cad-compare/phaseBComparison";

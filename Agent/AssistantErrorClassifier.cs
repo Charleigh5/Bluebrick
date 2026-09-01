@@ -100,6 +100,14 @@ namespace BlueBrick.Agent
         }
 
         // Legacy-compatible overload retained for existing call sites.
+        internal static AssistantErrorInfo FromProviderFailure(string body)
+        {
+            return new AssistantErrorInfo(
+                "provider_error",
+                ExtractSafeError(body, "AI provider request failed."));
+        }
+
+        // Legacy-compatible overload retained for existing call sites.
         internal static AssistantErrorInfo FromProviderFailure(string body, string provider, string model, int httpStatus)
         {
             return FromProviderFailure(provider, model, httpStatus, body);
@@ -176,20 +184,75 @@ namespace BlueBrick.Agent
                 var error = json["error"];
                 if (error is JObject errorObj)
                 {
-                    return SanitizeMessage(errorObj.Value<string>("message"), fallback);
+                    return ExtractSafeStructuredMessage(errorObj.Value<string>("message"), fallback);
                 }
 
                 if (error != null)
                 {
-                    return SanitizeMessage(error.ToString(), fallback);
+                    return ExtractSafeStructuredMessage(error.ToString(), fallback);
                 }
 
-                return SanitizeMessage(json.Value<string>("message"), fallback);
+                return ExtractSafeStructuredMessage(json.Value<string>("message"), fallback);
             }
             catch
             {
-                return SanitizeMessage(body, fallback);
+                return fallback;
             }
+        }
+
+        private static string ExtractSafeStructuredMessage(string value, string fallback)
+        {
+            if (IsSensitiveMessage(value))
+                return fallback;
+
+            var safe = SanitizeMessage(value, fallback);
+            return IsSensitiveMessage(safe) ? fallback : safe;
+        }
+
+        private static bool IsSensitiveMessage(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            var markers = new[]
+            {
+                "X-Agent-Auth", ".agent_token", "OPENAI_API_KEY", "NVIDIA_API_KEY",
+                "AssistantApiKey", "Authorization", "Bearer", "api_key", "apikey",
+                "access_token", "sk-", "nvapi-", "gsk_", "xai-", "AIza"
+            };
+
+            foreach (var marker in markers)
+            {
+                if (value.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+
+            var genericMarkers = new[] { "secret", "token", "password", "credential" };
+            foreach (var marker in genericMarkers)
+            {
+                var start = 0;
+                while (start < value.Length)
+                {
+                    var index = value.IndexOf(marker, start, StringComparison.OrdinalIgnoreCase);
+                    if (index < 0)
+                        break;
+
+                    var before = index == 0 ? '\0' : value[index - 1];
+                    var afterIndex = index + marker.Length;
+                    var after = afterIndex == value.Length ? '\0' : value[afterIndex];
+                    if (!IsLetterOrDigit(before) && !IsLetterOrDigit(after))
+                        return true;
+
+                    start = index + marker.Length;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsLetterOrDigit(char value)
+        {
+            return value != '\0' && char.IsLetterOrDigit(value);
         }
 
         // Prepends a parseable provenance tag to a wire/transcript error

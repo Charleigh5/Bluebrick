@@ -22,7 +22,16 @@ namespace BlueBrick.Agent
         private static readonly HashSet<string> DisabledActions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "start_local_generation",
-            "apply_safe_action"
+            "apply_safe_action",
+            "run_local_review"
+        };
+
+        private static readonly HashSet<string> ConfirmationActions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "capture_preview_screenshot",
+            "open_output_folder",
+            "reindex_local_vault",
+            "reset_local_vault"
         };
 
         internal PreviewPolicyDecision Evaluate(PreviewSession session, PreviewActionRequest request)
@@ -53,7 +62,7 @@ namespace BlueBrick.Agent
                 return PreviewPolicyDecision.Deny("Action is not allowed for this preview session.");
             }
 
-            return request.RequiresConfirmation
+            return request.RequiresConfirmation || ConfirmationActions.Contains(request.ActionName)
                 ? PreviewPolicyDecision.RequireConfirmation()
                 : PreviewPolicyDecision.Allow();
         }

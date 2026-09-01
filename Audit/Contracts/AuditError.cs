@@ -49,5 +49,11 @@ namespace BlueBrick.Audit.Contracts
 
         /// <summary>Bounded all-config limit was reached; remaining configurations were not read.</summary>
         public const string CONFIG_LIMIT_REACHED = "CONFIG_LIMIT_REACHED";
+
+        /// <summary>Bounded selection limit was reached; remaining selections were not read.</summary>
+        public const string SELECTION_LIMIT_REACHED = "SELECTION_LIMIT_REACHED";
+
+        /// <summary>Bounded feature tree limit was reached; remaining features were not read.</summary>
+        public const string FEATURE_LIMIT_REACHED = "FEATURE_LIMIT_REACHED";
     }
 }

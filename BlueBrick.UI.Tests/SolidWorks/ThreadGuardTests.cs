@@ -54,6 +54,69 @@ namespace BlueBrick.UI.Tests.SolidWorks
         }
 
         [TestMethod]
+        public void ThreadGuard_OffThread_UsesInjectedSynchronousInvoker()
+        {
+            var mainThreadId = Thread.CurrentThread.ManagedThreadId;
+            var dispatcherCalled = false;
+            var actionCalled = false;
+            var invokeReturned = false;
+            Exception workerError = null;
+            var guard = new SolidWorksThreadGuard(mainThreadId, action =>
+            {
+                dispatcherCalled = true;
+                action();
+                return true;
+            });
+
+            var worker = new Thread(() =>
+            {
+                try { invokeReturned = guard.TryInvoke(() => actionCalled = true); }
+                catch (Exception ex) { workerError = ex; }
+            });
+            worker.Start();
+            worker.Join();
+
+            Assert.IsNull(workerError);
+            Assert.IsTrue(invokeReturned);
+            Assert.IsTrue(dispatcherCalled);
+            Assert.IsTrue(actionCalled);
+        }
+
+        [TestMethod]
+        public void ThreadGuard_DeclinedInvoker_FailsClosedWithTypedViolation()
+        {
+            var guard = new SolidWorksThreadGuard(
+                Thread.CurrentThread.ManagedThreadId + 1,
+                action => false);
+
+            try
+            {
+                guard.Invoke(() => Assert.Fail("A declined dispatcher must not run the action."));
+                Assert.Fail("Expected a SolidWorksThreadViolationException.");
+            }
+            catch (SolidWorksThreadViolationException ex)
+            {
+                Assert.AreEqual(AuditErrorCodes.COM_THREAD_VIOLATION, ex.ErrorCode);
+                StringAssert.Contains(ex.Message, "No usable SynchronizationContext or Control.Invoke dispatcher");
+            }
+        }
+
+        [TestMethod]
+        public void ThreadGuard_MainThread_BypassesInjectedInvoker()
+        {
+            var dispatcherCalled = false;
+            var actionCalled = false;
+            var guard = new SolidWorksThreadGuard(
+                Thread.CurrentThread.ManagedThreadId,
+                action => { dispatcherCalled = true; return false; });
+
+            guard.Invoke(() => actionCalled = true);
+
+            Assert.IsTrue(actionCalled);
+            Assert.IsFalse(dispatcherCalled);
+        }
+
+        [TestMethod]
         public void Runtime_UnknownVersion_ReturnsReadOnlyLimited()
         {
             // Install-registry-derived runtime info MUST classify as UnknownReadOnly per packet §16.

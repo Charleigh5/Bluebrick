@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Text;
@@ -23,6 +24,13 @@ namespace BlueBrick.Agent
         };
 
         internal static string BaseUrl = "http://127.0.0.1:" + AppIdentity.BridgePort;
+
+        internal static void Configure(AgentConfig config)
+        {
+            var bridgePort = AgentConfig.ResolveBridgePort(config?.Agent?.BridgePort ?? 0, AppIdentity.BridgePort);
+
+            BaseUrl = "http://127.0.0.1:" + bridgePort.ToString(CultureInfo.InvariantCulture);
+        }
 
         internal static async Task<ApiResult<JObject>> GetJsonAsync(string path, IDictionary<string, string> query = null)
         {

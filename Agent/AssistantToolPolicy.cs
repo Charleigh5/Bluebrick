@@ -25,16 +25,18 @@ namespace BlueBrick.Agent
             string[] blockedSubstrings = new[] { "save", "save_as", "rebuild", "edit", "write", "config", "drawing", "bom", "checkout", "checkin", "batch" };
             foreach (var b in blockedSubstrings)
             {
-                if (lower.Contains(b) && !string.Equals(normalized, "solidworks.get_active_document_snapshot", StringComparison.OrdinalIgnoreCase))
+                if (lower.Contains(b) && !string.Equals(normalized, "solidworks.get_active_document_snapshot", StringComparison.OrdinalIgnoreCase) && !string.Equals(normalized, "solidworks.get_selection_snapshot", StringComparison.OrdinalIgnoreCase) && !string.Equals(normalized, "solidworks.get_feature_tree", StringComparison.OrdinalIgnoreCase))
                 {
                     return AssistantToolPolicyDecision.Deny("DENY", "Blocked mutation tool '" + b + "' denied by read-only policy.", true);
                 }
             }
-            if (lower.Contains("pdm") && !string.Equals(normalized, "search_pdm", StringComparison.OrdinalIgnoreCase) && !string.Equals(normalized, "solidworks.get_active_document_snapshot", StringComparison.OrdinalIgnoreCase))
+            if (lower.Contains("pdm") && !string.Equals(normalized, "search_pdm", StringComparison.OrdinalIgnoreCase) && !string.Equals(normalized, "solidworks.get_active_document_snapshot", StringComparison.OrdinalIgnoreCase) && !string.Equals(normalized, "solidworks.get_selection_snapshot", StringComparison.OrdinalIgnoreCase) && !string.Equals(normalized, "solidworks.get_feature_tree", StringComparison.OrdinalIgnoreCase))
             {
                 return AssistantToolPolicyDecision.Deny("DENY", "Blocked mutation tool 'pdm' denied by read-only policy.", true);
             }
             if (!string.Equals(normalized, "solidworks.get_active_document_snapshot", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(normalized, "solidworks.get_selection_snapshot", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(normalized, "solidworks.get_feature_tree", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(normalized, "search_local_vault", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(normalized, "search_pdm", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(normalized, "search_epicor", StringComparison.OrdinalIgnoreCase) &&
@@ -112,6 +114,67 @@ namespace BlueBrick.Agent
             }
 
             return AssistantToolPolicyDecision.Allow("unprotected_route", "Route is not in the protected CAD/PDM/lab set.", false);
+        }
+
+        internal AssistantToolPolicyDecision EvaluateCapability(
+            AssistantToolDescriptor descriptor,
+            AssistantToolRequest request,
+            AssistantToolInvocationSource source,
+            AssistantToolAuthorization trustedAuthorization,
+            string requestId,
+            string sessionId,
+            string environment,
+            DateTime nowUtc)
+        {
+            if (descriptor == null)
+            {
+                return AssistantToolPolicyDecision.Deny("unknown", "Unknown assistant capability.", true);
+            }
+
+            // Authorization is deliberately not deserialized from /assistant/tool. A direct
+            // in-process caller that presents a forged approval is denied as well.
+            if (request?.Authorization != null && request.Authorization.Granted)
+            {
+                return AssistantToolPolicyDecision.Deny(
+                    "untrusted_client_authorization",
+                    "Client-supplied authorization is request context, not execution authority.",
+                    true);
+            }
+
+            if (!descriptor.Enabled)
+            {
+                return AssistantToolPolicyDecision.Deny(
+                    "disabled",
+                    descriptor.UnavailableReason ?? "Capability is disabled.",
+                    false);
+            }
+
+            if (source == AssistantToolInvocationSource.Chat && !descriptor.AllowedInChat)
+            {
+                return AssistantToolPolicyDecision.Deny(
+                    "chat_not_allowed",
+                    "Capability is not available from the chat caller.",
+                    false);
+            }
+
+            var mutating = descriptor.Mutating ||
+                           descriptor.MutatesCad ||
+                           descriptor.MutatesPdm ||
+                           descriptor.MutatesEpicor ||
+                           descriptor.GenerationCapability;
+            if (mutating || !descriptor.ReadOnly)
+            {
+                if (trustedAuthorization == null ||
+                    !trustedAuthorization.IsValidFor(descriptor, request, requestId, sessionId, environment, nowUtc))
+                {
+                    return AssistantToolPolicyDecision.Deny(
+                        "approval_required",
+                        "Capability requires a trusted native approval bound to this request, arguments, session, and environment.",
+                        true);
+                }
+            }
+
+            return AssistantToolPolicyDecision.Allow("capability_allow", "Server capability policy allows this read-only capability.", descriptor.AuditRequired);
         }
 
         private static string Normalize(string value)

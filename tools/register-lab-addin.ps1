@@ -119,8 +119,14 @@ if (-not $isAdmin -and -not $WhatIfPreference -and -not $isPerUser) {
 }
 
 # --- Validate inputs -----------------------------------------------------
-if (-not (Test-Path $LabDllPath)) { throw "Lab DLL not found: $LabDllPath. Build Lab config first." }
-$LabDllPath = (Resolve-Path $LabDllPath).Path
+if (-not $Unregister -and -not (Test-Path -LiteralPath $LabDllPath)) { throw "Lab DLL not found: $LabDllPath. Build Lab config first." }
+if (Test-Path -LiteralPath $LabDllPath) {
+    $LabDllPath = (Resolve-Path -LiteralPath $LabDllPath).Path
+} elseif ($Unregister) {
+    # Unregister only needs the registry identity. The staged DLL may already
+    # have been removed by a first-time Lab rollback.
+    $LabDllPath = [IO.Path]::GetFullPath($LabDllPath)
+}
 
 # --- Optional staging to a space-free path -------------------------------
 if ($StageRoot -and -not $Unregister) {
@@ -130,11 +136,15 @@ if ($StageRoot -and -not $Unregister) {
     Copy-Item (Join-Path $srcDir '*') $StageRoot -Recurse -Force
     $LabDllPath = Join-Path $StageRoot (Split-Path $LabDllPath -Leaf)
 }
-$ver = (Get-Item $LabDllPath).VersionInfo.FileVersion
-if ($ver -ne $ExpectedVer) {
-    Write-Warn "Lab DLL version is $ver (expected $ExpectedVer) - proceeding anyway."
+$ver = if (Test-Path -LiteralPath $LabDllPath) { (Get-Item $LabDllPath).VersionInfo.FileVersion } else { 'not-present (unregister)' }
+if ($Unregister) {
+    Write-Step "Lab registry identity: $LabGuid  [$ver]"
+} else {
+    if ($ver -ne $ExpectedVer) {
+        Write-Warn "Lab DLL version is $ver (expected $ExpectedVer) - proceeding anyway."
+    }
+    Write-Step "Lab assembly: $LabDllPath  [$ver]"
 }
-Write-Step "Lab assembly: $LabDllPath  [$ver]"
 
 $codeBase = 'file:///' + ($LabDllPath -replace '\\','/' -replace ' ','%20').ToUpperInvariant()
 Write-Step "CodeBase (URI-encoded): $codeBase"

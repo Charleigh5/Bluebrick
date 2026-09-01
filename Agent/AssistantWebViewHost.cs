@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -11,6 +12,7 @@ namespace BlueBrick.Agent
     {
         private readonly WebView2 _webView;
         private readonly AgentConfig _config;
+        private readonly AssistantWebViewActivationState _activationState = new AssistantWebViewActivationState();
         private bool _disposed;
         private string _allowedDistRoot;
         private System.Windows.Forms.Timer _presentationProbeTimer;
@@ -18,6 +20,8 @@ namespace BlueBrick.Agent
         private int _presentationProbeAttemptCount;
         private bool _presentationProbeCaptureInFlight;
         private bool _diagnosticsProcessFailedHooked;
+        private readonly string _documentNonce = Guid.NewGuid().ToString("N");
+        private bool _trustedDocument;
         private System.Windows.Forms.Timer _bootstrapReadbackTimer;
         private int _bootstrapReadbackCount;
         private bool _bootstrapReadbackInFlight;
@@ -28,14 +32,30 @@ namespace BlueBrick.Agent
             _config = config ?? new AgentConfig();
         }
 
-        internal string LastLoadError { get; private set; }
-        internal bool LoadedReactShell { get; private set; }
+        internal string LastLoadError => _activationState.LastLoadError;
+        internal bool LoadedReactShell => _activationState.LoadedReactShell;
+        internal bool WebViewUsable => _activationState.WebViewUsable;
+
+        internal bool IsTrustedDocumentMessage(string sourceUri, string currentUri, string messageNonce)
+        {
+            return !_disposed &&
+                   _trustedDocument &&
+                   AssistantWebViewSecurity.IsTrustedPrivilegedMessage(
+                       sourceUri,
+                       currentUri,
+                       messageNonce,
+                       _documentNonce);
+        }
 
         internal async Task<bool> InitializeAsync(Func<string> fallbackShellHtml)
         {
+            var fallbackHtml = fallbackShellHtml == null
+                ? MinimalFallbackHtml()
+                : fallbackShellHtml();
             try
             {
-                var env = await CoreWebView2Environment.CreateAsync(userDataFolder: Path.GetTempPath()).ConfigureAwait(true);
+                Directory.CreateDirectory(AppIdentity.WebViewUserDataRoot);
+                var env = await CoreWebView2Environment.CreateAsync(userDataFolder: AppIdentity.WebViewUserDataRoot).ConfigureAwait(true);
                 _webView.CoreWebView2InitializationCompleted += WebView_CoreWebView2InitializationCompleted;
                 await _webView.EnsureCoreWebView2Async(env).ConfigureAwait(true);
                 ConfigureSecurity();
@@ -80,76 +100,56 @@ namespace BlueBrick.Agent
                     };
 
                 // BB-SPA-BOOTSTRAP-TELEMETRY-001: install before any page script runs.
-                _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
-                    AssistantWebViewDiagnostics.BootstrapTelemetryScript);
+                await _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                    BuildDocumentBindingScript() + Environment.NewLine + AssistantWebViewDiagnostics.BootstrapTelemetryScript).ConfigureAwait(true);
 
-                StartBootstrapReadbackTimer();
-
-                // StartPresentationProbe() disabled for bootstrap telemetry isolation
-                // (BB-SPA-BOOTSTRAP-TELEMETRY-001 T0). Implementation retained below.
-                var navigationReady = new TaskCompletionSource<bool>();
+                var navigationReady = new TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs>();
                 EventHandler<CoreWebView2NavigationCompletedEventArgs> completed = null;
                 completed = (s, e) =>
                 {
                     _webView.CoreWebView2.NavigationCompleted -= completed;
-                    navigationReady.TrySetResult(e.IsSuccess);
-                    if (!e.IsSuccess)
-                    {
-                        LastLoadError = "Assistant WebView navigation failed: " + e.WebErrorStatus;
-                    }
+                    navigationReady.TrySetResult(e);
                 };
                 _webView.CoreWebView2.NavigationCompleted += completed;
 
-                var loaded = LoadReactDist();
-                if (!loaded)
+                if (!StartReactNavigation())
                 {
-                    LoadedReactShell = false;
-                    _webView.NavigateToString(fallbackShellHtml == null ? MinimalFallbackHtml() : fallbackShellHtml());
+                    _webView.CoreWebView2.NavigationCompleted -= completed;
+                    return await NavigateFallbackAsync(fallbackHtml).ConfigureAwait(true);
                 }
 
                 var finished = await Task.WhenAny(navigationReady.Task, Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(true);
                 if (finished != navigationReady.Task)
                 {
-                    LastLoadError = "Assistant WebView navigation timed out.";
+                    _webView.CoreWebView2.NavigationCompleted -= completed;
+                    _activationState.RecordNavigationTimeout();
+                    return await NavigateFallbackAsync(fallbackHtml).ConfigureAwait(true);
                 }
 
-                // BB-SPA-BOOTSTRAP-TELEMETRY-001: one-shot read immediately after
-                // navigation settles, then a late read for slow/late failures.
-                var bootstrapCapture =
-                    AssistantWebViewDiagnostics.CaptureBootstrapAsync(
-                        _webView,
-                        "post_navigation");
-
-                var lateBootstrapCapture = Task.Run(async delegate
+                var navigation = await navigationReady.Task.ConfigureAwait(true);
+                if (!navigation.IsSuccess)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
-                    try
-                    {
-                        _webView.BeginInvoke((Action)(async delegate
-                        {
-                            try
-                            {
-                                await AssistantWebViewDiagnostics.CaptureBootstrapAsync(
-                                    _webView,
-                                    "late_8s");
-                            }
-                            catch { }
-                        }));
-                    }
-                    catch { }
-                });
+                    _activationState.RecordNavigationFailure(navigation.WebErrorStatus.ToString());
+                    return await NavigateFallbackAsync(fallbackHtml).ConfigureAwait(true);
+                }
 
+                _activationState.RecordNavigationSuccess();
+                _trustedDocument = AssistantWebViewSecurity.IsPrivilegedDocumentUri(_webView.Source == null ? null : _webView.Source.AbsoluteUri);
+                var bootstrapFailure = await WaitForReactBootstrapAsync().ConfigureAwait(true);
+                if (!string.IsNullOrWhiteSpace(bootstrapFailure))
+                {
+                    _activationState.RecordBootstrapFailure(bootstrapFailure);
+                    return await NavigateFallbackAsync(fallbackHtml).ConfigureAwait(true);
+                }
+
+                _activationState.RecordBootstrapSuccess();
+                StartBootstrapReadbackTimer();
                 return true;
             }
             catch (Exception ex)
             {
-                LastLoadError = ex.Message;
-                try
-                {
-                    _webView.NavigateToString(MinimalFallbackHtml());
-                }
-                catch { }
-                return false;
+                _activationState.RecordHostFailure(ex.Message);
+                return await NavigateFallbackAsync(fallbackHtml).ConfigureAwait(true);
             }
         }
 
@@ -157,7 +157,7 @@ namespace BlueBrick.Agent
         {
             if (!e.IsSuccess)
             {
-                LastLoadError = e.InitializationException?.Message ?? "WebView2 initialization failed.";
+                _activationState.RecordHostFailure(e.InitializationException?.Message ?? "WebView2 initialization failed.");
             }
         }
 
@@ -290,37 +290,48 @@ namespace BlueBrick.Agent
             _webView.CoreWebView2.Settings.IsScriptEnabled = true;
             _webView.CoreWebView2.NavigationStarting += (s, e) =>
             {
+                _trustedDocument = false;
                 if (!IsNavigationAllowed(e.Uri))
                 {
                     e.Cancel = true;
-                    LastLoadError = "Blocked WebView navigation: " + e.Uri;
+                    _activationState.RecordObservedError("Blocked WebView navigation: " + e.Uri);
                 }
             };
             _webView.CoreWebView2.NewWindowRequested += (s, e) => { e.Handled = true; };
         }
 
-        private bool LoadReactDist()
+        private bool StartReactNavigation()
         {
-            if ((_config.Assistant?.UseReactWebView ?? false) != true) return false;
             var distIndex = FindDistIndex();
-            if (string.IsNullOrWhiteSpace(distIndex) || !File.Exists(distIndex))
+            var distRoot = string.IsNullOrWhiteSpace(distIndex)
+                ? null
+                : Path.GetDirectoryName(distIndex);
+            var hasIndex = !string.IsNullOrWhiteSpace(distIndex) && File.Exists(distIndex);
+            var hasCss = !string.IsNullOrWhiteSpace(distRoot) &&
+                File.Exists(Path.Combine(distRoot, "assistant-index.css"));
+            var hasJavaScript = !string.IsNullOrWhiteSpace(distRoot) &&
+                File.Exists(Path.Combine(distRoot, "assistant-web.js"));
+
+            if (!_activationState.BeginReactLoad(
+                    _config.Assistant?.UseReactWebView ?? false,
+                    hasIndex,
+                    hasCss,
+                    hasJavaScript))
             {
-                LastLoadError = "AssistantWeb dist not found.";
                 return false;
             }
 
             if (_webView == null || _webView.CoreWebView2 == null)
             {
-                LastLoadError = "Assistant WebView core not ready.";
+                _activationState.RecordBootstrapFailure("WebView core was not ready.");
                 return false;
             }
 
             try
             {
-                string distRoot = Path.GetDirectoryName(distIndex);
                 if (string.IsNullOrWhiteSpace(distRoot) || !Directory.Exists(distRoot))
                 {
-                    LastLoadError = "AssistantWeb dist root missing.";
+                    _activationState.RecordBootstrapFailure("AssistantWeb dist root was missing.");
                     return false;
                 }
 
@@ -334,13 +345,94 @@ namespace BlueBrick.Agent
                 _allowedDistRoot = distRoot;
                 _webView.CoreWebView2.Navigate(
                     AssistantWebViewSecurity.ReactVirtualEntryUri.AbsoluteUri);
-                LoadedReactShell = true;
                 return true;
             }
             catch (Exception ex)
             {
-                LastLoadError = "Virtual host mapping failed: " + ex.Message;
-                LoadedReactShell = false;
+                _activationState.RecordBootstrapFailure("Virtual host mapping failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private async Task<string> WaitForReactBootstrapAsync()
+        {
+            string lastFailure = "bootstrap readiness did not complete.";
+            for (int attempt = 0; attempt < 40; attempt++)
+            {
+                try
+                {
+                    var receipt = await AssistantWebViewDiagnostics.CaptureBootstrapAsync(
+                        _webView,
+                        "activation_" + (attempt + 1).ToString("00")).ConfigureAwait(true);
+                    if (AssistantWebViewDiagnostics.IsReactBootstrapReady(receipt, out var failureReason))
+                        return null;
+
+                    lastFailure = failureReason ?? lastFailure;
+                }
+                catch (Exception ex)
+                {
+                    lastFailure = "bootstrap probe threw " + ex.GetType().Name + ".";
+                }
+
+                await Task.Delay(250).ConfigureAwait(true);
+            }
+
+            return lastFailure;
+        }
+
+        private async Task<bool> NavigateFallbackAsync(string fallbackHtml)
+        {
+            if (_webView == null || _webView.CoreWebView2 == null)
+            {
+                _activationState.RecordFallbackNavigationFailure("WebView core was not ready");
+                return false;
+            }
+
+            var coordinator = new AssistantWebViewFallbackNavigationCoordinator();
+            EventHandler<CoreWebView2NavigationCompletedEventArgs> completed = null;
+            completed = (sender, args) =>
+            {
+                _webView.CoreWebView2.NavigationCompleted -= completed;
+                coordinator.RecordCompleted(
+                    args.IsSuccess,
+                    args.IsSuccess ? "Success" : args.WebErrorStatus.ToString());
+            };
+
+            try
+            {
+                _trustedDocument = false;
+                _webView.CoreWebView2.NavigationCompleted += completed;
+                _activationState.RecordFallbackShown();
+                _webView.NavigateToString(string.IsNullOrWhiteSpace(fallbackHtml)
+                    ? MinimalFallbackHtml()
+                    : fallbackHtml);
+
+                var completedTask = await Task.WhenAny(
+                    coordinator.Completion,
+                    Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(true);
+                if (completedTask != coordinator.Completion)
+                {
+                    _webView.CoreWebView2.NavigationCompleted -= completed;
+                    coordinator.RecordTimeout();
+                }
+
+                var outcome = await coordinator.Completion.ConfigureAwait(true);
+                if (outcome == AssistantWebViewFallbackNavigationOutcome.Success)
+                {
+                    _activationState.RecordFallbackNavigationSuccess();
+                    return true;
+                }
+
+                if (outcome == AssistantWebViewFallbackNavigationOutcome.Timeout)
+                    _activationState.RecordFallbackNavigationTimeout();
+                else
+                    _activationState.RecordFallbackNavigationFailure("WebView2 reported navigation failure");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                try { _webView.CoreWebView2.NavigationCompleted -= completed; } catch { }
+                _activationState.RecordFallbackNavigationFailure(ex.Message);
                 return false;
             }
         }
@@ -396,10 +488,17 @@ namespace BlueBrick.Agent
             return "<!doctype html><html><body style='font-family:Segoe UI,Arial,sans-serif;background:#f8fafc;color:#111827'><strong>BlueBrick Assistant</strong><br/>Assistant WebView fallback loaded.</body></html>";
         }
 
+        private string BuildDocumentBindingScript()
+        {
+            var nonce = JsonConvert.SerializeObject(_documentNonce);
+            return "(() => { try { Object.defineProperty(window, '__blueBrickDocumentNonce', { value: " + nonce + ", writable: false, configurable: false, enumerable: false }); } catch (_) {} })();";
+        }
+
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
+            _trustedDocument = false;
             try
             {
                 if (_presentationProbeTimer != null)

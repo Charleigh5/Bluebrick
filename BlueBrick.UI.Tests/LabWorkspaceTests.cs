@@ -9,6 +9,7 @@ using BlueBrick.Agent;
 using BlueBrick.Vault;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.Win32;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace BlueBrick.UI.Tests
@@ -1037,6 +1038,103 @@ namespace BlueBrick.UI.Tests
         }
 
         [TestMethod]
+        public void AssistantErrorClassifier_ProviderFailure_UsesFallbackForPlaintextBodies()
+        {
+            var malformed = AssistantErrorClassifier.FromProviderFailure("upstream body <script>secret</script>");
+
+            Assert.AreEqual("provider_error", malformed.Code);
+            Assert.AreEqual("AI provider request failed.", malformed.Message);
+            Assert.IsFalse(malformed.Message.Contains("secret"));
+        }
+
+        [TestMethod]
+        public void AssistantErrorClassifier_ProviderFailure_DoesNotRelayOversizedPlaintext()
+        {
+            var oversized = new string('x', 301);
+            var classified = AssistantErrorClassifier.FromProviderFailure(oversized);
+
+            Assert.AreEqual("AI provider request failed.", classified.Message);
+            Assert.IsFalse(classified.Message.Contains(oversized));
+        }
+
+        [TestMethod]
+        public void AssistantErrorClassifier_ProviderFailure_UsesFallbackForCredentialLikeStructuredMessage()
+        {
+            var classified = AssistantErrorClassifier.FromProviderFailure(
+                "{\"error\":{\"message\":\"Authorization: Bearer sk-test-secret\"}}");
+
+            Assert.AreEqual("AI provider request failed.", classified.Message);
+            Assert.IsFalse(classified.Message.Contains("sk-test-secret"));
+            Assert.IsFalse(classified.Message.Contains("Authorization"));
+        }
+
+        [TestMethod]
+        public void AssistantErrorClassifier_ProviderFailure_RetainsBenignStructuredLengthCap()
+        {
+            var message = new string('q', 301);
+            var classified = AssistantErrorClassifier.FromProviderFailure(
+                "{\"error\":{\"message\":\"" + message + "\"}}");
+
+            Assert.AreEqual(303, classified.Message.Length);
+            StringAssert.StartsWith(classified.Message, new string('q', 300));
+            StringAssert.EndsWith(classified.Message, "...");
+        }
+
+        [TestMethod]
+        public void AssistantErrorClassifier_ProviderFailure_RejectsGenericCredentialMarkers()
+        {
+            var markers = new[] { "ToKeN", "password", "credential" };
+
+            foreach (var marker in markers)
+            {
+                var classified = AssistantErrorClassifier.FromProviderFailure(
+                    "{\"error\":{\"message\":\"provider " + marker + " leaked\"}}");
+
+                Assert.AreEqual("AI provider request failed.", classified.Message);
+                Assert.IsFalse(classified.Message.Contains(marker));
+            }
+        }
+
+        [TestMethod]
+        public void AssistantErrorClassifier_ProviderFailure_PreservesProvenanceRichContract()
+        {
+            var classified = AssistantErrorClassifier.FromProviderFailure(
+                "openai", "gpt-test", 429,
+                "{\"error\":{\"message\":\"quota exceeded\"}}");
+
+            Assert.AreEqual("provider_error", classified.Code);
+            Assert.AreEqual("quota exceeded", classified.Message);
+            Assert.AreEqual("openai", classified.Provider);
+            Assert.AreEqual("gpt-test", classified.Model);
+            Assert.AreEqual(429, classified.HttpStatus);
+            Assert.AreEqual("rate_limit", classified.Category);
+        }
+
+        [TestMethod]
+        public void AssistantErrorClassifier_ProviderFailure_ScreensSensitiveMarkerBeyondLengthCap()
+        {
+            var message = new string('q', 301) + " ToKeN: leaked";
+            var classified = AssistantErrorClassifier.FromProviderFailure(
+                "{\"error\":{\"message\":\"" + message + "\"}}");
+
+            Assert.AreEqual("AI provider request failed.", classified.Message);
+        }
+
+        [TestMethod]
+        public void AssistantErrorClassifier_ProviderFailure_PreservesGenericWordNearMisses()
+        {
+            var messages = new[] { "tokenization", "tokenized", "secretary" };
+
+            foreach (var message in messages)
+            {
+                var classified = AssistantErrorClassifier.FromProviderFailure(
+                    "{\"error\":{\"message\":\"" + message + "\"}}");
+
+                Assert.AreEqual(message, classified.Message);
+            }
+        }
+
+        [TestMethod]
         public void AssistantPanel_Builds_User_Facing_Classified_Error()
         {
             var message = AssistantPanel.BuildUserFacingError("provider_error", "quota exceeded");
@@ -1094,6 +1192,39 @@ namespace BlueBrick.UI.Tests
             StringAssert.Contains(shellHtml, "id='receiptGrid'");
             StringAssert.Contains(shellHtml, "id='integrationGrid'");
             StringAssert.Contains(shellHtml, "id='documentGrid'");
+        }
+
+        [TestMethod]
+        public void AssistantPanel_FallbackShell_BbAppend_Source_Contains_Object_And_Json_Payloads()
+        {
+            var shellHtml = typeof(AssistantPanel)
+                .GetMethod("BuildShellHtml", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                .Invoke(null, null) as string;
+
+            StringAssert.Contains(shellHtml, "window.bbAppend=function(raw)");
+            StringAssert.Contains(shellHtml, "if(raw==null||raw==='')return;");
+            StringAssert.Contains(shellHtml, "payload=typeof raw==='string'?JSON.parse(raw):raw;");
+            StringAssert.Contains(shellHtml, "if(!payload||typeof payload!=='object'||Array.isArray(payload))return;");
+            Assert.IsFalse(shellHtml.Contains("var payload=JSON.parse(raw);"));
+        }
+
+        [TestMethod]
+        public void AgentPanelClient_Configure_Uses_Configured_Bridge_Port()
+        {
+            var originalBaseUrl = AgentPanelClient.BaseUrl;
+            try
+            {
+                AgentPanelClient.Configure(new AgentConfig
+                {
+                    Agent = new AgentSettings { BridgePort = 35001 }
+                });
+
+                Assert.AreEqual("http://127.0.0.1:35001", AgentPanelClient.BaseUrl);
+            }
+            finally
+            {
+                AgentPanelClient.BaseUrl = originalBaseUrl;
+            }
         }
 
         [TestMethod]
@@ -2183,6 +2314,139 @@ namespace BlueBrick.UI.Tests
             Assert.IsTrue(parsed.Value<bool>("ok"));
             Assert.AreEqual("trace-1", parsed.Value<string>("correlationId"));
             Assert.IsInstanceOfType(parsed["models"], typeof(JArray));
+        }
+
+        [TestMethod]
+        public void AssistantWebViewSecurity_Requires_Trusted_Current_Document_And_Nonce()
+        {
+            var trusted = "https://bluebrick-ui.invalid/index.html";
+
+            Assert.IsTrue(AssistantWebViewSecurity.IsPrivilegedDocumentUri(trusted));
+            Assert.IsTrue(AssistantWebViewSecurity.IsTrustedPrivilegedMessage(trusted, trusted, "nonce-1", "nonce-1"));
+            Assert.IsFalse(AssistantWebViewSecurity.IsTrustedPrivilegedMessage("data:text/html,evil", trusted, "nonce-1", "nonce-1"));
+            Assert.IsFalse(AssistantWebViewSecurity.IsTrustedPrivilegedMessage("https://chatgpt.com/", trusted, "nonce-1", "nonce-1"));
+            Assert.IsFalse(AssistantWebViewSecurity.IsTrustedPrivilegedMessage(trusted, trusted, "nonce-old", "nonce-1"));
+            Assert.IsFalse(AssistantWebViewSecurity.IsTrustedPrivilegedMessage(trusted, "about:blank", "nonce-1", "nonce-1"));
+        }
+
+        [TestMethod]
+        public void AssistantToolRequest_Does_Not_Deserialize_Client_Authorization()
+        {
+            var request = JsonConvert.DeserializeObject<AssistantToolRequest>(
+                "{\"ToolName\":\"search_local_vault\",\"Authorization\":{\"Granted\":true,\"ApprovalId\":\"forged\"}}");
+
+            Assert.IsNotNull(request);
+            Assert.IsFalse(request.Authorization.Granted);
+        }
+
+        [TestMethod]
+        public async Task AssistantToolService_Denies_Forged_InProcess_Authorization()
+        {
+            var result = await new AssistantToolService(new AgentConfig()).ExecuteAsync(new AssistantToolRequest
+            {
+                ToolName = "search_local_vault",
+                Query = "bracket",
+                Authorization = new AssistantToolAuthorization { Granted = true, ApprovalId = "forged" }
+            }, "trace-forged-approval");
+
+            Assert.AreEqual("untrusted_client_authorization", result.Status);
+            Assert.IsFalse(result.Receipt.ApprovalGranted);
+            Assert.AreEqual("client_claim_ignored", result.Receipt.AuthorizationState);
+        }
+
+        [TestMethod]
+        public void ExecutionBoundaryPolicy_Denies_Sensitive_Routes_And_Side_Effects()
+        {
+            var cad = ExecutionBoundaryPolicy.EvaluateRoute("/sw/create_drawing", "POST");
+            var pdm = ExecutionBoundaryPolicy.EvaluateRoute("/pdm/search", "POST");
+            var local = ExecutionBoundaryPolicy.EvaluatePreviewAction("reset_local_vault");
+
+            Assert.IsFalse(cad.Allowed);
+            Assert.AreEqual("BB-CAD-EXECUTION-APPROVAL_REQUIRED", cad.Code);
+            Assert.IsFalse(pdm.Allowed);
+            Assert.AreEqual("BB-PDM-EXECUTION-APPROVAL_REQUIRED", pdm.Code);
+            Assert.IsFalse(local.Allowed);
+            Assert.AreEqual("BB-RUNTIME-LOCAL_SIDE_EFFECT_APPROVAL_REQUIRED", local.Code);
+        }
+
+        [TestMethod]
+        public void LabDeploymentContract_Separates_Runtime_And_Rollback_Targets()
+        {
+            var target = LabDeploymentTarget.Create("C:\\repo", "C:\\BlueBrickLab", "C:\\BlueBrick");
+            var plan = target.BuildRollbackPlan("C:\\BlueBrickLab\\backups\\run-1");
+
+            Assert.IsTrue(target.IsIsolatedFromProduction());
+            Assert.AreEqual("C:\\BlueBrickLab\\BlueBrick.Lab.dll", target.LabDllTarget);
+            Assert.AreEqual("C:\\BlueBrickLab\\config\\appsettings.lab.json", target.LabConfigTarget);
+            Assert.AreEqual(17179, target.LabBridgePort);
+            Assert.AreEqual(17178, target.ProductionBridgePort);
+            Assert.IsTrue(plan.NeverTouchesProduction);
+            Assert.AreEqual("C:\\BlueBrickLab\\BlueBrick.Lab.dll", plan.LabDllTarget);
+            Assert.AreEqual("C:\\BlueBrick\\BlueBrick.dll", plan.ProductionRuntimeRoot + "\\BlueBrick.dll");
+            StringAssert.Contains(plan.ProductionRegistryRoot, "BlueBrick");
+        }
+
+        [TestMethod]
+        public void AssistantToolCatalog_Exposes_Server_Capability_Metadata_And_Pdm_Gap()
+        {
+            var catalog = new AssistantToolService(new AgentConfig()).GetCatalog();
+            var local = catalog.Single(x => x.Name == "search_local_vault");
+            var pdm = catalog.Single(x => x.Name == "search_pdm");
+
+            Assert.AreEqual("search_local_vault", local.CapabilityId);
+            Assert.AreEqual("none_read_only", local.ApprovalPolicy);
+            Assert.IsTrue(local.ProductionAllowed);
+            Assert.IsFalse(pdm.Enabled);
+            StringAssert.Contains(pdm.UnavailableReason, "server-side");
+        }
+
+        [TestMethod]
+        public void ServerApproval_Binds_Request_Arguments_Session_And_Environment()
+        {
+            var request = new AssistantToolRequest
+            {
+                ToolName = "search_local_vault",
+                Query = "bracket",
+                Limit = 5,
+                ScopeId = "local",
+                SessionId = "lab-session"
+            };
+            var descriptor = new AssistantToolDescriptor
+            {
+                Name = request.ToolName,
+                CapabilityId = request.ToolName,
+                Enabled = true,
+                ReadOnly = true
+            };
+            var approval = AssistantToolAuthorization.CreateServerApproval(
+                "request-1",
+                descriptor.CapabilityId,
+                request,
+                request.SessionId,
+                "Lab",
+                "native-test",
+                "bounded test approval",
+                DateTime.UtcNow.AddMinutes(1));
+
+            Assert.IsTrue(approval.IsValidFor(descriptor, request, "request-1", "lab-session", "Lab", DateTime.UtcNow));
+            request.Query = "different-query";
+            Assert.IsFalse(approval.IsValidFor(descriptor, request, "request-1", "lab-session", "Lab", DateTime.UtcNow));
+        }
+
+        [TestMethod]
+        public void PreviewPolicy_Requires_Confirmation_For_Local_Side_Effects()
+        {
+            var policy = new PreviewActionPolicy();
+            var session = new PreviewSession { SessionId = "lab-session" };
+            var decision = policy.Evaluate(session, new PreviewActionRequest
+            {
+                SessionId = session.SessionId,
+                ActionName = "open_output_folder",
+                RequestedBy = "trusted-native-test"
+            });
+
+            Assert.IsTrue(decision.Allowed);
+            Assert.IsTrue(decision.RequiresConfirmation);
         }
 
         private static void SafeDelete(string path)

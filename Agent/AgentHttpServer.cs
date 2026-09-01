@@ -30,6 +30,7 @@ namespace BlueBrick.Agent
         private readonly GenerateReviewJobManager _generateReviewJobs;
         private readonly IAssistantService _assistantService;
         private readonly AssistantToolService _assistantTools;
+        private readonly ProtectedRouteIngressGate _protectedRouteIngress;
         private readonly ChatGptSessionStore _chatGptSessions;
         private readonly BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition _auditComposition;
         private readonly PreviewSessionCoordinator _previewSessions;
@@ -56,6 +57,7 @@ namespace BlueBrick.Agent
         _assistantService = new OpenAiAssistantService(config);
         _auditComposition = auditComposition ?? TryCreateAuditComposition(swApp);
         _assistantTools = new AssistantToolService(config, _assistantService, _auditComposition);
+        _protectedRouteIngress = new ProtectedRouteIngressGate(new InMemoryProtectedRouteDecisionReceiptStore());
         _chatGptSessions = new ChatGptSessionStore();
         _previewActionPolicy = new PreviewActionPolicy();
         _relayTunnel = new RelayTunnelClient(config, _telemetry, GetKnownSessionIds, HandleRelayInvocationAsync);
@@ -130,14 +132,38 @@ namespace BlueBrick.Agent
 
         private async Task HandleRequest(HttpListenerContext context, string traceId)
         {
-            // Verify authentication token
             var token = context.Request.Headers["X-Agent-Auth"];
             var expectedToken = GetAuthToken();
-            
-        if (string.IsNullOrEmpty(token) || token != expectedToken)
+            var invocation = await _protectedRouteIngress.InvokeAsync(new ProtectedRouteIngressRequest
+            {
+                Route = context.Request.Url.AbsolutePath,
+                Method = context.Request.HttpMethod,
+                IsAuthenticated = !string.IsNullOrEmpty(token) && token == expectedToken,
+                Origin = context.Request.Headers["Origin"]
+            }, normalized => DispatchAuthenticatedRequest(context, normalized.NormalizedRoute, normalized.HttpMethod, traceId)).ConfigureAwait(false);
+
+            if (!invocation.ContinuationInvoked)
+            {
+                if (!invocation.Decision.IsProtectedRoute && invocation.Decision.ErrorCode == "authentication_failed")
+                {
+                    context.Response.StatusCode = 403;
+                    await WriteJson(context, new { error = "Invalid or missing authentication token", traceId });
+                    return;
+                }
+                var receiptId = invocation.Decision.FinalReceipt?.ReceiptId ?? invocation.Decision.PreActionReceipt?.ReceiptId;
+                context.Response.StatusCode = invocation.Decision.StatusCode;
+                await WriteJson(context, new { error = invocation.Decision.Message, code = invocation.Decision.ErrorCode, receiptId, traceId });
+                return;
+            }
+        }
+
+        private async Task DispatchAuthenticatedRequest(HttpListenerContext context, string path, string method, string traceId)
+        {
+        var executionBoundary = ExecutionBoundaryPolicy.EvaluateRoute(path, method);
+        if (!executionBoundary.Allowed)
         {
             context.Response.StatusCode = 403;
-            await WriteJson(context, new { error = "Invalid or missing authentication token", traceId });
+            await WriteJson(context, new { error = executionBoundary.Message, code = executionBoundary.Code, traceId });
             return;
         }
 
@@ -148,30 +174,6 @@ namespace BlueBrick.Agent
             await WriteJson(context, new { error = "Request body too large", maxBytes = MaxRequestBodyBytes, traceId });
             return;
         }
-
-        var path = context.Request.Url.AbsolutePath.ToLowerInvariant();
-            
-            // Security: Origin/Referer check for PDM/CAD endpoints
-            if (path.StartsWith("/pdm/") || path.StartsWith("/sw/"))
-            {
-                var origin = context.Request.Headers["Origin"];
-                if (!string.IsNullOrEmpty(origin))
-                {
-                    Uri originUri = null;
-                    try { originUri = new Uri(origin); } catch { }
-                    
-                    if (originUri != null && 
-                        !originUri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) && 
-                        !originUri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
-                    {
-                        context.Response.StatusCode = 403;
-                        await WriteJson(context, new { error = "Origin not allowed", traceId });
-                        return;
-                    }
-                }
-            }
-
-            var method = context.Request.HttpMethod.ToUpperInvariant();
 
             if (path == "/agent/overlay/show" && method == "POST")
             {
@@ -308,6 +310,16 @@ namespace BlueBrick.Agent
             await WriteAssistantJson(context, new { tools = _assistantTools.GetCatalog(), traceId }, traceId).ConfigureAwait(false);
             return;
         }
+        if (path == "/assistant/capabilities" && method == "GET")
+        {
+            await WriteAssistantJson(context, new
+            {
+                capabilities = _assistantTools.GetCatalog(),
+                environment = AppIdentity.IsLabBuild ? "Lab" : "Production",
+                traceId
+            }, traceId).ConfigureAwait(false);
+            return;
+        }
         if (path == "/assistant/tool-audit" && method == "GET")
         {
             var limitRaw = context.Request.QueryString["limit"];
@@ -348,6 +360,28 @@ namespace BlueBrick.Agent
                 return;
             }
             await HandleAssistantSnapshotActiveDocument(context, traceId).ConfigureAwait(false);
+            return;
+        }
+        if (path == "/assistant/snapshot/selection" || path == "/assistant/snapshot/selection/")
+        {
+            if (!IsGet(context.Request))
+            {
+                context.Response.StatusCode = 405;
+                await WriteAssistantError(context, "method_not_allowed", "Method not allowed", traceId).ConfigureAwait(false);
+                return;
+            }
+            await HandleAssistantSnapshotSelection(context, traceId).ConfigureAwait(false);
+            return;
+        }
+        if (path == "/assistant/snapshot/feature-tree" || path == "/assistant/snapshot/feature-tree/")
+        {
+            if (!IsGet(context.Request))
+            {
+                context.Response.StatusCode = 405;
+                await WriteAssistantError(context, "method_not_allowed", "Method not allowed", traceId).ConfigureAwait(false);
+                return;
+            }
+            await HandleAssistantSnapshotFeatureTree(context, traceId).ConfigureAwait(false);
             return;
         }
 
@@ -947,6 +981,14 @@ private string ResolveVaultName()
 
     private async Task HandlePdmSearch(HttpListenerContext context, JObject json, string traceId)
     {
+        var boundary = ExecutionBoundaryPolicy.EvaluateRoute("/pdm/search", context.Request.HttpMethod);
+        if (!boundary.Allowed)
+        {
+            context.Response.StatusCode = 403;
+            await WriteJson(context, new { error = boundary.Message, code = boundary.Code, traceId });
+            return;
+        }
+
         var query = json.Value<string>("query");
         if (string.IsNullOrEmpty(query))
         {
@@ -985,6 +1027,14 @@ private string ResolveVaultName()
 
         private async Task HandlePdmGetProps(HttpListenerContext context, JObject json, string traceId)
         {
+            var boundary = ExecutionBoundaryPolicy.EvaluateRoute("/pdm/get_props", context.Request.HttpMethod);
+            if (!boundary.Allowed)
+            {
+                context.Response.StatusCode = 403;
+                await WriteJson(context, new { error = boundary.Message, code = boundary.Code, traceId });
+                return;
+            }
+
             var path = json.Value<string>("path");
             if (string.IsNullOrEmpty(path))
             {
@@ -1008,6 +1058,14 @@ private string ResolveVaultName()
 
     private async Task HandlePdmGetFile(HttpListenerContext context, JObject json, string traceId)
     {
+        var boundary = ExecutionBoundaryPolicy.EvaluateRoute("/pdm/get_file", context.Request.HttpMethod);
+        if (!boundary.Allowed)
+        {
+            context.Response.StatusCode = 403;
+            await WriteJson(context, new { error = boundary.Message, code = boundary.Code, traceId });
+            return;
+        }
+
         var path = json.Value<string>("path");
         if (string.IsNullOrEmpty(path))
         {
@@ -1274,6 +1332,8 @@ private string ResolveVaultName()
         private async Task HandleAssistantTool(HttpListenerContext context, JObject json, string traceId)
         {
             var request = json.ToObject<AssistantToolRequest>() ?? new AssistantToolRequest();
+            request.RequestId = traceId;
+            request.Environment = AppIdentity.IsLabBuild ? "Lab" : "Production";
             var result = await _assistantTools.ExecuteAsync(request, traceId).ConfigureAwait(false);
             if (result.Status == "invalid")
             {
@@ -1553,6 +1613,68 @@ private string ResolveVaultName()
             }, traceId).ConfigureAwait(false);
         }
 
+        private async Task HandleAssistantSnapshotSelection(HttpListenerContext context, string traceId)
+        {
+            if (_auditComposition == null)
+            {
+                context.Response.StatusCode = 503;
+                await WriteAssistantError(context, "unavailable", "Snapshot service unavailable", traceId).ConfigureAwait(false);
+                return;
+            }
+            try
+            {
+                System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> errors;
+                var snap = _auditComposition.GetSelectionSnapshot(traceId, traceId, out errors);
+                if (errors == null) errors = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError>();
+                var hasNoDoc = errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT);
+                var status = hasNoDoc ? "empty" : (errors.Count == 0 ? snap.Status ?? "ok" : "partial");
+                if (snap.Count == 0 && status == "ok") status = "empty";
+                await WriteAssistantJson(context, new { status, traceId, snapshot = snap, errors, runtime = new { classification = _auditComposition.Runtime?.Classification.ToString(), version = _auditComposition.Runtime?.Version?.DisplayVersion }, mainThreadId = _auditComposition.Guard?.MainThreadId }, traceId).ConfigureAwait(false);
+            }
+            catch (BlueBrick.SolidWorks.Runtime.SolidWorksThreadViolationException ex)
+            {
+                var errs = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> { new BlueBrick.Audit.Contracts.AuditError { Code = BlueBrick.Audit.Contracts.AuditErrorCodes.COM_THREAD_VIOLATION, CorrelationId = traceId, Message = ex.Message } };
+                var snap = new BlueBrick.SolidWorks.Snapshots.SelectionSnapshot { Count = 0, SelectionType = "None", SafeName = string.Empty, SelectionMark = -1, DocumentIdentityHash = string.Empty, Limitations = new System.Collections.Generic.List<string> { BlueBrick.Audit.Contracts.AuditErrorCodes.COM_THREAD_VIOLATION }, Status = "partial", Items = new System.Collections.Generic.List<BlueBrick.SolidWorks.Snapshots.SelectionEntry>() };
+                await WriteAssistantJson(context, new { status = "partial", traceId, snapshot = snap, errors = errs, mainThreadId = _auditComposition.Guard?.MainThreadId, note = "COM thread violation — selection snapshot must be called on main STA thread." }, traceId).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                var errs = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> { new BlueBrick.Audit.Contracts.AuditError { Code = BlueBrick.Audit.Contracts.AuditErrorCodes.READ_FAILURE, CorrelationId = traceId, Message = ex.Message } };
+                await WriteAssistantJson(context, new { status = "partial", traceId, snapshot = (object)null, errors = errs }, traceId).ConfigureAwait(false);
+            }
+        }
+
+        private async Task HandleAssistantSnapshotFeatureTree(HttpListenerContext context, string traceId)
+        {
+            if (_auditComposition == null)
+            {
+                context.Response.StatusCode = 503;
+                await WriteAssistantError(context, "unavailable", "Snapshot service unavailable", traceId).ConfigureAwait(false);
+                return;
+            }
+            try
+            {
+                System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> errors;
+                var snap = _auditComposition.GetFeatureTreeSnapshot(traceId, traceId, out errors);
+                if (errors == null) errors = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError>();
+                var hasNoDoc = errors.Exists(e => e.Code == BlueBrick.Audit.Contracts.AuditErrorCodes.NO_ACTIVE_DOCUMENT);
+                var status = hasNoDoc ? "empty" : (errors.Count == 0 ? snap.Status ?? "ok" : "partial");
+                if (snap.Features.Count == 0 && status == "ok") status = "empty";
+                await WriteAssistantJson(context, new { status, traceId, snapshot = snap, errors, runtime = new { classification = _auditComposition.Runtime?.Classification.ToString(), version = _auditComposition.Runtime?.Version?.DisplayVersion }, mainThreadId = _auditComposition.Guard?.MainThreadId }, traceId).ConfigureAwait(false);
+            }
+            catch (BlueBrick.SolidWorks.Runtime.SolidWorksThreadViolationException ex)
+            {
+                var errs = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> { new BlueBrick.Audit.Contracts.AuditError { Code = BlueBrick.Audit.Contracts.AuditErrorCodes.COM_THREAD_VIOLATION, CorrelationId = traceId, Message = ex.Message } };
+                var snap = new BlueBrick.SolidWorks.Snapshots.FeatureTreeSnapshot { Features = new System.Collections.Generic.List<BlueBrick.SolidWorks.Snapshots.FeatureSnapshot>(), Status = "partial", Limitations = new System.Collections.Generic.List<string> { BlueBrick.Audit.Contracts.AuditErrorCodes.COM_THREAD_VIOLATION }, DocumentIdentityHash = string.Empty, TotalCount = 0, Truncated = false };
+                await WriteAssistantJson(context, new { status = "partial", traceId, snapshot = snap, errors = errs, mainThreadId = _auditComposition.Guard?.MainThreadId, note = "COM thread violation — feature tree snapshot must be called on main STA thread." }, traceId).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                var errs = new System.Collections.Generic.List<BlueBrick.Audit.Contracts.AuditError> { new BlueBrick.Audit.Contracts.AuditError { Code = BlueBrick.Audit.Contracts.AuditErrorCodes.READ_FAILURE, CorrelationId = traceId, Message = ex.Message } };
+                await WriteAssistantJson(context, new { status = "partial", traceId, snapshot = (object)null, errors = errs }, traceId).ConfigureAwait(false);
+            }
+        }
+
         private async Task HandleAssistantHistory(HttpListenerContext context, string traceId)
         {
             var sessionId = context.Request.QueryString["sessionId"];
@@ -1696,39 +1818,14 @@ private string ResolveVaultName()
 
         private async Task HandleChatGptConfirm(HttpListenerContext context, PreviewSession session, JObject json, string traceId)
         {
-            var confirmation = json.ToObject<PreviewConfirmationRequest>() ?? new PreviewConfirmationRequest();
-            var pending = _previewSessions.ResolveConfirmation(session, confirmation.ConfirmationId);
-            if (pending == null)
+            context.Response.StatusCode = 403;
+            await WriteJson(context, new
             {
-                context.Response.StatusCode = 404;
-                await WriteJson(context, new { error = "confirmation not found", traceId }).ConfigureAwait(false);
-                return;
-            }
-
-            session.PendingConfirmations.Remove(pending);
-            if (!confirmation.Approved)
-            {
-                var denied = BuildActionResult(session.SessionId, pending.ActionName, "denied",
-                    string.IsNullOrWhiteSpace(confirmation.Reason) ? "Action denied by operator." : confirmation.Reason,
-                    traceId);
-                session.History.Add(denied);
-                _previewSessions.Save(session);
-                await WriteJson(context, denied).ConfigureAwait(false);
-                return;
-            }
-
-            var request = new PreviewActionRequest
-            {
-                SessionId = session.SessionId,
-                ActionName = pending.ActionName,
-                Parameters = pending.Parameters,
-                RequestedBy = "operator-confirmed",
-                RequiresConfirmation = false
-            };
-            var result = await _previewActionExecutor.ExecuteAsync(session, request, traceId).ConfigureAwait(false);
-            session.History.Add(result);
-            _previewSessions.Save(session);
-            await WriteJson(context, result).ConfigureAwait(false);
+                error = "Trusted native confirmation is not available for external ChatGPT/relay callers.",
+                code = "BB-AUTH-TRUSTED_CONFIRMATION_UNAVAILABLE",
+                traceId
+            }).ConfigureAwait(false);
+            return;
         }
 
         private async Task<PreviewActionResult> ExecutePreviewActionAsync(PreviewSession session, PreviewActionRequest request, string traceId)
@@ -1780,6 +1877,13 @@ private string ResolveVaultName()
 
         private async Task<PreviewActionResult> HandleRelayInvocationAsync(RelayToolInvocation invocation)
         {
+            if (!_relayTunnel.IsTrustedChannel)
+            {
+                return BuildActionResult(invocation?.SessionId, invocation?.ToolName, "denied",
+                    "Relay channel is not trusted or is not configured with a registration token. [BB-AUTH-RELAY_UNTRUSTED]",
+                    Guid.NewGuid().ToString("N"));
+            }
+
             var session = _previewSessions.Get(invocation?.SessionId);
             if (session == null)
             {
@@ -1790,10 +1894,20 @@ private string ResolveVaultName()
             {
                 SessionId = session.SessionId,
                 ActionName = invocation.ToolName,
-                RequestedBy = invocation.RequestedBy,
+                RequestedBy = "trusted-relay",
                 RequiresConfirmation = false,
                 Parameters = invocation.Arguments ?? new Dictionary<string, string>()
             };
+
+            var policyDecision = _previewActionPolicy.Evaluate(session, request);
+            if (!policyDecision.Allowed || policyDecision.RequiresConfirmation)
+            {
+                return BuildActionResult(session.SessionId, request.ActionName, "denied",
+                    policyDecision.RequiresConfirmation
+                        ? "Relay cannot supply trusted native confirmation. [BB-AUTH-RELAY_CONFIRMATION_REQUIRED]"
+                        : policyDecision.Reason,
+                    Guid.NewGuid().ToString("N"));
+            }
 
             var decision = _previewActionPolicy.Evaluate(session, request);
             if (!decision.Allowed)
@@ -1894,13 +2008,23 @@ private string ResolveVaultName()
 
         private static string GetTraceId(HttpListenerContext context)
         {
-            var traceId = context.Request.Headers["X-Trace-Id"];
-            if (string.IsNullOrEmpty(traceId))
+            var traceId = context.Request.Headers["X-Request-Id"] ?? context.Request.Headers["X-Trace-Id"];
+            if (!IsSafeTraceId(traceId))
             {
                 traceId = Guid.NewGuid().ToString();
             }
             context.Response.Headers["X-Trace-Id"] = traceId;
             return traceId;
+        }
+
+        private static bool IsSafeTraceId(string traceId)
+        {
+            if (string.IsNullOrWhiteSpace(traceId) || traceId.Length > 128) return false;
+            foreach (var ch in traceId)
+            {
+                if (!(char.IsLetterOrDigit(ch) || ch == '-' || ch == '_' || ch == ':' || ch == '.')) return false;
+            }
+            return true;
         }
         
         private static string GetAuthToken()

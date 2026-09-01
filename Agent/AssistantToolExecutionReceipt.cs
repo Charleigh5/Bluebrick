@@ -10,6 +10,12 @@ namespace BlueBrick.Agent
         public string CorrelationId { get; set; }
         public string TraceId { get; set; }
         public string ToolName { get; set; }
+        public string RequestId { get; set; }
+        public string SessionId { get; set; }
+        public string Environment { get; set; }
+        public string CapabilityId { get; set; }
+        public string ExecutionBoundary { get; set; }
+        public string AuthorizationState { get; set; }
         public string Mode { get; set; } = "READ_ONLY_ANALYST";
         public string Version { get; set; } = string.Empty;
         public string DocumentType { get; set; } = "Unknown";
@@ -41,6 +47,7 @@ namespace BlueBrick.Agent
             request = request ?? new AssistantToolRequest();
             policy = policy ?? AssistantToolPolicyDecision.Deny("unknown_policy", "Policy decision missing.", true);
             authorization = authorization ?? AssistantToolAuthorization.None();
+            var serverApprovalGranted = authorization.Granted && authorization.IsServerIssued;
             var warnings = new List<string>();
             var errorCodes = new List<string>();
             if (!policy.Allowed) errorCodes.Add(policy.Code ?? "DENY");
@@ -52,6 +59,12 @@ namespace BlueBrick.Agent
                 CorrelationId = traceId ?? string.Empty,
                 TraceId = traceId,
                 ToolName = request.ToolName ?? string.Empty,
+                RequestId = request.RequestId ?? traceId ?? string.Empty,
+                SessionId = request.SessionId ?? string.Empty,
+                Environment = request.Environment ?? string.Empty,
+                CapabilityId = descriptor?.CapabilityId ?? descriptor?.Name ?? string.Empty,
+                ExecutionBoundary = descriptor?.ExecutionBoundary ?? "assistant_tool_service",
+                AuthorizationState = serverApprovalGranted ? "server_issued" : (authorization.Granted ? "client_claim_ignored" : "none"),
                 Mode = "READ_ONLY_ANALYST",
                 Version = descriptor?.AllowedModes != null && descriptor.AllowedModes.Length > 0 ? string.Join(",", descriptor.AllowedModes) : "READ_ONLY_ANALYST",
                 DocumentType = "Unknown",
@@ -64,8 +77,8 @@ namespace BlueBrick.Agent
                 Allowed = policy.Allowed,
                 ReadOnly = descriptor == null || descriptor.ReadOnly,
                 ApprovalRequired = descriptor?.RequiresConfirmation == true || policy.RequiresReceipt,
-                ApprovalGranted = authorization.Granted,
-                ApprovalId = authorization.ApprovalId ?? string.Empty,
+                ApprovalGranted = serverApprovalGranted,
+                ApprovalId = serverApprovalGranted ? authorization.ApprovalId ?? string.Empty : string.Empty,
                 PolicyCode = policy.Code,
                 ResultStatus = resultStatus,
                 Message = message,

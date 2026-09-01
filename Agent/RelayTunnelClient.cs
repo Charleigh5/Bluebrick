@@ -45,6 +45,13 @@ namespace BlueBrick.Agent
 
         internal RelayTunnelState State { get; }
 
+        internal bool IsTrustedChannel =>
+            _config?.Relay != null &&
+            _config.Relay.Enabled &&
+            !string.IsNullOrWhiteSpace(_config.Relay.BaseUrl) &&
+            !string.IsNullOrWhiteSpace(_config.Relay.RegistrationToken) &&
+            State.Connected;
+
         internal void Start()
         {
             if (!_config.Relay.Enabled || string.IsNullOrWhiteSpace(_config.Relay.BaseUrl) || _runLoop != null)

@@ -514,3 +514,28 @@
     grid-template-columns: 1fr;
   }
 }
+
+@media (max-width: 300px) {
+  .vira-lab-shell {
+    padding: 6px;
+    gap: 8px;
+  }
+
+  .vira-lab-runtime-cluster {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .vira-lab-runtime,
+  .vira-lab-state,
+  .diagnostic-count {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .vira-lab-panel {
+    padding: 9px;
+  }
+}
