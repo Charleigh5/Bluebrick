@@ -1,0 +1,10 @@
+{
+  "schema":"bluebrick.epicor-acceptance.v1",
+  "runId":"20260902-095413",
+  "historicalPath":"ClsEpicor.cs direct SQL callers: EpiSearch, ProductCat, UsageSearch, TaskSearch, QuoteAttach, OppEmail",
+  "v2Path":"AssistantToolService search_epicor is parameterized and part-only",
+  "labConfig":"disabled",
+  "readOnlyQuery":"NOT_ATTEMPTED",
+  "writes":"NONE",
+  "result":"BLOCKED_EXTERNAL"
+}

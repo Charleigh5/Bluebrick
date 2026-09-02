@@ -1,0 +1,34 @@
+{
+  "schema": "bluebrick.beta-pretest-state.v1",
+  "runId": "20260902-095413",
+  "capturedUtc": "2026-09-02T13:55:19.6975850Z",
+  "repository": {
+    "path": "C:\\Users\\cweir\\Documents\\GitHub\\VIRA GITHUB\\Bluebrick",
+    "branch": "bluebrick-assistant-slice1-foundation",
+    "head": "9a26e89bb2c7e320924b39a7edc65fa86fa0559f",
+    "trackedDirtyBeforeLive": ["AssistantWeb/dist/assistant-index.css","AssistantWeb/dist/assistant-web.js"],
+    "usefulUntrackedBeforeLive": ["artifacts/"]
+  },
+  "roots": {"lab":"C:\\BlueBrickLab","production":"C:\\BlueBrick","distinct":true},
+  "production": {
+    "dllSha256":"C6C38DF37B5853D8D97D09D0FA7236735A4B6F0933CE7D4923E9C5D269CC10AE",
+    "configSha256":"2BC0B3E19169ADCC6C59376956B2F5E3B30034235C507DB5EB5CB0E3F93A9091",
+    "bridgePort":17178
+  },
+  "lab": {
+    "dllSha256":"32B5271C35D89DB55C5C566B6B905B11C43555B86E21DFBDB606033C5F97D9FE",
+    "configSha256":"D4EC9F049E09F4815428406AC6E09F2F48C8A5BE42478C9F98ED471E5AE1C3B5",
+    "bridgePort":17179,
+    "useReactWebView":true,
+    "pdmAssistantEnabled":false,
+    "epicorEnabled":false
+  },
+  "solidWorks": {
+    "version":"2025 SP5.0",
+    "existingUserProcess":{"pid":34736,"windowTitle":"SOLIDWORKS Professional 2025 SP5.0 - [80242726.SLDASM *]","dirtyMarker":true,"sessionHandling":"DO_NOT_TERMINATE_OR_ATTACH"},
+    "labProcess":{"pid":23756,"windowTitle":"SOLIDWORKS Professional 2025 SP5.0","dirtyMarker":false,"launchedBy":"Lab controller","dllLoaded":false},
+    "port17179":"NOT_LISTENING"
+  },
+  "externalSystems": {"database":"NOT_ATTEMPTED","pdm":"NOT_ATTEMPTED","epicor":"NOT_ATTEMPTED"},
+  "priorRecoveryRoot":"C:\\VIRA-Recovery\\BlueBrick\\20260901-163846"
+}

@@ -1,0 +1,22 @@
+{
+  "schema":"bluebrick.beta-runtime-identity.v1",
+  "runId":"20260902-095413",
+  "sourceCommit":"9a26e89bb2c7e320924b39a7edc65fa86fa0559f",
+  "identityLabel":"LAB | BlueBrick 2.0 | 9a26e89bb2c7e320924b39a7edc65fa86fa0559f | 20260902-095413",
+  "buildUtc":"2026-09-02T13:54:24.2747056Z",
+  "packageVersion":"0.1.0",
+  "entrypoint":"AssistantWeb/src/main.tsx -> App.tsx",
+  "schemaVersion":"2026-06-01.v1",
+  "assetManifest":["index.html","assistant-index.css","assistant-web.js"],
+  "assetSha256":{
+    "index.html":"E370C9711592F2695CF0651F702AE809A69AC0DE9B635C6C5B4CC8A4A6C7237B",
+    "assistant-index.css":"8B0281A263CD60E9A83A3CE332DC6D0C9A3BE2525337F3E3847080CFB5C87B27",
+    "assistant-web.js":"E5A698929EAF2EEAC9B2F348C36F427EAD052BA5B5FE55E4F3659407E4CEE20F"
+  },
+  "sourceToBinLabByteParity":true,
+  "expectedLoadedWebViewUri":"https://bluebrick-ui.invalid/index.html",
+  "observedLoadedWebViewUri":"UNKNOWN",
+  "observedDomMarker":"UNKNOWN",
+  "liveResult":"LIVE_IDENTITY_NOT_PROVEN",
+  "failureCode":"LIVE_RUNTIME_NOT_ACTIVATED"
+}

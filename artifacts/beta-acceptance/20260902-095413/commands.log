@@ -1,0 +1,22 @@
+RUN_ID=20260902-095413
+SOURCE_COMMIT=9a26e89bb2c7e320924b39a7edc65fa86fa0559f
+Vite build with VITE_BLUEBRICK_ENVIRONMENT=LAB, source commit, run ID, and UTC: PASS
+npm run typecheck: PASS
+npm run verify:transport: PASS
+npm run verify:ui-activation: PASS
+npm run verify:replay: PASS
+npm run test:execution-board: PASS
+npm run test:vira-lab: PASS
+bluebrick.ps1 -Action build -Target Lab -Configuration Lab: PASS
+npm run verify:output-lab: PASS
+vstest BlueBrick.UI.Tests.dll: 266 passed, 1 skipped, 0 failed of 267
+vstest BlueBrick.Relay.Tests.dll: 4 passed, 0 failed
+bluebrick.ps1 -Action doctor -Target Lab -Json: PASS; Production intentionally DEGRADED/hash-distinct
+bluebrick.ps1 -Action prepare -Target Lab: PASS; no changes
+bluebrick.ps1 -Action launch -Target Lab: PASS dry-run
+bluebrick.ps1 -Action rollback -Target Lab: PASS dry-run
+bluebrick.ps1 -Action smoke -Target Lab: PASS entry evidence; one non-fatal ReleaseComObject warning
+bluebrick.ps1 -Action launch -Target Lab -Execute: PASS staging/registration/launch request
+Live observation: Lab PID 23756 responsive, no BlueBrick.Lab.dll loaded, 17179 not listening, no fresh WebView telemetry
+bluebrick.ps1 -Action rollback -Target Lab -BackupRoot C:/BlueBrickLab/backups/20260902-095613 -Execute: PASS
+Production before/after hash check: PASS; productionMutationObserved=false

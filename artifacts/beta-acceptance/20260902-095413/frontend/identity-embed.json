@@ -1,0 +1,11 @@
+{
+  "schema":"bluebrick.frontend-identity-embed.v1",
+  "runId":"20260902-095413",
+  "bundle":"AssistantWeb/dist/assistant-web.js",
+  "identityLabel":"LAB | BlueBrick 2.0 | 9a26e89bb2c7e320924b39a7edc65fa86fa0559f | 20260902-095413",
+  "embeddingMethod":"literal import.meta.env.VITE_* access compiled by Vite",
+  "domMarker":"data-bluebrick-runtime-identity",
+  "surfaceCoverage":["default","hardware-cad","execution-board","vira-lab"],
+  "assetManifest":"index.html,assistant-index.css,assistant-web.js",
+  "result":"PASS_STATIC_NOT_LIVE"
+}

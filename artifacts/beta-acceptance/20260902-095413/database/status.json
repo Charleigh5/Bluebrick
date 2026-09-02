@@ -1,0 +1,9 @@
+{
+  "schema":"bluebrick.database-acceptance.v1",
+  "runId":"20260902-095413",
+  "v2LocalVault":"file-backed JSON index; source mapped only",
+  "v2RelayDatabase":"isolated SQLite path covered by 4 passing tests",
+  "legacyBusinessDatabase":"Epicor/PDM SQL architecture source mapped; schema/query not executed",
+  "result":"BLOCKED_EXTERNAL",
+  "reason":"Lab bridge was not active; no external SQL query was authorized without a safe runtime path"
+}

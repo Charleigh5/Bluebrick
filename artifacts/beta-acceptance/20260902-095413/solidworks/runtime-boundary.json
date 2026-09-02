@@ -1,0 +1,9 @@
+{
+  "schema":"bluebrick.solidworks-runtime-boundary.v1",
+  "runId":"20260902-095413",
+  "registration":{"clsid":"{251d6df2-3e7b-42ef-b7fc-175e1fdcb4c5}","title":"BlueBrick Lab","codeBase":"file:///C:/BLUEBRICKLAB/BLUEBRICK.LAB.DLL","perUserStartup":1,"result":"PASS_ENTRY_BOUNDARY"},
+  "labProcess":{"pid":23756,"responding":true,"windowTitle":"SOLIDWORKS Professional 2025 SP5.0","blueBrickDllLoaded":false,"bridge17179":"NOT_LISTENING","freshWebViewTelemetry":"NOT_OBSERVED"},
+  "existingProcess":{"pid":34736,"windowTitle":"SOLIDWORKS Professional 2025 SP5.0 - [80242726.SLDASM *]","dirtyMarker":true,"action":"PRESERVED"},
+  "rollback":{"backupRoot":"C:\\BlueBrickLab\\backups\\20260902-095613","executeExit":0,"productionTargeted":false},
+  "result":"LIVE_ACTIVATION_BLOCKED"
+}

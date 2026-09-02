@@ -1,0 +1,40 @@
+{
+  "schema": "bluebrick.runtime-identity-manifest.v1",
+  "runId": "20260902-095413",
+  "sourceCommit": "9a26e89bb2c7e320924b39a7edc65fa86fa0559f",
+  "expected": {
+    "environment": "LAB",
+    "product": "BlueBrick 2.0",
+    "frontendId": "BlueBrick React AssistantWeb",
+    "sourceDirectory": "AssistantWeb",
+    "entrypoint": "AssistantWeb/src/main.tsx -> App.tsx",
+    "framework": "React 19 + Vite 8.0.16",
+    "buildCommand": "VITE_BLUEBRICK_ENVIRONMENT=LAB VITE_BLUEBRICK_SOURCE_COMMIT=<commit> VITE_BLUEBRICK_BUILD_ID=<run-id> VITE_BLUEBRICK_BUILD_UTC=<utc> npm run build",
+    "buildId": "20260902-095413",
+    "buildUtc": "2026-09-02T13:54:24.2747056Z",
+    "packageVersion": "0.1.0",
+    "schemaVersion": "2026-06-01.v1",
+    "assetManifest": ["index.html","assistant-index.css","assistant-web.js"],
+    "loadedWebViewUri": "https://bluebrick-ui.invalid/index.html",
+    "backend": {"environment":"Lab","dll":"C:\\BlueBrickLab\\BlueBrick.Lab.dll","dllSha256":"32B5271C35D89DB55C5C566B6B905B11C43555B86E21DFBDB606033C5F97D9FE","config":"C:\\BlueBrickLab\\config\\appsettings.lab.json","configSha256":"D4EC9F049E09F4815428406AC6E09F2F48C8A5BE42478C9F98ED471E5AE1C3B5","bridge":"127.0.0.1:17179"}
+  },
+  "builtArtifact": {
+    "identityLabel": "LAB | BlueBrick 2.0 | 9a26e89bb2c7e320924b39a7edc65fa86fa0559f | 20260902-095413",
+    "assetSha256": {
+      "AssistantWeb/dist/index.html":"E370C9711592F2695CF0651F702AE809A69AC0DE9B635C6C5B4CC8A4A6C7237B",
+      "AssistantWeb/dist/assistant-index.css":"8B0281A263CD60E9A83A3CE332DC6D0C9A3BE2525337F3E3847080CFB5C87B27",
+      "AssistantWeb/dist/assistant-web.js":"E5A698929EAF2EEAC9B2F348C36F427EAD052BA5B5FE55E4F3659407E4CEE20F"
+    },
+    "sourceToBinLabByteParity": "PASS",
+    "sourceToLabRootByteParity": "NOT_VERIFIED_AFTER_ROLLBACK"
+  },
+  "observedLive": {
+    "loadedWebViewUri": "UNKNOWN",
+    "frontendDomIdentity": "UNKNOWN",
+    "labProcess": {"pid":23756,"windowTitle":"SOLIDWORKS Professional 2025 SP5.0","mainWindowHandleObserved":true,"blueBrickLabDllLoaded":false},
+    "bridge17179": "NOT_LISTENING",
+    "freshWebViewTelemetry": "NOT_OBSERVED",
+    "result": "LIVE_IDENTITY_NOT_PROVEN",
+    "failureCode": "LIVE_RUNTIME_NOT_ACTIVATED"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "schema":"bluebrick.beta-static-tests.v1",
+  "runId":"20260902-095413",
+  "uiTests":{"passed":266,"skipped":1,"failed":0,"total":267,"skip":"credential-gated OpenAiAssistantService real connection test"},
+  "relayTests":{"passed":4,"skipped":0,"failed":0,"total":4},
+  "frontend":{"typecheck":"PASS","transport":"PASS","uiActivation":"PASS","replay":"PASS","executionBoard":"PASS","viraLab":"PASS","packageOutputLab":"PASS"},
+  "msbuild":{"configuration":"Lab","result":"PASS","warnings":0,"errors":0},
+  "runtimeCeiling":"STATIC_SOURCE_CONTRACT_ONLY"
+}

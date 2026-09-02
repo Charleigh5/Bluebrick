@@ -1,0 +1,9 @@
+{
+  "schema":"bluebrick.pdm-acceptance.v1",
+  "runId":"20260902-095413",
+  "historicalPath":"EdmVault5/LoginAuto/IEdmSearch* in ClsLucky.cs, ClsCardGen.cs, ClsTools.cs, and DocGenerator/ClsGenerators.cs",
+  "labConfig":"disabled",
+  "readOnlySearch":"NOT_ATTEMPTED",
+  "writes":"NONE",
+  "result":"BLOCKED_EXTERNAL"
+}

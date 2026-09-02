@@ -1,0 +1,20 @@
+{
+  "schema":"bluebrick.beta-acceptance-summary.v1",
+  "runId":"20260902-095413",
+  "status":"COMPLETED_WITH_DECLARED_GAPS",
+  "highestProvenState":"STATE 0 NOT_LIVE",
+  "staticIdentity":"PASS",
+  "labRegistration":"PASS",
+  "labDeployment":"PASS",
+  "liveSolidWorksAddin":"NOT_PROVEN",
+  "frontendDomIdentity":"NOT_OBSERVED",
+  "bridge17179":"NOT_LISTENING",
+  "legacyParity":"SOURCE_MAPPED_RUNTIME_UNTESTED",
+  "database":"BLOCKED_EXTERNAL",
+  "pdm":"BLOCKED_EXTERNAL",
+  "epicor":"BLOCKED_EXTERNAL",
+  "rollback":"PASS",
+  "productionMutationObserved":false,
+  "criticalFailures":["Lab add-in/WebView/17179 activation not proven","Current visible SOLIDWORKS window is not proven to be the Lab instance"],
+  "nextDependency":"Owned Lab SOLIDWORKS activation evidence via a working Computer Use or typed host lane"
+}

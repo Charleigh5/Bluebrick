@@ -1,0 +1,70 @@
+{
+  "runId": "20260902-091551",
+  "capturedLocalTime": "2026-09-02T09:15:51-04:00",
+  "repository": {
+    "path": "C:\\Users\\cweir\\Documents\\GitHub\\VIRA GITHUB\\Bluebrick",
+    "branch": "bluebrick-assistant-slice1-foundation",
+    "head": "45e422e5b639aa1f71adbe297cd60641344f83c5",
+    "status": "CLEAN",
+    "trackedFiles": 723,
+    "nonIgnoredUntrackedFiles": 0,
+    "remote": "https://github.com/Charleigh5/Bluebrick.git",
+    "mainMutation": false
+  },
+  "runtimeRoots": {
+    "lab": "C:\\BlueBrickLab",
+    "production": "C:\\BlueBrick",
+    "distinct": true
+  },
+  "artifacts": {
+    "productionDll": {
+      "path": "C:\\BlueBrick\\BlueBrick.dll",
+      "sha256": "C6C38DF37B5853D8D97D09D0FA7236735A4B6F0933CE7D4923E9C5D269CC10AE",
+      "lastWrite": "2026-08-27T09:15:59.7494601-04:00"
+    },
+    "productionConfig": {
+      "path": "C:\\BlueBrick\\config\\appsettings.json",
+      "sha256": "2BC0B3E19169ADCC6C59376956B2F5E3B30034235C507DB5EB5CB0E3F93A9091",
+      "bridgePort": 35001
+    },
+    "labDll": {
+      "path": "C:\\BlueBrickLab\\BlueBrick.Lab.dll",
+      "sha256": "32B5271C35D89DB55C5C566B6B905B11C43555B86E21DFBDB606033C5F97D9FE",
+      "lastWrite": "2026-09-01T17:23:14.9538688-04:00"
+    },
+    "labConfig": {
+      "path": "C:\\BlueBrickLab\\config\\appsettings.lab.json",
+      "sha256": "D4EC9F049E09F4815428406AC6E09F2F48C8A5BE42478C9F98ED471E5AE1C3B5",
+      "bridgePort": 17179,
+      "pdmAssistantReadOnly": false
+    }
+  },
+  "solidWorks": {
+    "processId": 34736,
+    "responding": true,
+    "path": "C:\\Program Files\\SOLIDWORKS Corp\\SOLIDWORKS\\SLDWORKS.exe",
+    "documentState": "OPEN_ASSEMBLY_DIRTY_MARKER_OBSERVED",
+    "sessionHandling": "DO_NOT_TERMINATE_OR_RESTART_EXISTING_SESSION"
+  },
+  "ports": {
+    "production": { "port": 17178, "listenerObserved": true, "owner": 4 },
+    "lab": { "port": 17179, "listenerObserved": false, "owner": null }
+  },
+  "registration": {
+    "labPerUserClsid": "{251d6df2-3e7b-42ef-b7fc-175e1fdcb4c5}",
+    "labPerUserStartup": 1,
+    "labAddinDefault": 0
+  },
+  "pdm": {
+    "runtimeAccess": "NOT_ATTEMPTED",
+    "writes": false
+  },
+  "epicor": {
+    "runtimeAccess": "NOT_ATTEMPTED",
+    "writes": false
+  },
+  "recovery": {
+    "root": "C:\\VIRA-Recovery\\BlueBrick\\20260901-163846",
+    "priorBundleVerified": true
+  }
+}
