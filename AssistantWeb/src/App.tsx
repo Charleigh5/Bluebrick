@@ -8,6 +8,7 @@ import {
 import { HardwareCadPanel } from "./hardware-cad/HardwareCadPanel";
 import { ExecutionBoardApp } from "./execution-board/ExecutionBoardApp";
 import { ViraLabApp } from "./vira-lab/ViraLabApp";
+import { RuntimeIdentitySurface } from "./runtimeIdentity";
 import { resolveAssistantSurface } from "./surfaceRouting";
 
 // ---------------------------------------------------------------------------
@@ -483,7 +484,7 @@ export function App() {
   if (surface === "hardware-cad") {
     return (
       <main className="shell vira-command-surface">
-        <header className="top"><div className="brand-row"><div className="brand"><div className="mark" aria-hidden="true" /><div className="brand-text"><span className="brand-title">VIRA Hardware Intelligence</span><span className="brand-sub">MCM CAD Acquisition</span></div></div></div></header>
+        <header className="top"><div className="brand-row"><div className="brand"><div className="mark" aria-hidden="true" /><div className="brand-text"><span className="brand-title">VIRA Hardware Intelligence</span><span className="brand-sub">MCM CAD Acquisition</span></div></div><RuntimeIdentitySurface /></div></header>
         <HardwareCadPanel />
       </main>
     );
@@ -499,6 +500,7 @@ export function App() {
               <span className="brand-sub">{modeLabel}</span>
             </div>
           </div>
+          <RuntimeIdentitySurface />
           <div className="chip-row">
             <span
               className={"chip conn " + (connectionState === "READY" ? "ok" : "warn")}

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { isAllowedLocalRelayUrl, routeEngineeringQueryViaLocalRelay } from "./adapters/LocalRelayQueryAdapter";
 import { capabilityDecisions, sourceAssets, type ActionPlan, type CapabilityState } from "./fixtures";
 import { routeEngineeringQuery, serializeExecutionReceipt, type EngineeringQueryRoute } from "./routing";
+import { RuntimeIdentitySurface } from "../runtimeIdentity";
 import "./execution-board.css";
 
 const sampleRequests = [
@@ -92,6 +93,7 @@ export function ExecutionBoardApp() {
             Route engineering intent through exact IDs, local evidence fixtures, capability states, action previews, and auditable receipts without
             touching live CAD, PDM, Epicor, Salesforce, secrets, or production systems.
           </p>
+          <RuntimeIdentitySurface />
         </div>
         <div className="eb-receipt-summary" aria-label="Current receipt boundary">
           <strong>{route.receipt.id}</strong>

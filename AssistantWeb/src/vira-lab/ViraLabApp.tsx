@@ -13,6 +13,7 @@ import {
   type ViraRuntimeKind
 } from "./viraLabRuntime";
 import { buildViraDiagnosticsExport, buildViraLabReceipt } from "./viraLabReceipt";
+import { RuntimeIdentitySurface } from "../runtimeIdentity";
 import "./vira-lab.css";
 
 type WorkbenchState = "loading" | "ready" | "unavailable" | "error";
@@ -151,6 +152,7 @@ export function ViraLabApp({ search }: { search: string }) {
           <span className="vira-lab-state">{state}</span>
           <span className="vira-lab-state packet">{packetState}</span>
         </div>
+        <RuntimeIdentitySurface />
       </header>
 
       <section className="vira-lab-boundary" aria-label="Read-only safety boundary">

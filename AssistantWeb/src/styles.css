@@ -1686,6 +1686,20 @@ input:focus-visible {
   font-size: 9.5px;
 }
 
+.bluebrick-runtime-identity {
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
+  color: currentColor;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 9px;
+  line-height: 1.35;
+  opacity: 0.72;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .chip-row {
   display: flex;
   align-items: center;
