@@ -3,17 +3,7 @@ import packageJson from "../package.json";
 
 const UNKNOWN = "UNKNOWN";
 
-type BlueBrickViteEnv = {
-  VITE_BLUEBRICK_ENVIRONMENT?: string;
-  VITE_BLUEBRICK_SOURCE_COMMIT?: string;
-  VITE_BLUEBRICK_BUILD_ID?: string;
-  VITE_BLUEBRICK_BUILD_UTC?: string;
-};
-
-const viteEnv = import.meta.env as ImportMetaEnv & BlueBrickViteEnv;
-
-function readEnv(name: keyof BlueBrickViteEnv, fallback: string): string {
-  const value = viteEnv[name];
+function readEnv(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
@@ -30,16 +20,16 @@ export type BlueBrickRuntimeIdentity = {
   label: string;
 };
 
-const environment = readEnv("VITE_BLUEBRICK_ENVIRONMENT", UNKNOWN);
-const sourceCommit = readEnv("VITE_BLUEBRICK_SOURCE_COMMIT", UNKNOWN);
-const buildId = readEnv("VITE_BLUEBRICK_BUILD_ID", UNKNOWN);
+const environment = readEnv(import.meta.env.VITE_BLUEBRICK_ENVIRONMENT, UNKNOWN);
+const sourceCommit = readEnv(import.meta.env.VITE_BLUEBRICK_SOURCE_COMMIT, UNKNOWN);
+const buildId = readEnv(import.meta.env.VITE_BLUEBRICK_BUILD_ID, UNKNOWN);
 
 export const runtimeIdentity: BlueBrickRuntimeIdentity = {
   environment,
   product: "BlueBrick 2.0",
   sourceCommit,
   buildId,
-  buildUtc: readEnv("VITE_BLUEBRICK_BUILD_UTC", UNKNOWN),
+  buildUtc: readEnv(import.meta.env.VITE_BLUEBRICK_BUILD_UTC, UNKNOWN),
   packageVersion: typeof packageJson.version === "string" ? packageJson.version : UNKNOWN,
   entrypoint: "AssistantWeb/src/main.tsx -> App.tsx",
   schemaVersion: "1",
