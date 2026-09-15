@@ -290,12 +290,13 @@ namespace BlueBrick.Agent
             _webView.CoreWebView2.Settings.IsScriptEnabled = true;
             _webView.CoreWebView2.NavigationStarting += (s, e) =>
             {
-                _trustedDocument = false;
                 if (!IsNavigationAllowed(e.Uri))
                 {
                     e.Cancel = true;
                     _activationState.RecordObservedError("Blocked WebView navigation: " + e.Uri);
+                    return;
                 }
+                _trustedDocument = false;
             };
             _webView.CoreWebView2.NewWindowRequested += (s, e) => { e.Handled = true; };
         }
@@ -311,6 +312,23 @@ namespace BlueBrick.Agent
                 File.Exists(Path.Combine(distRoot, "assistant-index.css"));
             var hasJavaScript = !string.IsNullOrWhiteSpace(distRoot) &&
                 File.Exists(Path.Combine(distRoot, "assistant-web.js"));
+
+            if (AppIdentity.IsLabBuild)
+            {
+                var assemblyPath = typeof(AssistantWebViewHost).Assembly.Location;
+                var generation = RuntimeGenerationGuard.Validate(
+                    Path.Combine(Path.GetDirectoryName(assemblyPath), "runtime-manifest.json"),
+                    "Lab",
+                    assemblyPath,
+                    _config.ConfigurationDiagnostics?.ConfigPath,
+                    distRoot,
+                    _config.ConfigSchemaVersion);
+                if (!generation.IsMatch)
+                {
+                    _activationState.RecordBootstrapFailure(generation.Code + ": " + generation.Detail);
+                    return false;
+                }
+            }
 
             if (!_activationState.BeginReactLoad(
                     _config.Assistant?.UseReactWebView ?? false,

@@ -1,0 +1,18 @@
+{
+  "schema": "bluebrick.bb20-dist-manifest.v1",
+  "stage": "BUILD_LAB",
+  "runId": "BB20-UI-20260902-111609-R01",
+  "root": "C:\\Users\\cweir\\Documents\\GitHub\\VIRA GITHUB\\Bluebrick\\bin\\Lab\\AssistantWeb\\dist",
+  "dll": {
+    "path": "C:\\Users\\cweir\\Documents\\GitHub\\VIRA GITHUB\\Bluebrick\\bin\\Lab\\BlueBrick.Lab.dll",
+    "sha256": "32B5271C35D89DB55C5C566B6B905B11C43555B86E21DFBDB606033C5F97D9FE"
+  },
+  "configSha256": "D4EC9F049E09F4815428406AC6E09F2F48C8A5BE42478C9F98ED471E5AE1C3B5",
+  "artifacts": {
+    "index.html": "E370C9711592F2695CF0651F702AE809A69AC0DE9B635C6C5B4CC8A4A6C7237B",
+    "assistant-index.css": "8B0281A263CD60E9A83A3CE332DC6D0C9A3BE2525337F3E3847080CFB5C87B27",
+    "assistant-web.js": "84B5772808D0A9099E85A9775473BC9980459BC9FC65A05441D5A0915DF29678"
+  },
+  "sourceToBuildByteParity": true,
+  "result": "PASS"
+}

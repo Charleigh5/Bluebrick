@@ -6,6 +6,7 @@ namespace BlueBrick.Agent
 {
     internal class AssistantSession
     {
+        public List<string> PendingScreenshotIds { get; set; } = new List<string>();
         public string SessionId { get; set; }
         public DateTime CreatedUtc { get; set; }
         public List<AssistantMessage> Messages { get; set; } = new List<AssistantMessage>();
@@ -13,6 +14,8 @@ namespace BlueBrick.Agent
 
     internal class AssistantMessage
     {
+        public List<string> AttachmentArtifactIds { get; set; } = new List<string>();
+        public string ResolvedModelId { get; set; }
         public string Role { get; set; }
         public string Text { get; set; }
         public List<string> AttachmentPaths { get; set; } = new List<string>();
@@ -21,6 +24,12 @@ namespace BlueBrick.Agent
 
     internal class AssistantScreenshotArtifact
     {
+        public string MimeType { get; set; }
+        public string Sha256 { get; set; }
+        public string RuntimeBuildId { get; set; }
+        public string ApprovalMode { get; set; }
+        public string ApprovalPolicySource { get; set; }
+        public bool AttachedToConversation { get; set; }
         public string SchemaVersion { get; set; }
         public string ScreenshotId { get; set; }
         public string ArtifactId { get; set; }
@@ -40,8 +49,13 @@ namespace BlueBrick.Agent
         public string SolidWorksDocumentPathHash { get; set; }
         public bool RedactionApplied { get; set; }
         public bool SentToModel { get; set; }
+        public string TransmissionState { get; set; }
         public string RetentionPolicy { get; set; }
         public string ModelProfileId { get; set; }
+        public string ReviewStatus { get; set; } = "pending";
+        public DateTime? ReviewedUtc { get; set; }
+        public bool CloudSendApproved { get; set; }
+        public string ApprovedContentHash { get; set; }
         public List<AssistantScreenshotAnnotation> Annotations { get; set; } = new List<AssistantScreenshotAnnotation>();
         public List<AssistantExtractedContact> ExtractedContacts { get; set; } = new List<AssistantExtractedContact>();
         public AssistantScreenshotReceipt Receipt { get; set; }
@@ -94,6 +108,12 @@ namespace BlueBrick.Agent
 
     internal class AssistantScreenshotReceipt
     {
+        public string TransmissionState { get; set; }
+        public string RuntimeBuildId { get; set; }
+        public string ApprovalMode { get; set; }
+        public string ApprovalPolicySource { get; set; }
+        public string SessionId { get; set; }
+        public string Sha256 { get; set; }
         public string ScreenshotId { get; set; }
         public string ArtifactId { get; set; }
         public DateTime CapturedUtc { get; set; }
@@ -170,6 +190,15 @@ namespace BlueBrick.Agent
         public string WorkingFolder { get; set; }
         public string BridgeUrl { get; set; }
         public int BridgePort { get; set; }
+        public bool UseReactWebView { get; set; }
+        public string ConfigPath { get; set; }
+        public string ConfigHash { get; set; }
+        public string ConfigSchemaVersion { get; set; }
+        public string ConfigurationLoadStatus { get; set; }
+        public string AssistantValueSource { get; set; }
+        public string RuntimeGenerationStatus { get; set; }
+        public string RuntimeGenerationDetail { get; set; }
+        public string RuntimeBuildId { get; set; }
         public bool LocalVaultExists { get; set; }
         public bool SampleSeedExists { get; set; }
         public bool AgentTokenConfigured { get; set; }
@@ -195,6 +224,9 @@ namespace BlueBrick.Agent
         public string DisplayName { get; set; }
         public bool SupportsText { get; set; } = true;
         public bool SupportsVision { get; set; }
+        public bool SupportsDocuments { get; set; }
+        public bool SupportsStreaming { get; set; }
+        public string CapabilitySource { get; set; }
         public bool SupportsToolCalling { get; set; }
         public bool SupportsStructuredOutput { get; set; }
         public bool IsLocal { get; set; }
@@ -210,14 +242,17 @@ namespace BlueBrick.Agent
                 Id = profile.Id,
                 ProviderId = profile.ProviderKind,
                 DisplayName = profile.Provider + " · " + profile.Name,
-                SupportsText = true,
+                SupportsText = profile.SupportsText,
+                SupportsDocuments = profile.SupportsDocuments,
+                SupportsStreaming = profile.SupportsStreaming,
+                CapabilitySource = profile.CapabilitySource ?? profile.Source ?? "configuration-declaration; provider verification not established",
                 SupportsVision = profile.SupportsVision,
                 SupportsToolCalling = profile.SupportsTools,
                 SupportsStructuredOutput = profile.SupportsJsonMode,
                 IsLocal = !cloud,
-                IsAvailable = profile.Enabled && (!cloud || keyConfigured),
+                IsAvailable = profile.Enabled && keyConfigured,
                 UnavailableReason = profile.Enabled
-                    ? (cloud && !keyConfigured ? "API key is not configured for this model." : string.Empty)
+                    ? (!keyConfigured ? "API key is not configured for this model." : string.Empty)
                     : "Model profile is disabled."
             };
         }
@@ -326,6 +361,14 @@ namespace BlueBrick.Agent
 
     internal class AssistantModelProfile
     {
+        // Runtime eligibility, refreshed by GetModelsAsync; not inference proof.
+        public bool? Available { get; set; }
+        public bool RuntimeEligible { get; set; }
+        public string UnavailableReason { get; set; }
+        public string AvailabilityEvidence { get; set; }
+        public bool SupportsText { get; set; } = true;
+        public bool SupportsDocuments { get; set; }
+        public string CapabilitySource { get; set; }
         public string Id { get; set; }
         public string Name { get; set; }
         public string Provider { get; set; }

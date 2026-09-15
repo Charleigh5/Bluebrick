@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Vira.Next.Engine</RootNamespace>
+    <AssemblyName>Vira.Next.Engine</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Vira.Next.Contracts\Vira.Next.Contracts.csproj" />
+  </ItemGroup>
+</Project>

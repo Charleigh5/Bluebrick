@@ -1,0 +1,566 @@
+[
+  {
+    "requirements": {
+      "text": false,
+      "vision": false,
+      "tools": false,
+      "streaming": false,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": false,
+      "tools": false,
+      "streaming": false,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": true,
+      "tools": false,
+      "streaming": false,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": true,
+      "tools": false,
+      "streaming": false,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": false,
+      "tools": true,
+      "streaming": false,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": false,
+      "tools": true,
+      "streaming": false,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": true,
+      "tools": true,
+      "streaming": false,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": true,
+      "tools": true,
+      "streaming": false,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": false,
+      "tools": false,
+      "streaming": true,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": false,
+      "tools": false,
+      "streaming": true,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": true,
+      "tools": false,
+      "streaming": true,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": true,
+      "tools": false,
+      "streaming": true,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": false,
+      "tools": true,
+      "streaming": true,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": false,
+      "tools": true,
+      "streaming": true,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": true,
+      "tools": true,
+      "streaming": true,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": true,
+      "tools": true,
+      "streaming": true,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": false,
+      "tools": false,
+      "streaming": false,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": false,
+      "tools": false,
+      "streaming": false,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": true,
+      "tools": false,
+      "streaming": false,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": true,
+      "tools": false,
+      "streaming": false,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": false,
+      "tools": true,
+      "streaming": false,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": false,
+      "tools": true,
+      "streaming": false,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": true,
+      "tools": true,
+      "streaming": false,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": true,
+      "tools": true,
+      "streaming": false,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": false,
+      "tools": false,
+      "streaming": true,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": false,
+      "tools": false,
+      "streaming": true,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": true,
+      "tools": false,
+      "streaming": true,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": true,
+      "tools": false,
+      "streaming": true,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": false,
+      "tools": true,
+      "streaming": true,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": false,
+      "tools": true,
+      "streaming": true,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": true,
+      "tools": true,
+      "streaming": true,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": true,
+      "tools": true,
+      "streaming": true,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": null,
+    "expected": [
+      "nvidia-kimi-k3",
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": false,
+      "tools": false,
+      "streaming": false,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": "text",
+    "expected": [
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": true,
+      "tools": false,
+      "streaming": false,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": "vision",
+    "expected": [
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": false,
+      "tools": true,
+      "streaming": false,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": "tools",
+    "expected": [
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": false,
+      "tools": false,
+      "streaming": true,
+      "structuredOutput": false
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": "streaming",
+    "expected": [
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": false,
+      "vision": false,
+      "tools": false,
+      "streaming": false,
+      "structuredOutput": true
+    },
+    "unavailableKimi": false,
+    "missingKimiCapability": "structuredOutput",
+    "expected": [
+      "google-gemini-3-8-flash"
+    ]
+  },
+  {
+    "requirements": {
+      "text": true,
+      "vision": true,
+      "tools": true,
+      "streaming": true,
+      "structuredOutput": true
+    },
+    "unavailableKimi": true,
+    "missingKimiCapability": null,
+    "expected": [
+      "google-gemini-3-8-flash"
+    ]
+  }
+]

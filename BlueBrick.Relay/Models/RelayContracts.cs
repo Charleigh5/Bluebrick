@@ -65,7 +65,7 @@ public sealed class McpJsonRpcRequest
     public string JsonRpc { get; set; } = "2.0";
 
     [JsonPropertyName("id")]
-    public string? Id { get; set; }
+    public System.Text.Json.JsonElement? Id { get; set; }
 
     [JsonPropertyName("method")]
     public string Method { get; set; } = string.Empty;
@@ -80,7 +80,7 @@ public sealed class McpJsonRpcResponse
     public string JsonRpc { get; set; } = "2.0";
 
     [JsonPropertyName("id")]
-    public string? Id { get; set; }
+    public System.Text.Json.JsonElement? Id { get; set; }
 
     [JsonPropertyName("result")]
     public object? Result { get; set; }

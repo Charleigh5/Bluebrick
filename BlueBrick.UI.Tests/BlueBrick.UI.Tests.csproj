@@ -87,6 +87,14 @@
     <Compile Include="Agent\AssistantChainedReceiptTests.cs" />
     <Compile Include="Agent\AssistantPromotionGateTests.cs" />
     <Compile Include="Agent\NativePortAndStartupTests.cs" />
+    <Compile Include="Agent\RecoveryContractTests.cs" />
+    <Compile Include="Agent\ScreenshotConversationTests.cs" />
+    <Compile Include="Agent\VisionRoutingTests.cs" />
+    <Compile Include="Agent\SharedAiTests.cs" />
+    <Content Include="..\SharedAI\tests\fixtures.json">
+      <Link>SharedAI\tests\fixtures.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Compile Include="Agent\ProtectedRouteIngressTests.cs" />
     <Compile Include="SolidWorks\T5LiveEvidenceTests.cs" />
     <Compile Include="SolidWorks\FeatureTreeSnapshotTests.cs" />

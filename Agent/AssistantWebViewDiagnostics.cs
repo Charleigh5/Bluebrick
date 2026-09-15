@@ -144,6 +144,7 @@ namespace BlueBrick.Agent
 
     const root = document.getElementById('root');
     const text = document.body ? (document.body.innerText || '') : '';
+    const identity = document.querySelector('[data-bluebrick-app-mounted=true]');
 
     return {
         readyState: document.readyState,
@@ -152,6 +153,10 @@ namespace BlueBrick.Agent
         bodyTextLength: text.length,
         rootChildCount: root ? root.children.length : -1,
         blueBrickHeaderPresent: text.indexOf('BlueBrick Assistant') >= 0,
+        reactMounted: !!identity,
+        frontendBuildId: identity ? identity.getAttribute('data-bluebrick-build-id') : null,
+        frontendSourceCommit: identity ? identity.getAttribute('data-bluebrick-source-commit') : null,
+        frontendEnvironment: identity ? identity.getAttribute('data-bluebrick-environment') : null,
         documentUrl: String(document.location || ''),
         bbCallbacks: [
             'bbReset','bbAppend','bbTypingStart','bbAppendChunk','bbTypingStop',
@@ -257,6 +262,12 @@ namespace BlueBrick.Agent
             if (readback.Value<bool?>("blueBrickHeaderPresent") != true)
             {
                 failureReason = "BlueBrick React shell header was not present.";
+                return false;
+            }
+
+            if (readback.Value<bool?>("reactMounted") != true)
+            {
+                failureReason = "React application mounted marker was not present.";
                 return false;
             }
 

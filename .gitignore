@@ -34,5 +34,8 @@ TestResults/
 Forms/_write_test.txt
 Forms/hello2.txt
 
+## Acceptance-run binary snapshots (hashes live in manifests; DLLs redeploy from bin/)
+artifacts/**/build-lab/
+
 ## AssistantWeb dependencies
 AssistantWeb/node_modules/

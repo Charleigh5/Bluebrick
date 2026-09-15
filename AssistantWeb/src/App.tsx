@@ -39,6 +39,9 @@ type Model = {
 };
 
 type ScreenshotArtifact = {
+  thumbnailDataUrl?: string;
+  attachedToConversation?: boolean;
+  approvalMode?: string;
   screenshotId?: string;
   artifactId?: string;
   fileName?: string;
@@ -68,10 +71,14 @@ type BridgeStatus = "offline" | "connecting" | "connected" | "error";
 // ---------------------------------------------------------------------------
 export function App() {
   const [modelId, setModelId] = useState<string>("UNKNOWN");
+  const [pendingModel, setPendingModel] = useState<string | null>(null);
+  const pendingModelRef = useRef<{ id: string; operationId: string } | null>(null);
+  const latestModelOperationRef = useRef<string | null>(null);
+  const [operationError, setOperationError] = useState("");
   const [models, setModels] = useState<Model[]>([]);
   const [scopeId, setScopeId] = useState<string>("UNKNOWN");
   const [scopes, setScopes] = useState<Scope[]>([]);
-  const [statusBlob, setStatusBlob] = useState<unknown>({ connection: "CONNECTING" });
+  const [statusBlob, setStatusBlob] = useState<unknown>({});
   const [tools, setTools] = useState<unknown[]>([]);
   const [toolReceipts, setToolReceipts] = useState<unknown[]>([]);
   const [productCatalogs, setProductCatalogs] = useState<unknown>({});
@@ -83,6 +90,7 @@ export function App() {
   const [screenshotReviews, setScreenshotReviews] = useState<Record<string, string>>({});
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>("offline");
 
+  const reviewOperationsRef = useRef<Record<string, string>>({});
   const bridgeRef = useRef<BlueBrickBridge | null>(null);
   const streamingIdRef = useRef<string | null>(null);
   const messagesRef = useRef<Message[]>([]);
@@ -121,7 +129,13 @@ export function App() {
   const handlers: BlueBrickBridgeHandlers = {
     onReset: () => {
       streamingIdRef.current = null;
+      screenshotsRef.current = [];
+      reviewOperationsRef.current = {};
       commitMessages([]);
+      syncScreenshots();
+      setScreenshotReviews({});
+      setToolResults([]);
+      setStreaming(false);
     },
 
     onAppend: (payload) => {
@@ -201,25 +215,34 @@ export function App() {
     },
 
     onSetModel: (model: unknown) => {
-      const m = model as string | { id?: string; name?: string; displayName?: string };
-      if (typeof m === "string") setModelId(m);
-      else if (m && typeof m === "object")
-        setModelId(m.id ?? m.name ?? m.displayName ?? "UNKNOWN");
-      else setModelId(String(m ?? "UNKNOWN"));
+      const m = model as { id?: string; Id?: string; operationId?: string; error?: string };
+      const id = typeof model === "string" ? model : m?.id ?? m?.Id;
+      if (m?.operationId && m.operationId !== latestModelOperationRef.current) return;
+      const pending = pendingModelRef.current;
+      if (pending) {
+        if (m?.operationId !== pending.operationId) return;
+        pendingModelRef.current = null;
+        setPendingModel(null);
+        if (m.error || id !== pending.id) {
+          setOperationError(m.error ?? "The host did not acknowledge the requested model.");
+          return;
+        }
+      }
+      if (id) setModelId(id);
     },
 
     onSetModels: (rawModels: unknown[]) => {
       setModels(
         (rawModels ?? []).map((m) => {
-          const mo = m as Model & { Id?: string; Name?: string; DisplayName?: string; Available?: boolean; SupportsVision?: boolean };
+          const mo = m as Model & { Id?: string; Name?: string; DisplayName?: string; Available?: boolean; Enabled?: boolean; SupportsTools?: boolean; SupportsJsonMode?: boolean; SupportsVision?: boolean };
           const id = mo.id ?? mo.Id ?? String(mo.displayName ?? mo.DisplayName ?? mo.id ?? "unknown");
           return {
             id,
-            displayName: mo.displayName ?? mo.DisplayName ?? id,
-            available: mo.available ?? mo.Available,
+            displayName: mo.displayName ?? mo.DisplayName ?? mo.Name ?? id,
+            available: mo.available ?? mo.Available ?? mo.Enabled,
             supportsVision: mo.supportsVision ?? mo.SupportsVision,
-            supportsToolCalling: mo.supportsToolCalling,
-            supportsStructuredOutput: mo.supportsStructuredOutput,
+            supportsToolCalling: mo.supportsToolCalling ?? mo.SupportsTools,
+            supportsStructuredOutput: mo.supportsStructuredOutput ?? mo.SupportsJsonMode,
           };
         }),
       );
@@ -264,16 +287,12 @@ export function App() {
         }
         if (typeof s.scopeId === "string") setScopeId(s.scopeId);
         if (typeof s.ScopeId === "string") setScopeId(s.ScopeId);
-        if (typeof s.model === "string") setModelId(s.model);
-        if (typeof s.activeModel === "string") setModelId(s.activeModel);
-        if (s.activeModelDescriptor && typeof s.activeModelDescriptor === "object") {
-          const md = s.activeModelDescriptor as { id?: string; displayName?: string };
-          if (md.id) setModelId(md.id);
-        }
-        if (s.activeModel && typeof s.activeModel === "object") {
-          const am = s.activeModel as { id?: string; Id?: string };
-          const activeId = am.id ?? am.Id;
-          if (activeId) setModelId(activeId);
+        // Status refreshes carry display labels too; only authoritative IDs may select a model.
+        if (!pendingModelRef.current) {
+          const descriptor = s.activeModelDescriptor as { id?: string; Id?: string } | undefined;
+          const active = s.activeModel as { id?: string; Id?: string } | undefined;
+          const confirmedId = descriptor?.id ?? descriptor?.Id ?? active?.id ?? active?.Id;
+          if (confirmedId) setModelId(confirmedId);
         }
       }
     },
@@ -313,6 +332,12 @@ export function App() {
     onUpdateScreenshotArtifact: (update: unknown) => {
       const u = update as ScreenshotArtifact;
       if (u && u.screenshotId) {
+        if (u.reviewOperationId) {
+          if (u.reviewOperationId !== reviewOperationsRef.current[u.screenshotId]) return;
+          delete reviewOperationsRef.current[u.screenshotId];
+          setScreenshotReviews((previous) => ({ ...previous, [u.screenshotId!]: u.reviewError ? "failed" : "acknowledged" }));
+          if (u.reviewError) setOperationError(String(u.reviewError));
+        }
         screenshotsRef.current = screenshotsRef.current.map((s) =>
           s.screenshotId === u.screenshotId ? { ...s, ...u } : s,
         );
@@ -379,8 +404,20 @@ export function App() {
   const handleSelectModel = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const id = e.target.value;
-      setModelId(id);
-      bridgeRef.current?.post("selectModel", { type: "selectModel", modelId: id });
+      if (pendingModelRef.current) return;
+      if (!bridgeRef.current?.isHostAvailable()) { setOperationError("Model selection unavailable: host is offline."); return; }
+      const operationId = cryptoId();
+      latestModelOperationRef.current = operationId;
+      pendingModelRef.current = { id, operationId };
+      setPendingModel(id);
+      setOperationError("");
+      bridgeRef.current.post("selectModel", { type: "selectModel", modelId: id, operationId });
+      window.setTimeout(() => {
+        if (pendingModelRef.current?.operationId !== operationId) return;
+        pendingModelRef.current = null;
+        setPendingModel(null);
+        setOperationError("Model selection timed out. The confirmed selection has not changed.");
+      }, 30000);
     },
     [],
   );
@@ -388,7 +425,7 @@ export function App() {
   const handleSelectScope = useCallback(
     (s: Scope) => {
       if (!s.enabled) return;
-      setScopeId(s.id);
+      if (!bridgeRef.current?.isHostAvailable()) { setOperationError("Scope selection unavailable: host is offline."); return; }
       bridgeRef.current?.post("selectScope", { type: "selectScope", scopeId: s.id });
     },
     [],
@@ -410,6 +447,7 @@ export function App() {
   const handleSend = useCallback(() => {
     const msg = input.trim();
     if (!msg) return;
+    if (!bridgeRef.current?.isHostAvailable()) { setOperationError("Send unavailable: host is offline."); return; }
     // Single transaction: the ref must contain the exact user + pending
     // assistant records BEFORE the host can later call bbGetTranscript.
     const pendingAssistantId = cryptoId();
@@ -437,24 +475,27 @@ export function App() {
   }, [commitMessages]);
 
   const handleNewSession = useCallback(() => {
-    bridgeRef.current?.post("newSession", { type: "newSession" });
-    streamingIdRef.current = null;
-    screenshotsRef.current = [];
-    commitMessages([]);
-    syncScreenshots();
-    setToolResults([]);
+    if (!bridgeRef.current?.isHostAvailable()) { setOperationError("New session unavailable: host is offline."); return; }
+    bridgeRef.current.post("newSession", { type: "newSession" });
   }, [commitMessages, syncScreenshots]);
 
-  const handleApprove = useCallback(
-    (screenshotId: string) => {
-      setScreenshotReviews((prev) => ({ ...prev, [screenshotId]: "approved" }));
-      bridgeRef.current?.post("reviewScreenshotItem", {
-        type: "reviewScreenshotItem",
-        screenshotId,
-        reviewStatus: "approved",
+  const handleReview = useCallback(
+    (screenshotId: string, reviewStatus: "approved" | "rejected", targetType = "screenshot") => {
+      if (!bridgeRef.current?.isHostAvailable()) { setOperationError("Review unavailable: host is offline."); return; }
+      const operationId = cryptoId();
+      reviewOperationsRef.current[screenshotId] = operationId;
+      setScreenshotReviews((prev) => ({ ...prev, [screenshotId]: "pending" }));
+      setOperationError("");
+      bridgeRef.current.post("reviewScreenshotItem", {
+        type: "reviewScreenshotItem", screenshotId, targetType, targetId: screenshotId, reviewStatus, operationId,
       });
-    },
-    [],
+      window.setTimeout(() => {
+        if (reviewOperationsRef.current[screenshotId] !== operationId) return;
+        delete reviewOperationsRef.current[screenshotId];
+        setScreenshotReviews((prev) => ({ ...prev, [screenshotId]: "failed" }));
+        setOperationError("Screenshot review timed out. The saved decision is unknown; no success is assumed.");
+      }, 30000);
+    }, [],
   );
 
   // -------------------------------------------------------------------------
@@ -463,13 +504,23 @@ export function App() {
   const availableModels = models.length > 0 ? models : [{ id: "UNKNOWN", displayName: "UNKNOWN" }];
   const statusObj = statusBlob as Record<string, unknown>;
   const connectionState =
-    statusObj?.connection ?? (statusObj?.configured ? "READY" : "CONNECTING");
+    bridgeStatus !== "connected"
+      ? "HOST OFFLINE"
+      : typeof (statusObj?.configured ?? statusObj?.Configured) === "boolean"
+        ? "HOST CONNECTED"
+        : "HOST CONNECTING";
   const modeLabel =
     typeof statusObj?.mode === "string"
       ? String(statusObj.mode)
       : typeof statusObj?.AssistantMode === "string"
         ? String(statusObj.AssistantMode)
         : "UNKNOWN";
+  const providerConfigured = statusObj?.configured ?? statusObj?.Configured;
+  const providerState = connectionState !== "HOST CONNECTED"
+    ? "NOT VERIFIED"
+    : providerConfigured !== true
+      ? "UNAVAILABLE"
+      : modeLabel.toLowerCase() === "mock" ? "MOCK MODE" : "CONFIGURED";
   const surface = resolveAssistantSurface(typeof window !== "undefined" ? window.location.search : "");
 
   // -------------------------------------------------------------------------
@@ -503,10 +554,13 @@ export function App() {
           <RuntimeIdentitySurface />
           <div className="chip-row">
             <span
-              className={"chip conn " + (connectionState === "READY" ? "ok" : "warn")}
-              title={"Connection state: " + String(connectionState)}
+              className={"chip conn " + (connectionState === "HOST CONNECTED" ? "ok" : "warn")}
+              title={"Host connection: " + connectionState}
             >
               ● {String(connectionState)}
+            </span>
+            <span className="chip" title={"Model provider: " + providerState}>
+              MODEL {providerState}
             </span>
             <span className="chip" title={"Tools available in the selected scope: " + tools.length}>
               tools {tools.length}
@@ -523,6 +577,8 @@ export function App() {
           </div>
         </div>
 
+        {operationError && <p role="alert">{operationError}</p>}
+        {pendingModel && <p role="status">Waiting for the host to acknowledge model selection…</p>}
         <div className="controls">
           <div className="select-row">
             <select
@@ -531,9 +587,10 @@ export function App() {
               aria-label="Select assistant model"
               value={modelId}
               onChange={handleSelectModel}
+              disabled={!!pendingModel || bridgeStatus !== "connected" || models.length === 0}
             >
               {availableModels.map((m) => (
-                <option key={m.id} value={m.id}>
+                <option key={m.id} value={m.id} disabled={m.available === false}>
                   {m.displayName ?? formatModelLabel(m.id)}
                 </option>
               ))}
@@ -588,7 +645,7 @@ export function App() {
               <span className="action-symbol search" />
               <span className="action-label">Search</span>
             </button>
-            <button className="action primary" aria-label="More actions" title="More actions">
+            <button className="action primary" aria-label="More actions" title="More actions are unavailable" disabled>
               <span className="action-symbol more" />
               <span className="action-label">More</span>
             </button>
@@ -599,7 +656,7 @@ export function App() {
       <section className="thread" aria-live="polite">
         {messages.length === 0 && screenshots.length === 0 && toolResults.length === 0 && (
           <div className="empty">
-            <div className="empty-title">BlueBrick is ready</div>
+            <div className="empty-title">{bridgeStatus === "connected" ? "Start a conversation" : "BlueBrick host is offline"}</div>
             <p className="empty-copy">
               Ask about the active model, capture the screen, or attach engineering context.
             </p>
@@ -631,6 +688,10 @@ export function App() {
 
         {screenshots.map((s) => (
           <div key={s.screenshotId ?? s.artifactId ?? s.fileName ?? "screenshot"} className="shot">
+            {s.thumbnailDataUrl?.startsWith("data:image/jpeg;base64,") && (
+              <img src={s.thumbnailDataUrl} alt={s.attachedToConversation ? "Screenshot attached to this conversation" : "Locally captured screenshot"} style={{ maxWidth: "100%", maxHeight: 220, objectFit: "contain" }} />
+            )}
+            <div role="status">{s.attachedToConversation ? "Attached to this conversation" : "Local capture — not attached"} · {s.approvalMode ?? "MANUAL"} local review · Upload consent is separate</div>
             <div className="shot-head">
               <strong className="badge">Screenshot captured</strong>
               <span className="badge">
@@ -670,14 +731,23 @@ export function App() {
             <div className="review-actions">
               <button
                 aria-label={"Approve screenshot " + (s.screenshotId ?? "")}
-                disabled={screenshotReviews[s.screenshotId ?? ""] === "approved"}
-                onClick={() => s.screenshotId && handleApprove(s.screenshotId)}
+                disabled={screenshotReviews[s.screenshotId ?? ""] === "pending" || s.reviewStatus === "approved"}
+                onClick={() => s.screenshotId && handleReview(s.screenshotId, "approved")}
               >
                 Approve
               </button>
-              <button aria-label="Reject screenshot review">
+              <button aria-label="Reject screenshot review"
+                disabled={screenshotReviews[s.screenshotId ?? ""] === "pending"}
+                onClick={() => s.screenshotId && handleReview(s.screenshotId, "rejected")}>
                 Reject
               </button>
+              <button
+                disabled={s.reviewStatus !== "approved" || s.cloudSendApproved === true || screenshotReviews[s.screenshotId ?? ""] === "pending"}
+                onClick={() => s.screenshotId && handleReview(s.screenshotId, "approved", "screenshot-upload")}>
+                Allow image upload
+              </button>
+              <span role="status">{screenshotReviews[s.screenshotId ?? ""] === "pending" ? "Saving decision…" : String(s.reviewStatus ?? "pending")}
+                {s.cloudSendApproved === true ? " · upload allowed" : " · local only"}</span>
             </div>
           </div>
         ))}
@@ -742,7 +812,7 @@ export function App() {
           <span className={"safety-dot" + (bridgeStatus === "connected" ? "" : " off")} aria-hidden="true">●</span>
           <span className="safety-label">Local-first</span>
           <span className="safety-spacer" aria-hidden="true" />
-          <span className="safety-bridge">Bridge {bridgeStatus}</span>
+          <span className="safety-bridge">{connectionState}</span>
         </div>
       </footer>
     </main>

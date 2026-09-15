@@ -47,6 +47,7 @@ export function RuntimeIdentitySurface() {
       "data-bluebrick-product": runtimeIdentity.product,
       "data-bluebrick-source-commit": runtimeIdentity.sourceCommit,
       "data-bluebrick-build-id": runtimeIdentity.buildId,
+      "data-bluebrick-app-mounted": "true",
       "data-bluebrick-build-utc": runtimeIdentity.buildUtc,
       "data-bluebrick-package-version": runtimeIdentity.packageVersion,
       "data-bluebrick-entrypoint": runtimeIdentity.entrypoint,

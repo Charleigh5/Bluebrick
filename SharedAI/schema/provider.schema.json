@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "protocol",
+        "baseUrl",
+        "credentialBinding"
+      ],
+      "properties": {
+        "id": {
+          "const": "nvidia"
+        },
+        "protocol": {
+          "const": "openai-chat-completions"
+        },
+        "baseUrl": {
+          "const": "https://integrate.api.nvidia.com/v1"
+        },
+        "credentialBinding": {
+          "const": "NVIDIA_API_KEY"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "protocol",
+        "baseUrl",
+        "credentialBinding"
+      ],
+      "properties": {
+        "id": {
+          "const": "google-gemini"
+        },
+        "protocol": {
+          "const": "openai-chat-completions"
+        },
+        "baseUrl": {
+          "const": "https://generativelanguage.googleapis.com/v1beta/openai"
+        },
+        "credentialBinding": {
+          "const": "GEMINI_API_KEY"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "protocol",
+        "baseUrl",
+        "credentialBinding"
+      ],
+      "properties": {
+        "id": {
+          "const": "openrouter"
+        },
+        "protocol": {
+          "const": "openai-chat-completions"
+        },
+        "baseUrl": {
+          "const": "https://openrouter.ai/api/v1"
+        },
+        "credentialBinding": {
+          "const": "OPENROUTER_API_KEY"
+        }
+      }
+    }
+  ]
+}

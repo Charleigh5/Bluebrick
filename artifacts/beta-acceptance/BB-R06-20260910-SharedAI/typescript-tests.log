@@ -1,0 +1,33 @@
+PASS 38 shared cross-language route fixtures
+PASS canonical catalog validates and has exactly two stable models
+PASS default deterministically prefers Kimi
+PASS vision deterministically prefers Kimi
+PASS tools deterministically prefers Kimi
+PASS missing credential permits available Gemini
+PASS absent runtime states never mean available
+PASS required capabilities filter candidates
+PASS vision route inherently requires vision
+PASS rejects duplicate models
+PASS rejects invalid provider reference
+PASS rejects invalid route reference
+PASS rejects duplicate route
+PASS rejects unknown secret field
+PASS rejects endpoint credentials
+PASS rejects endpoint query
+PASS rejects wrong capability type
+PASS rejects fractional context
+PASS rejects secret-like metadata
+PASS rejects unknown role
+PASS rejects context overflow
+PASS rejects provider identity mismatch
+PASS rejects unapproved endpoint
+PASS rejects wrong credential binding
+PASS rejects oversized display name
+PASS provider API model revision preserves stable identity
+PASS AionUI maps explicit provider IDs and provider model strings without mutation
+PASS AionUI reports missing mappings
+PASS AionUI reports capability and endpoint drift
+PASS AionUI reports missing model and ambiguous provider
+PASS AionUI rejects full secret-bearing record without echoing input
+PASS AionUI enable state is preserved separately from availability
+{"status":"PASS","passed":32,"scope":"isolated contracts/router and synthetic AionUI projections; no live DB or inference"}

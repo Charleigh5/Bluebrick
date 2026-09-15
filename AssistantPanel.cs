@@ -513,7 +513,7 @@ namespace BlueBrick
                 TraceBridgeDiagnostic("WEBMESSAGE_PARSED", "type=" + type);
                 if (string.Equals(type, "selectModel", StringComparison.OrdinalIgnoreCase))
                 {
-                    await SelectModelAsync(msg.Value<string>("modelId")).ConfigureAwait(true);
+                    await SelectModelAsync(msg.Value<string>("modelId"), msg.Value<string>("operationId")).ConfigureAwait(true);
                 }
                 else if (string.Equals(type, "selectScope", StringComparison.OrdinalIgnoreCase))
                 {
@@ -573,7 +573,7 @@ namespace BlueBrick
                         msg.Value<string>("targetType"),
                         msg.Value<string>("targetId"),
                         msg.Value<string>("reviewStatus"),
-                        msg.Value<string>("reviewNote")).ConfigureAwait(true);
+                        msg.Value<string>("reviewNote"), msg.Value<string>("operationId")).ConfigureAwait(true);
                 }
                 else if (string.Equals(type, "saveScreenshotAnnotation", StringComparison.OrdinalIgnoreCase))
                 {
@@ -740,7 +740,7 @@ namespace BlueBrick
             string targetType,
             string targetId,
             string reviewStatus,
-            string reviewNote)
+            string reviewNote, string operationId = null)
         {
             if (string.IsNullOrWhiteSpace(screenshotId) ||
                 string.IsNullOrWhiteSpace(targetType) ||
@@ -763,6 +763,7 @@ namespace BlueBrick
                 if (artifact != null && _webView != null)
                 {
                     var payload = NormalizeScreenshotArtifact(artifact);
+                    payload["reviewOperationId"] = operationId;
                     await _webView.ExecuteScriptAsync("if(window.bbUpdateScreenshotArtifact)window.bbUpdateScreenshotArtifact(" + payload.ToString(Formatting.None) + ");").ConfigureAwait(true);
                 }
 
@@ -773,6 +774,11 @@ namespace BlueBrick
                 return;
             }
 
+            if (_webView.CoreWebView2 != null)
+            {
+                var failed = new JObject { ["screenshotId"] = screenshotId, ["reviewOperationId"] = operationId, ["reviewError"] = result.Error ?? "Review failed." };
+                await ExecuteHostCallbackWithAckAsync("bbUpdateScreenshotArtifact", failed.ToString(Formatting.None));
+            }
             await AppendMessageAsync(
                 "assistant",
                 "Review update failed: " + (result.Error ?? "unknown error"),
@@ -846,7 +852,7 @@ namespace BlueBrick
             {
                 await ExecuteHostCallbackWithAckAsync(
                     "bbSetModel",
-                    JsonConvert.SerializeObject(_activeModel));
+                    JsonConvert.SerializeObject(activeModel?.Value<string>("Id") ?? activeModel?.Value<string>("id") ?? "UNKNOWN"));
                 var uiState = new JObject
                 {
                     ["mode"] = _assistantMode,
@@ -1010,11 +1016,21 @@ namespace BlueBrick
             await SelectModelAsync(item.Id);
         }
 
-        private async Task SelectModelAsync(string modelId)
+        private async Task SelectModelAsync(string modelId, string operationId = null)
         {
             if (!_initialized || _loadingModels || string.IsNullOrWhiteSpace(modelId)) return;
 
             var result = await AgentPanelClient.PostJsonAsync("/assistant/model", new JObject { ["modelId"] = modelId });
+            var confirmed = result.Data?["activeModel"] as JObject;
+            var acknowledgement = new JObject
+            {
+                ["id"] = confirmed?.Value<string>("Id") ?? confirmed?.Value<string>("id"),
+                ["operationId"] = operationId,
+                ["requestedId"] = modelId,
+                ["error"] = result.Ok ? null : result.Error ?? "Model selection failed."
+            };
+            if (_webView.CoreWebView2 != null)
+                await ExecuteHostCallbackWithAckAsync("bbSetModel", acknowledgement.ToString(Formatting.None));
             if (!result.Ok)
             {
                 lblChatStatus.Text = result.Error;
@@ -1061,13 +1077,12 @@ namespace BlueBrick
                 return;
             }
 
-            _pendingAttachment = result.Data.Value<string>("path");
             var artifact = result.Data["artifact"] as JObject;
-            var analyzed = await AnalyzeScreenshotArtifactAsync(artifact);
-            var finalArtifact = analyzed ?? artifact;
-            await AppendScreenshotArtifactAsync(finalArtifact);
-            await CreateScreenshotReviewReportAsync(finalArtifact);
-            lblChatStatus.Text = "Screenshot attached; review report created";
+            await AppendScreenshotArtifactAsync(artifact);
+            await CreateScreenshotReviewReportAsync(artifact);
+            lblChatStatus.Text = artifact?.Value<bool?>("AttachedToConversation") == true
+                ? "Screenshot attached to this conversation; upload requires separate consent."
+                : "Screenshot saved locally; persistent approval is required before attachment.";
             lblChatStatus.Visible = false;
         }
 
@@ -1506,6 +1521,8 @@ namespace BlueBrick
 
             return new JObject
             {
+                ["reviewStatus"] = artifact.Value<string>("ReviewStatus") ?? artifact.Value<string>("reviewStatus") ?? "pending",
+                ["cloudSendApproved"] = artifact.Value<bool?>("CloudSendApproved") ?? artifact.Value<bool?>("cloudSendApproved") ?? false,
                 ["artifactId"] = artifactId,
                 ["screenshotId"] = screenshotId,
                 ["path"] = path,
@@ -1513,6 +1530,10 @@ namespace BlueBrick
                 ["capturedUtc"] = capturedUtc,
                 ["metadataPath"] = metadataPath,
                 ["thumbnailPath"] = thumbnailPath,
+                ["thumbnailDataUrl"] = ScreenshotThumbnailDataUrl(screenshotId),
+                ["attachedToConversation"] = artifact.Value<bool?>("AttachedToConversation") ?? false,
+                ["approvalMode"] = artifact.Value<string>("ApprovalMode") ?? "MANUAL",
+                ["runtimeBuildId"] = artifact.Value<string>("RuntimeBuildId") ?? string.Empty,
                 ["annotationsPath"] = annotationsPath,
                 ["sourceWindowTitle"] = title,
                 ["solidWorksDocumentTitle"] = solidWorksDocumentTitle,
@@ -1520,7 +1541,7 @@ namespace BlueBrick
                 ["captureTarget"] = captureTarget,
                 ["captureSource"] = captureSource,
                 ["retentionPolicy"] = retentionPolicy,
-                ["localOnlyCloudState"] = localOnlyCloudState,
+                ["localOnlyCloudState"] = artifact.Value<string>("TransmissionState") ?? localOnlyCloudState,
                 ["modelProfileId"] = modelProfileId,
                 ["redactionApplied"] = redactionApplied,
                 ["sentToModel"] = sentToModel,
@@ -1532,6 +1553,15 @@ namespace BlueBrick
                 ["contacts"] = contacts,
                 ["receipt"] = receipt ?? new JObject()
             };
+        }
+
+        private static string ScreenshotThumbnailDataUrl(string screenshotId)
+        {
+            if (!Guid.TryParseExact(screenshotId, "N", out _)) return string.Empty;
+            var stored = AssistantScreenshotArtifactStore.FindArtifact(screenshotId);
+            if (stored == null || string.IsNullOrWhiteSpace(stored.ThumbnailPath) || !File.Exists(stored.ThumbnailPath)) return string.Empty;
+            if (new FileInfo(stored.ThumbnailPath).Length > 512 * 1024) return string.Empty;
+            return "data:image/jpeg;base64," + Convert.ToBase64String(File.ReadAllBytes(stored.ThumbnailPath));
         }
 
         internal static AssistantStreamEvent NormalizeAssistantStreamEvent(JObject chunk)
@@ -1961,6 +1991,13 @@ namespace BlueBrick
                         };
                     }
 
+                    if (string.Equals(FirstString(jObj, "type", "Type"), "model_resolved", StringComparison.Ordinal))
+                    {
+                        var routing = new JObject { ["label"] = "Model routing", ["status"] = "resolved",
+                            ["message"] = "Resolved model: " + FirstString(jObj, "text", "Text"), ["items"] = new JArray() };
+                        QueueWebViewScript("if(window.bbAppendToolResult)window.bbAppendToolResult(" + routing.ToString(Formatting.None) + ");");
+                        return;
+                    }
                     var streamEvent = NormalizeAssistantStreamEvent(jObj);
                     RenderNormalizedAssistantStreamEvent(streamEvent, streamedText, ref streamedAnyText, ref renderedStreamEvent, ref finalAppended, ref finalText);
                 }, requestCts.Token);

@@ -1,0 +1,24 @@
+ Agent/AgentConfig.cs                               | 309 ++++++++++++++++-----
+ Agent/AgentHttpServer.cs                           |  45 ++-
+ Agent/AssistantModels.cs                           |  44 ++-
+ Agent/AssistantScreenshotArtifactStore.cs          | 141 +++++++++-
+ Agent/AssistantSessionStore.cs                     | 105 ++++++-
+ Agent/AssistantWebViewDiagnostics.cs               |  11 +
+ Agent/AssistantWebViewHost.cs                      |  20 +-
+ Agent/OpenAiAssistantService.cs                    | 281 ++++++++++++++-----
+ AssistantPanel.cs                                  |  61 +++-
+ AssistantWeb/dist/assistant-web.js                 |   2 +-
+ .../scripts/verify-packaged-output-contract.mjs    |  25 ++
+ AssistantWeb/src/App.tsx                           | 168 +++++++----
+ AssistantWeb/src/bridge/blueBrickWebViewBridge.ts  |   3 +-
+ AssistantWeb/src/runtimeIdentity.ts                |   1 +
+ BlueBrick.Relay/Models/RelayContracts.cs           |   4 +-
+ BlueBrick.Relay/Program.cs                         |  66 ++---
+ .../Agent/NativePortAndStartupTests.cs             | 201 ++++++++++++++
+ BlueBrick.UI.Tests/BlueBrick.UI.Tests.csproj       |   3 +
+ BlueBrick.csproj                                   |   5 +-
+ config/appsettings.json                            |   1 +
+ config/appsettings.lab.json                        |  72 ++++-
+ scripts/bluebrick.ps1                              | 137 ++++++++-
+ tools/validate-lab-live.ps1                        |   2 +-
+ 23 files changed, 1441 insertions(+), 266 deletions(-)

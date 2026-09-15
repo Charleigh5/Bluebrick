@@ -66,6 +66,30 @@ assert(labOutput?.Assistant?.UseReactWebView === true, `${configuration} lab con
 const dllPath = `bin/${configuration}/${expectedDll}`;
 const dllSha256 = hash(dllPath);
 
+const labDeploymentVerified = [];
+if (configuration === "Lab") {
+  const lifecycle = readFileSync(join(repoRoot, "scripts/bluebrick.ps1"), "utf8");
+  const requiredLifecycleTokens = [
+    "LAB_PACKAGE_INCOMPLETE",
+    "$labFrontendSource",
+    "$labFrontendTarget",
+    "$labRuntimeManifestTarget",
+    "AssistantWeb.dist.orig",
+    "runtime-manifest.json.orig",
+    "Write-LabRuntimeManifest",
+    "Assert-FrontendParity $labFrontendSource $labFrontendTarget",
+  ];
+  for (const token of requiredLifecycleTokens) {
+    assert(lifecycle.includes(token), `Lab lifecycle deployment contract is missing: ${token}`);
+  }
+  labDeploymentVerified.push(
+    "lab_frontend_readiness_gate",
+    "lab_frontend_backup_and_restore",
+    "lab_runtime_manifest",
+    "build_to_deployed_hash_gate",
+  );
+}
+
 console.log(JSON.stringify({
   ok: true,
   configuration,
@@ -78,5 +102,6 @@ console.log(JSON.stringify({
     "exact_dist_triplet",
     "byte_matching_source_outputs",
     "configuration_specific_dll",
+    ...labDeploymentVerified,
   ],
 }, null, 2));

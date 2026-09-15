@@ -1,0 +1,1 @@
+No live BlueBrick UI screenshot was captured in R01 because SOLIDWORKS did not discover/load the Lab add-in. Execution stopped at F09_WRONG_REGISTRATION before WebView activation.

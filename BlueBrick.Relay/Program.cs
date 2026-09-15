@@ -1,5 +1,4 @@
 using System.Net.WebSockets;
-using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using BlueBrick.Relay;
@@ -126,7 +125,7 @@ app.MapPost("/devices/heartbeat", async (HttpContext context, IRelayRepository r
     return Results.Ok(new { ok = true });
 });
 
-app.MapGet("/chatgpt/handoff", async (HttpContext context, IRelayRepository repo, IOptions<RelayOptions> relay) =>
+app.MapGet("/chatgpt/handoff", (HttpContext context, IOptions<RelayOptions> relay) =>
 {
     var sessionId = context.Request.Query["sessionId"].ToString();
     var deviceId = context.Request.Query["deviceId"].ToString();
@@ -135,20 +134,15 @@ app.MapGet("/chatgpt/handoff", async (HttpContext context, IRelayRepository repo
         return Results.BadRequest(new { error = "sessionId and deviceId are required." });
     }
 
-    await repo.UpsertSessionRouteAsync(new RelaySessionRoute
-    {
-        SessionId = sessionId,
-        DeviceId = deviceId,
-        UpdatedUtc = DateTime.UtcNow
-    }, context.RequestAborted);
+    // Containment: viewing a handoff must not establish or replace a route.
 
     var html = $"""
 <!doctype html>
 <html>
 <head><meta charset="utf-8"><title>BlueBrick Relay Handoff</title></head>
 <body style="font-family:Segoe UI,Arial,sans-serif;padding:24px;">
-  <h1>BlueBrick session linked</h1>
-  <p>Session <code>{System.Net.WebUtility.HtmlEncode(sessionId)}</code> is now routed to workstation <code>{System.Net.WebUtility.HtmlEncode(deviceId)}</code>.</p>
+  <h1>BlueBrick handoff unavailable</h1>
+  <p>Relay tool execution is disabled pending ownership, scope, and response validation. No session routing was changed.</p>
   <p><a href="{System.Net.WebUtility.HtmlEncode(relay.Value.ChatWorkspaceUrl)}">Open ChatGPT workspace</a></p>
 </body>
 </html>
@@ -230,8 +224,15 @@ app.Map("/ws/agent", async (HttpContext context, DeviceTunnelRegistry tunnels, I
     }
 });
 
-app.MapMethods("/mcp", new[] { "GET", "POST" }, async (HttpContext context, McpToolCatalog catalog, ToolRoutingService routing, IRelayRepository repo) =>
+app.MapMethods("/mcp", new[] { "GET", "POST" }, async (HttpContext context, McpToolCatalog catalog) =>
 {
+    if (!context.User.Identity?.IsAuthenticated ?? true)
+    {
+        context.Response.Headers.WWWAuthenticate = @"Bearer resource_metadata=""/.well-known/oauth-protected-resource""";
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return;
+    }
+
     if (HttpMethods.IsGet(context.Request.Method))
     {
         context.Response.ContentType = "text/event-stream";
@@ -240,14 +241,18 @@ app.MapMethods("/mcp", new[] { "GET", "POST" }, async (HttpContext context, McpT
         return;
     }
 
-    if (!context.User.Identity?.IsAuthenticated ?? true)
+    McpJsonRpcRequest request;
+    try { request = await context.Request.ReadFromJsonAsync<McpJsonRpcRequest>() ?? new McpJsonRpcRequest(); }
+    catch (JsonException)
     {
-        context.Response.Headers.WWWAuthenticate = @"Bearer resource_metadata=""/.well-known/oauth-protected-resource""";
-        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await Results.BadRequest(new McpJsonRpcResponse { Error = new { code = -32700, message = "Invalid JSON-RPC payload." } }).ExecuteAsync(context);
         return;
     }
-
-    var request = await context.Request.ReadFromJsonAsync<McpJsonRpcRequest>() ?? new McpJsonRpcRequest();
+    if (request.Id is JsonElement id && id.ValueKind != JsonValueKind.String && id.ValueKind != JsonValueKind.Number && id.ValueKind != JsonValueKind.Null)
+    {
+        await Results.BadRequest(new McpJsonRpcResponse { Error = new { code = -32600, message = "Invalid JSON-RPC ID." } }).ExecuteAsync(context);
+        return;
+    }
     McpJsonRpcResponse response;
 
     switch (request.Method)
@@ -272,23 +277,22 @@ app.MapMethods("/mcp", new[] { "GET", "POST" }, async (HttpContext context, McpT
             };
             break;
         case "tools/call":
-            var toolName = request.Params.TryGetValue("name", out var nameObj) ? Convert.ToString(nameObj) : string.Empty;
-            var args = request.Params.TryGetValue("arguments", out var argsObj)
-                ? JsonSerializer.Deserialize<Dictionary<string, string>>(JsonSerializer.Serialize(argsObj)) ?? new Dictionary<string, string>()
-                : new Dictionary<string, string>();
-            var sessionId = args.TryGetValue("sessionId", out var session) ? session : string.Empty;
-            var result = await routing.RouteAsync(new RelayToolInvocation
-            {
-                SessionId = sessionId,
-                ToolName = toolName ?? string.Empty,
-                Arguments = args,
-                RequestedBy = context.User.FindFirstValue("sub") ?? "chatgpt"
-            }, context.RequestAborted);
-            await repo.WriteAuditAsync("mcp", "tools/call", sessionId, result.Result.Status, toolName ?? string.Empty, context.RequestAborted);
+            // Containment only: do not parse arguments or dispatch any tool until
+            // trusted ownership, scope enforcement, and response correlation exist.
             response = new McpJsonRpcResponse
             {
                 Id = request.Id,
-                Result = result
+                Error = new
+                {
+                    code = -32003,
+                    message = "relay_security_not_ready",
+                    data = new
+                    {
+                        status = "relay_security_not_ready",
+                        retryable = false,
+                        detail = "Relay tool execution is disabled pending ownership, scope, and response validation."
+                    }
+                }
             };
             break;
         default:
@@ -309,7 +313,7 @@ static bool ValidateRegistrationToken(HttpContext context, RelayOptions relay)
 {
     if (string.IsNullOrWhiteSpace(relay.RegistrationToken))
     {
-        return true;
+        return false;
     }
 
     return string.Equals(context.Request.Headers["X-Relay-Token"], relay.RegistrationToken, StringComparison.Ordinal);

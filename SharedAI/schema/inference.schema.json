@@ -1,0 +1,430 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "modelId",
+        "messages",
+        "tools",
+        "streaming",
+        "structuredOutput",
+        "reasoning"
+      ],
+      "properties": {
+        "kind": {
+          "const": "request"
+        },
+        "modelId": {
+          "type": "string",
+          "enum": [
+            "nvidia-kimi-k3",
+            "google-gemini-3-8-flash"
+          ]
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "content",
+              "imageReferences",
+              "toolCallId",
+              "toolCalls"
+            ],
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "system",
+                  "user",
+                  "assistant",
+                  "tool"
+                ]
+              },
+              "content": {
+                "type": "string",
+                "maxLength": 1000000
+              },
+              "imageReferences": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^(?!.*(?:[\\r\\n]|[Bb]earer |sk-|AIza|-----BEGIN)).+$"
+                }
+              },
+              "toolCallId": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^(?!.*(?:[\\r\\n]|[Bb]earer |sk-|AIza|-----BEGIN)).+$"
+                  }
+                ]
+              },
+              "toolCalls": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name",
+                    "arguments"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^(?!.*(?:[\\r\\n]|[Bb]earer |sk-|AIza|-----BEGIN)).+$"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^(?!.*(?:[\\r\\n]|[Bb]earer |sk-|AIza|-----BEGIN)).+$"
+                    },
+                    "arguments": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "parameters"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^(?!.*(?:[\\r\\n]|[Bb]earer |sk-|AIza|-----BEGIN)).+$"
+              },
+              "parameters": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "streaming": {
+          "type": "boolean"
+        },
+        "structuredOutput": {
+          "type": "boolean"
+        },
+        "reasoning": {
+          "type": "object",
+          "maxProperties": 8
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "modelId",
+            "providerId",
+            "providerModel",
+            "content",
+            "toolCalls",
+            "usage",
+            "finishStatus",
+            "error",
+            "diagnostics"
+          ],
+          "properties": {
+            "kind": {
+              "const": "response"
+            },
+            "modelId": {
+              "const": "nvidia-kimi-k3"
+            },
+            "providerId": {
+              "const": "nvidia"
+            },
+            "providerModel": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?!.*(?:[\\r\\n]|[Bb]earer |sk-|AIza|-----BEGIN)).+$"
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 1000000
+            },
+            "toolCalls": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name",
+                  "arguments"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^(?!.*(?:[\\r\\n]|[Bb]earer |sk-|AIza|-----BEGIN)).+$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^(?!.*(?:[\\r\\n]|[Bb]earer |sk-|AIza|-----BEGIN)).+$"
+                  },
+                  "arguments": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "usage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "inputTokens",
+                "outputTokens"
+              ],
+              "properties": {
+                "inputTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "outputTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "finishStatus": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "tool_calls",
+                "length",
+                "error",
+                "interrupted"
+              ]
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "credential_missing",
+                    "authentication_failed",
+                    "rate_limited",
+                    "provider_unavailable",
+                    "model_unavailable",
+                    "timeout",
+                    "malformed_response",
+                    "unsupported_payload",
+                    "tool_call_parse_failure",
+                    "context_limit",
+                    "stream_interrupted",
+                    "bluebrick_tool_execution_failure"
+                  ]
+                }
+              ]
+            },
+            "diagnostics": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "boundary": {
+                  "type": "string",
+                  "enum": [
+                    "request_construction",
+                    "transport",
+                    "inference",
+                    "response_parsing",
+                    "tool_call_parsing",
+                    "permission_validation",
+                    "tool_execution",
+                    "tool_continuation"
+                  ]
+                },
+                "httpStatus": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 599
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "modelId",
+            "providerId",
+            "providerModel",
+            "content",
+            "toolCalls",
+            "usage",
+            "finishStatus",
+            "error",
+            "diagnostics"
+          ],
+          "properties": {
+            "kind": {
+              "const": "response"
+            },
+            "modelId": {
+              "const": "google-gemini-3-8-flash"
+            },
+            "providerId": {
+              "const": "google-gemini"
+            },
+            "providerModel": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?!.*(?:[\\r\\n]|[Bb]earer |sk-|AIza|-----BEGIN)).+$"
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 1000000
+            },
+            "toolCalls": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name",
+                  "arguments"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^(?!.*(?:[\\r\\n]|[Bb]earer |sk-|AIza|-----BEGIN)).+$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^(?!.*(?:[\\r\\n]|[Bb]earer |sk-|AIza|-----BEGIN)).+$"
+                  },
+                  "arguments": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "usage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "inputTokens",
+                "outputTokens"
+              ],
+              "properties": {
+                "inputTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "outputTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "finishStatus": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "tool_calls",
+                "length",
+                "error",
+                "interrupted"
+              ]
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "credential_missing",
+                    "authentication_failed",
+                    "rate_limited",
+                    "provider_unavailable",
+                    "model_unavailable",
+                    "timeout",
+                    "malformed_response",
+                    "unsupported_payload",
+                    "tool_call_parse_failure",
+                    "context_limit",
+                    "stream_interrupted",
+                    "bluebrick_tool_execution_failure"
+                  ]
+                }
+              ]
+            },
+            "diagnostics": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "boundary": {
+                  "type": "string",
+                  "enum": [
+                    "request_construction",
+                    "transport",
+                    "inference",
+                    "response_parsing",
+                    "tool_call_parsing",
+                    "permission_validation",
+                    "tool_execution",
+                    "tool_continuation"
+                  ]
+                },
+                "httpStatus": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 599
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

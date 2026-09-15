@@ -1,0 +1,103 @@
+{
+  "head": "f3c0905137da6ac5ffe3523d3aa852c26fa18c48",
+  "branch": "bluebrick-assistant-slice1-foundation",
+  "files": [
+    {
+      "path": "Agent/AgentConfig.cs",
+      "sha256": "11E6875B67BABECBDE8BDB03E2401573FC49612726F78B0A4E9B981F25C94677"
+    },
+    {
+      "path": "Agent/OpenAiAssistantService.cs",
+      "sha256": "5703F18F7B71D35CCD34A01286B39D9E78EA981513E7DBD168C25F9FB5962D6E"
+    },
+    {
+      "path": "Agent/AssistantModels.cs",
+      "sha256": "C16318179B9651539A61596B5656E1FA24252D3BA8FB24BE2682AB832379B086"
+    },
+    {
+      "path": "Agent/SharedAiProfiles.cs",
+      "sha256": "6E06CF1BEA8FE82B443FAC17E19EF21BCAE833860399D1CECBBA79B1D15A042F"
+    },
+    {
+      "path": "BlueBrick.csproj",
+      "sha256": "6BB9963B3413966F89A24363F06103B09E2CBB0C3DAF0019914DB008792C67AF"
+    },
+    {
+      "path": "BlueBrick.UI.Tests/BlueBrick.UI.Tests.csproj",
+      "sha256": "99CCF49F058387E4746E9ADE52F80404CD33EEDFE4CB19906528A8994B030A0F"
+    },
+    {
+      "path": "BlueBrick.UI.Tests/Agent/SharedAiTests.cs",
+      "sha256": "553E19AA880384DDFEFCEAEBEF3067C10E9C1C2F34BB6B721F52FD53DF4F4396"
+    },
+    {
+      "path": "config/appsettings.lab.json",
+      "sha256": "84B8DBC51E8249A8DD85B3BDBBFDA08CC26A94365B753868EA3C111F2523EE64"
+    },
+    {
+      "path": "SharedAI\\README.md",
+      "sha256": "C2131E5103C5B9760045DB0F921CF94C614352264B802225A3FE6A68B773731F"
+    },
+    {
+      "path": "SharedAI\\catalog\\models.json",
+      "sha256": "68C1AB7AF63ECB1CEB46C84C32237D6048C749A4E2668BF78ED628D5CDEEEF16"
+    },
+    {
+      "path": "SharedAI\\catalog\\providers.json",
+      "sha256": "0D54FEBA52BBA2118A153BBA83E46272CCA99365DF76A0E7DC409CB1111ADE59"
+    },
+    {
+      "path": "SharedAI\\catalog\\routes.json",
+      "sha256": "F865DE52D7A7BDA71D75D6E6EE21DBED60A0E8663F35F15D62DF38FC273AF991"
+    },
+    {
+      "path": "SharedAI\\generated\\csharp\\SharedCatalog.cs",
+      "sha256": "FD157BFB80072B9617424982C4C837115F70556AFF9062E781B9527AD9D43B90"
+    },
+    {
+      "path": "SharedAI\\generated\\typescript\\sharedAI.ts",
+      "sha256": "26E9C620D67B7BC9CD7230A9CB86490719722F0F18D117E41E04E287FFD1C392"
+    },
+    {
+      "path": "SharedAI\\schema\\build.cjs",
+      "sha256": "9A7F81729CB037A156874C093A1B60E95A81E1EE4D3A49DDA93596F7AFD1EDD5"
+    },
+    {
+      "path": "SharedAI\\schema\\inference.schema.json",
+      "sha256": "9738569139EB7E93D8B2A39DD7C3838BD4EB398EEA6B2D44FF58CF0F7B9488B4"
+    },
+    {
+      "path": "SharedAI\\schema\\model.schema.json",
+      "sha256": "DB40C860E96ADC6B404673FB1A7F253583024CA9C4E0CF640E59601F1E75DAD7"
+    },
+    {
+      "path": "SharedAI\\schema\\provider.schema.json",
+      "sha256": "C95E3E2ADA74495AD274615FB6B7B2676E141EC911B82EDE7E07353C13E60DE9"
+    },
+    {
+      "path": "SharedAI\\schema\\routing.schema.json",
+      "sha256": "05ED27EDCDF0A6A6C553545217340B9970AA5CD09D8DE32A9939BDC205B24E38"
+    },
+    {
+      "path": "SharedAI\\schema\\verify.cjs",
+      "sha256": "648915D23EA7D0C84CD7433742E707744F8493CCBCFED8AE08B8FD0F8BDED481"
+    },
+    {
+      "path": "SharedAI\\tests\\.gitignore",
+      "sha256": "E357436ED0FE463C49BEF80CE33F8BDEC170E02746009E7035FD1FFD1743A510"
+    },
+    {
+      "path": "SharedAI\\tests\\fixtures.json",
+      "sha256": "1CE12BA2EA91AF0425D43F5BFDBD152C49B4618510EBB310A74A0979AC0CBBB0"
+    },
+    {
+      "path": "SharedAI\\tests\\package.json",
+      "sha256": "323F084AB43C0BE767D9AD165CBBDA2454FDBC79C8C69C391408EF03DB3139F4"
+    },
+    {
+      "path": "SharedAI\\tests\\typescript.test.cjs",
+      "sha256": "10E181EF4CA5E0BB1AF41EEA172AFCBE616AAF42095D77981C4D449A662BDDF4"
+    }
+  ],
+  "scope": "R06 source changes only; prior WIP preserved in before images"
+}

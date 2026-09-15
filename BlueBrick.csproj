@@ -53,6 +53,8 @@
     </PropertyGroup>
     <ItemGroup>
         <Compile Include="AppIdentity.cs" />
+        <Compile Include="SharedAI\generated\csharp\SharedCatalog.cs" />
+        <Compile Include="Agent\SharedAiProfiles.cs" />
         <Compile Include="Agent\AgentClient.cs" />
         <Compile Include="Agent\AgentConfig.cs" />
         <Compile Include="Agent\AgentFontLoader.cs" />
@@ -77,8 +79,9 @@
         <Compile Include="Agent\AssistantFallbackDiagnostic.cs" />
         <Compile Include="Agent\ProtectedRouteIngressGate.cs" />
         <Compile Include="Agent\ExecutionBoundaryPolicy.cs" />
-        <Compile Include="Agent\LabDeploymentContract.cs" />
-        <Compile Include="Agent\AssistantWebViewDiagnostics.cs" />
+      <Compile Include="Agent\LabDeploymentContract.cs" />
+      <Compile Include="Agent\RuntimeGenerationGuard.cs" />
+      <Compile Include="Agent\AssistantWebViewDiagnostics.cs" />
         <Compile Include="Agent\AssistantWebViewSecurity.cs" />
         <Compile Include="Agent\AssistantWebViewHost.cs" />
         <Compile Include="Agent\AgentHttpServer.cs" />
@@ -337,6 +340,9 @@
         </Content>
         <Content Include="config\appsettings.lab.json">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+        <Content Include="SharedAI\catalog\*.json">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
         <Content Include="DataFiles\settings.xml">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

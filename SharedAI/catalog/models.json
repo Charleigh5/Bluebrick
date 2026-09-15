@@ -1,0 +1,42 @@
+[
+  {
+    "id": "nvidia-kimi-k3",
+    "providerId": "nvidia",
+    "providerModel": "moonshotai/kimi-k3",
+    "displayName": "NVIDIA Kimi K3",
+    "capabilities": {
+      "text": true,
+      "vision": true,
+      "tools": true,
+      "streaming": true,
+      "structuredOutput": true
+    },
+    "contextLimit": 1048576,
+    "roles": [
+      "general",
+      "vision",
+      "engineering",
+      "agent"
+    ]
+  },
+  {
+    "id": "google-gemini-3-8-flash",
+    "providerId": "google-gemini",
+    "providerModel": "gemini-3.8-flash",
+    "displayName": "Google Gemini 3.8 Flash",
+    "capabilities": {
+      "text": true,
+      "vision": true,
+      "tools": true,
+      "streaming": true,
+      "structuredOutput": true
+    },
+    "contextLimit": 1048576,
+    "roles": [
+      "general",
+      "vision",
+      "fast",
+      "fallback"
+    ]
+  }
+]

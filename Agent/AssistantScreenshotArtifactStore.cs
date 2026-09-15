@@ -3,11 +3,15 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using Newtonsoft.Json;
+using System.Security.Cryptography;
+using System.Linq;
 
 namespace BlueBrick.Agent
 {
     internal static class AssistantScreenshotArtifactStore
     {
+        private static readonly object ReviewLock = new object();
+
         internal static string NewArtifactId()
         {
             return Guid.NewGuid().ToString("N");
@@ -41,7 +45,9 @@ namespace BlueBrick.Agent
             artifact.AnnotatedPath = Path.ChangeExtension(artifact.Path, null) + ".annotated.png";
 
             CreateThumbnail(artifact.Path, artifact.ThumbnailPath);
-            File.WriteAllText(artifact.MetadataPath, JsonConvert.SerializeObject(artifact, Formatting.Indented));
+            artifact.MimeType = "image/png";
+            artifact.Sha256 = ContentHash(artifact.Path);
+            PersistMetadata(artifact);
             if (!File.Exists(artifact.AnnotationsPath))
             {
                 File.WriteAllText(artifact.AnnotationsPath, JsonConvert.SerializeObject(new AssistantScreenshotAnnotationDocument
@@ -55,15 +61,15 @@ namespace BlueBrick.Agent
             }
 
             artifact.Receipt = BuildReceipt(artifact);
-            File.WriteAllText(artifact.MetadataPath, JsonConvert.SerializeObject(artifact, Formatting.Indented));
+            PersistMetadata(artifact);
             return artifact.Receipt;
         }
 
-        internal static AssistantScreenshotArtifact FindArtifact(string screenshotId)
+        internal static AssistantScreenshotArtifact FindArtifact(string screenshotId, string artifactRoot = null)
         {
             var id = SafeId(screenshotId);
             if (string.IsNullOrWhiteSpace(id)) return null;
-            var root = Root;
+            var root = artifactRoot ?? Root;
             if (!Directory.Exists(root)) return null;
 
             foreach (var metadataPath in Directory.GetFiles(root, "capture_" + id + ".metadata.json", SearchOption.AllDirectories))
@@ -96,11 +102,134 @@ namespace BlueBrick.Agent
                 ImagePath = artifact.Path,
                 MetadataPath = artifact.MetadataPath,
                 ThumbnailPath = artifact.ThumbnailPath,
-                LocalOnly = !artifact.SentToModel,
+                LocalOnly = !artifact.SentToModel && string.IsNullOrEmpty(artifact.TransmissionState),
+                TransmissionState = artifact.TransmissionState ?? "LOCAL_ONLY",
+                RuntimeBuildId = artifact.RuntimeBuildId,
+                ApprovalMode = artifact.ApprovalMode,
+                ApprovalPolicySource = artifact.ApprovalPolicySource,
+                SessionId = artifact.SessionId,
+                Sha256 = artifact.Sha256,
                 SentToModel = artifact.SentToModel,
                 RetentionPolicy = artifact.RetentionPolicy,
-                ReviewStatus = "pending"
+                ReviewStatus = artifact.ReviewStatus ?? "pending"
             };
+        }
+
+        private static void PersistMetadata(AssistantScreenshotArtifact artifact)
+        {
+            lock (ReviewLock)
+            {
+                // Annotation/capture refresh cannot overwrite a later review decision.
+                if (File.Exists(artifact.MetadataPath))
+                {
+                    var previous = JsonConvert.DeserializeObject<AssistantScreenshotArtifact>(File.ReadAllText(artifact.MetadataPath));
+                    artifact.ReviewStatus = previous?.ReviewStatus ?? "pending";
+                    artifact.ReviewedUtc = previous?.ReviewedUtc;
+                    artifact.CloudSendApproved = previous?.CloudSendApproved ?? false;
+                    artifact.ApprovedContentHash = previous?.ApprovedContentHash;
+                }
+                artifact.Receipt = BuildReceipt(artifact);
+                WriteMetadataAtomically(artifact.MetadataPath, artifact);
+            }
+        }
+
+        private static void WriteMetadataAtomically(string path, AssistantScreenshotArtifact artifact)
+        {
+            var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temp, JsonConvert.SerializeObject(artifact, Formatting.Indented));
+                if (File.Exists(path)) File.Replace(temp, path, null);
+                else File.Move(temp, path);
+            }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
+        }
+
+        internal static AssistantScreenshotArtifact Review(string screenshotId, string targetType, string targetId, string status, string root = null, string approvalMode = "MANUAL", string policySource = "explicit-user-review", string runtimeBuildId = null)
+        {
+            if (!Guid.TryParseExact(screenshotId, "N", out _) || screenshotId != targetId ||
+                (targetType != "screenshot" && targetType != "screenshot-upload") ||
+                (status != "approved" && status != "rejected"))
+                throw new ArgumentException("A valid screenshot identity, review target and approved/rejected decision are required.");
+            lock (ReviewLock)
+            {
+                root = root ?? Root;
+                var matches = Directory.Exists(root) ? Directory.GetFiles(root, "capture_" + screenshotId + ".metadata.json", SearchOption.AllDirectories) : Array.Empty<string>();
+                if (matches.Length != 1) throw new FileNotFoundException("Screenshot artifact was not found uniquely.");
+                var metadata = matches[0];
+                var artifact = JsonConvert.DeserializeObject<AssistantScreenshotArtifact>(File.ReadAllText(metadata));
+                if (artifact == null || artifact.ScreenshotId != screenshotId || artifact.ArtifactId != screenshotId ||
+                    !string.Equals(Path.GetFullPath(Path.ChangeExtension(artifact.Path, null) + ".metadata.json"), Path.GetFullPath(metadata), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Screenshot metadata identity does not match.");
+                if (targetType == "screenshot-upload")
+                {
+                    if (status == "approved" && artifact.ReviewStatus != "approved")
+                        throw new InvalidOperationException("Approve the local screenshot review before allowing upload.");
+                    artifact.CloudSendApproved = status == "approved";
+                    artifact.ApprovedContentHash = artifact.CloudSendApproved ? ContentHash(artifact.Path) : null;
+                }
+                else
+                {
+                    artifact.ReviewStatus = status;
+                    artifact.ApprovalMode = approvalMode;
+                    artifact.ApprovalPolicySource = policySource;
+                    artifact.RuntimeBuildId = runtimeBuildId ?? artifact.RuntimeBuildId;
+                    // Every changed local decision requires fresh, separate transmission consent.
+                    artifact.CloudSendApproved = false;
+                    artifact.ApprovedContentHash = null;
+                }
+                artifact.ReviewedUtc = DateTime.UtcNow;
+                artifact.Receipt = BuildReceipt(artifact);
+                WriteMetadataAtomically(metadata, artifact);
+                return artifact;
+            }
+        }
+
+        internal static void RecordProviderSuccess(string id, string modelId, string root = null)
+        {
+            lock (ReviewLock)
+            {
+                var artifact = FindArtifact(id, root);
+                if (artifact == null) throw new FileNotFoundException("Provider result artifact is missing.");
+                artifact.SentToModel = true;
+                artifact.TransmissionState = "SUCCEEDED";
+                artifact.ModelProfileId = modelId;
+                artifact.Receipt = BuildReceipt(artifact);
+                WriteMetadataAtomically(artifact.MetadataPath, artifact);
+            }
+        }
+
+        internal static void RecordTransmissionAttempt(string id, string modelId, string root = null)
+        {
+            lock (ReviewLock)
+            {
+                var artifact = FindArtifact(id, root);
+                if (artifact == null) throw new FileNotFoundException("Transmission artifact is missing.");
+                artifact.TransmissionState = "ATTEMPTED_OUTCOME_UNKNOWN";
+                artifact.ModelProfileId = modelId;
+                artifact.Receipt = BuildReceipt(artifact);
+                WriteMetadataAtomically(artifact.MetadataPath, artifact);
+            }
+        }
+
+        internal static void EnsureAttachmentTransmissionAllowed(string path, string root = null)
+        {
+            root = Path.GetFullPath(root ?? Root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!Path.GetFullPath(path).StartsWith(root, StringComparison.OrdinalIgnoreCase)) return;
+            var metadata = Path.ChangeExtension(path, null) + ".metadata.json";
+            if (!File.Exists(metadata)) throw new InvalidOperationException("SCREENSHOT_UPLOAD_NOT_APPROVED: capture metadata is missing.");
+            var artifact = JsonConvert.DeserializeObject<AssistantScreenshotArtifact>(File.ReadAllText(metadata));
+            if (artifact == null || artifact.ReviewStatus != "approved" || !artifact.CloudSendApproved ||
+                !string.Equals(Path.GetFullPath(artifact.Path ?? string.Empty), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(artifact.ApprovedContentHash, ContentHash(path), StringComparison.Ordinal))
+                throw new InvalidOperationException("SCREENSHOT_UPLOAD_NOT_APPROVED: approve review and explicitly allow the unchanged image upload.");
+        }
+
+        internal static string ContentHash(string path)
+        {
+            using (var stream = File.OpenRead(path))
+            using (var hash = SHA256.Create())
+                return BitConverter.ToString(hash.ComputeHash(stream)).Replace("-", string.Empty);
         }
 
         internal static string Root =>

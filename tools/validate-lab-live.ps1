@@ -48,7 +48,7 @@ if ($disc.Count) {
     if ($title) { Add-Result 'PASS' "Discovery ($($disc.Kind)): $($disc.Path)  Title='$title' Default=$dflt" }
     else { Add-Result 'WARN' "Discovery ($($disc.Kind)): exists but Title missing" }
     if ($disc.Kind -eq 'HKCU') {
-        Add-Result 'INFO' 'HKCU discovery present - launching SW 2025 SP5 will reveal if honored'
+        Add-Result 'WARN' 'HKCU-only discovery is not proof that SOLIDWORKS discovers the Lab add-in. Verify loading in an isolated Lab session; if ignored, the Lab HKLM discovery entry requires one-time elevated registration.'
     }
 } else {
     Add-Result 'FAIL' 'Discovery key missing (neither HKLM nor HKCU) -> run tools\register-lab-addin.ps1 elevated or -Mode PerUser'

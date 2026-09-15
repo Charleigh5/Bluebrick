@@ -1,0 +1,69 @@
+{
+  "schema": "bluebrick-react-preview.v1",
+  "runId": "BB20-UI-20260902-165104-R02",
+  "completedUtc": "2026-09-02T20:51:04.5331941Z",
+  "sourceDist": "C:\\Users\\cweir\\Documents\\GitHub\\VIRA GITHUB\\Bluebrick\\AssistantWeb\\dist",
+  "targetDist": "C:\\BlueBrick\\AssistantWeb\\dist",
+  "backupDir": "C:\\BlueBrick\\backups\\BB20-UI-20260902-165104-R02",
+  "source": {
+    "assistant-index.css": {
+      "sha256": "8B0281A263CD60E9A83A3CE332DC6D0C9A3BE2525337F3E3847080CFB5C87B27",
+      "sizeBytes": 39961,
+      "lastWriteUtc": "2026-09-02T20:49:10.2885875Z"
+    },
+    "assistant-web.js": {
+      "sha256": "9854EC54946987FBC91B069D62BBF56F416A8C42D99560316EBF52FF08BBE82B",
+      "sizeBytes": 2392081,
+      "lastWriteUtc": "2026-09-02T20:49:10.2875121Z"
+    },
+    "index.html": {
+      "sha256": "E370C9711592F2695CF0651F702AE809A69AC0DE9B635C6C5B4CC8A4A6C7237B",
+      "sizeBytes": 390,
+      "lastWriteUtc": "2026-09-02T20:49:10.2893824Z"
+    }
+  },
+  "targetBefore": {
+    "assistant-index.css": {
+      "sha256": "3298B3F959CD5A3D038AAAFF063D7BCE240B148E289B619E789BE9BCEBA2833D",
+      "sizeBytes": 26319,
+      "lastWriteUtc": "2026-08-27T13:13:52.6333880Z"
+    },
+    "assistant-web.js": {
+      "sha256": "817E6D68BADC2EF95633BAF9BA6C19D76AA1D8E8ADE3A65FF87179B6E7A01A65",
+      "sizeBytes": 211318,
+      "lastWriteUtc": "2026-08-27T13:13:52.6333880Z"
+    },
+    "index.html": {
+      "sha256": "E370C9711592F2695CF0651F702AE809A69AC0DE9B635C6C5B4CC8A4A6C7237B",
+      "sizeBytes": 390,
+      "lastWriteUtc": "2026-08-27T13:13:52.6343924Z"
+    }
+  },
+  "targetAfter": {
+    "assistant-index.css": {
+      "sha256": "8B0281A263CD60E9A83A3CE332DC6D0C9A3BE2525337F3E3847080CFB5C87B27",
+      "sizeBytes": 39961,
+      "lastWriteUtc": "2026-09-02T20:49:10.2885875Z"
+    },
+    "assistant-web.js": {
+      "sha256": "9854EC54946987FBC91B069D62BBF56F416A8C42D99560316EBF52FF08BBE82B",
+      "sizeBytes": 2392081,
+      "lastWriteUtc": "2026-09-02T20:49:10.2875121Z"
+    },
+    "index.html": {
+      "sha256": "E370C9711592F2695CF0651F702AE809A69AC0DE9B635C6C5B4CC8A4A6C7237B",
+      "sizeBytes": 390,
+      "lastWriteUtc": "2026-09-02T20:49:10.2893824Z"
+    }
+  },
+  "filesCopied": [
+    "index.html",
+    "assistant-index.css",
+    "assistant-web.js"
+  ],
+  "dllChanged": false,
+  "configChanged": false,
+  "registryChanged": false,
+  "hashParity": true,
+  "backupParity": true
+}

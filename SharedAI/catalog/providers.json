@@ -1,0 +1,20 @@
+[
+  {
+    "id": "nvidia",
+    "protocol": "openai-chat-completions",
+    "baseUrl": "https://integrate.api.nvidia.com/v1",
+    "credentialBinding": "NVIDIA_API_KEY"
+  },
+  {
+    "id": "google-gemini",
+    "protocol": "openai-chat-completions",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "credentialBinding": "GEMINI_API_KEY"
+  },
+  {
+    "id": "openrouter",
+    "protocol": "openai-chat-completions",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "credentialBinding": "OPENROUTER_API_KEY"
+  }
+]

@@ -1,0 +1,27 @@
+BB20-UI-20260902-111609-R01
+2026-09-02T15:16:13Z repo/pretest inspection: PASS
+git root/branch/HEAD/status/worktrees: PASS; canonical checkout clean at f3c0905
+Visual Studio build gate: PASS; LegacyBuildReady=true
+SOLIDWORKS process inventory: PASS read-only; PID 29820 is pre-existing and user-owned
+Production hashes/registration snapshot: PASS read-only
+Lab hashes/registration/frontend snapshot: PASS read-only
+Frontend source identity: PASS_UNAMBIGUOUS
+2026-09-02T15:17:49Z npm.cmd run check:deps: exit 0
+2026-09-02T15:17:49Z npm.cmd run typecheck: exit 0
+2026-09-02T15:17:49Z npm.cmd run build: exit 0; Vite 8.0.16; 45 modules
+2026-09-02T15:17:49Z npm.cmd run verify:ui-activation: exit 0; STATIC_SOURCE_CONTRACT_ONLY
+Source dist manifest: PASS; exact index/css/js triplet and relative references
+2026-09-02T15:18:43Z scripts/bluebrick.ps1 build Lab: exit 0; MSBuild 17.14.51; 0 warnings; 0 errors
+2026-09-02T15:18:47Z npm.cmd run verify:output-lab: exit 0; source/build parity PASS
+Deployment lifecycle hardening: PASS focused verifier; frontend readiness/backup/manifest/hash gates
+2026-09-02T15:22:01Z governed Lab launch: exit 0; backup C:\BlueBrickLab\backups\20260902-112158; PID 49356
+2026-09-02T15:22:13Z governed Lab smoke: mandatory checks PASS; one nonfatal COM release warning
+Runtime observation: PID 49356 responsive; Lab DLL not observed; port 17179 absent; Lab telemetry absent
+Registration diagnosis: HKCU Lab keys present; HKLM Lab discovery key absent
+Primary failure: F09_WRONG_REGISTRATION
+Elevated Mode All attempt 1: command-line Confirm parse error; no write
+Elevated Mode All attempt 2: UAC canceled by user; no write
+2026-09-02T15:25:09Z npm.cmd run verify:transport: exit 0
+2026-09-02T15:25:09Z npm.cmd run verify:replay: exit 0
+2026-09-02T15:25:09Z npm.cmd run smoke:narrow: exit 0
+Production DLL/config hashes unchanged: PASS

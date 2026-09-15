@@ -1,0 +1,10 @@
+{
+  "schema": "bluebrick.bb20-react-bootstrap-evidence.v1",
+  "runId": "BB20-UI-20260902-111609-R01",
+  "resourceLoad": "NOT_REACHED",
+  "rootPresent": "NOT_REACHED",
+  "reactMounted": "NOT_REACHED",
+  "compatibilityBridgeReady": "NOT_REACHED",
+  "unhandledJsError": "UNKNOWN",
+  "reason": "Execution stopped at F09_WRONG_REGISTRATION before WebView creation."
+}

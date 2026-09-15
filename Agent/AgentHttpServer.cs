@@ -429,6 +429,42 @@ namespace BlueBrick.Agent
                 }
             }
 
+            if (path == "/assistant/review")
+            {
+                if (method != "POST")
+                {
+                    context.Response.StatusCode = 405;
+                    await WriteAssistantError(context, "method_not_allowed", "Use POST for screenshot review.", traceId).ConfigureAwait(false);
+                    return;
+                }
+                try
+                {
+                    var artifact = AssistantScreenshotArtifactStore.Review(json.Value<string>("screenshotId"),
+                        json.Value<string>("targetType"), json.Value<string>("targetId"), json.Value<string>("reviewStatus"));
+                    var conversationStore = new AssistantSessionStore();
+                    if (artifact.ReviewStatus == "rejected")
+                        conversationStore.DetachScreenshot(artifact.SessionId, artifact.ArtifactId);
+                    else if (_config.Assistant.Screenshots?.AutoAttachToChat == true)
+                        conversationStore.AttachScreenshot(artifact, new AssistantScreenshotSettings { AutoAttachToChat = true }, artifact.RuntimeBuildId);
+                    await WriteAssistantJson(context, new { artifact, traceId }, traceId).ConfigureAwait(false);
+                }
+                catch (FileNotFoundException)
+                {
+                    context.Response.StatusCode = 404;
+                    await WriteAssistantError(context, "not_found", "Screenshot artifact not found.", traceId).ConfigureAwait(false);
+                }
+                catch (ArgumentException)
+                {
+                    context.Response.StatusCode = 400;
+                    await WriteAssistantError(context, "invalid_review", "Invalid screenshot review request.", traceId).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException || ex is JsonException)
+                {
+                    context.Response.StatusCode = 409;
+                    await WriteAssistantError(context, "review_not_persisted", "Review could not be persisted. No success acknowledged.", traceId).ConfigureAwait(false);
+                }
+                return;
+            }
             switch (path)
             {
                 case "/sw/open":
@@ -1316,7 +1352,14 @@ private string ResolveVaultName()
                 return;
             }
 
-            var status = await _assistantService.SetModelAsync(modelId).ConfigureAwait(false);
+            AssistantPreviewStatus status;
+            try { status = await _assistantService.SetModelAsync(modelId).ConfigureAwait(false); }
+            catch (InvalidOperationException)
+            {
+                context.Response.StatusCode = 409;
+                await WriteAssistantError(context, "model_unavailable", "Requested model is unknown or disabled.", traceId).ConfigureAwait(false);
+                return;
+            }
             await WriteAssistantJson(context, new
             {
                 model = status.Model,

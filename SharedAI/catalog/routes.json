@@ -1,0 +1,14 @@
+{
+  "default": [
+    "nvidia-kimi-k3",
+    "google-gemini-3-8-flash"
+  ],
+  "vision": [
+    "nvidia-kimi-k3",
+    "google-gemini-3-8-flash"
+  ],
+  "tools": [
+    "nvidia-kimi-k3",
+    "google-gemini-3-8-flash"
+  ]
+}

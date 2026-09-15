@@ -1,0 +1,28 @@
+{
+  "schema": "bluebrick.frontend-source-identity.v1",
+  "runId": "BB20-UI-20260902-111609-R01",
+  "sourceRoot": "C:\\Users\\cweir\\Documents\\GitHub\\VIRA GITHUB\\Bluebrick\\AssistantWeb",
+  "entrypoint": "AssistantWeb/src/main.tsx -> AssistantWeb/src/App.tsx",
+  "framework": "React 19.2.7 + Vite 8.0.16 + TypeScript 6.0.3",
+  "packageVersion": "0.1.0",
+  "gitCommit": "f3c0905137da6ac5ffe3523d3aa852c26fa18c48",
+  "latestFrontendImplementationCommit": "9a26e89bb2c7e320924b39a7edc65fa86fa0559f",
+  "buildCommand": "npm.cmd run build",
+  "expectedOutputDirectory": "AssistantWeb/dist",
+  "expectedArtifacts": [
+    "index.html",
+    "assistant-index.css",
+    "assistant-web.js"
+  ],
+  "authorityEvidence": [
+    "BlueBrick.csproj packages AssistantWeb/dist",
+    "Agent/AssistantWebViewHost.cs resolves AssistantWeb/dist/index.html",
+    "AssistantWeb/vite.config.mjs fixes the expected output names",
+    "git history forward-ported the modern React AssistantWeb at cb813c45e6ac3de217765c972ab41784beeb67aa"
+  ],
+  "alternateCandidateDisposition": {
+    "path": "BlueBrick_IT_Review_2026-06-11/Bluebrick/AssistantWeb",
+    "status": "ARCHIVED_REVIEW_COPY_NOT_PACKAGED_OR_HOST_REFERENCED"
+  },
+  "result": "PASS_UNAMBIGUOUS"
+}

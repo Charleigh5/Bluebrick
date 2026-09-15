@@ -1,0 +1,10 @@
+{
+  "schema": "bluebrick.bb20-webview-resource-evidence.v1",
+  "runId": "BB20-UI-20260902-111609-R01",
+  "reached": false,
+  "reason": "Lab add-in was not discovered/loaded by SOLIDWORKS; no Lab WebView telemetry was created.",
+  "firstFailure": "F09_WRONG_REGISTRATION",
+  "resolvedDistPath": "NOT_REACHED",
+  "resources": [],
+  "result": "NOT_RUN_AFTER_EARLIER_FAILURE"
+}

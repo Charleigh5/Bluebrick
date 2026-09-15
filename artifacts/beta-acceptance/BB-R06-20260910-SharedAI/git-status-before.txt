@@ -1,0 +1,37 @@
+ M Agent/AgentConfig.cs
+ M Agent/AgentHttpServer.cs
+ M Agent/AssistantModels.cs
+ M Agent/AssistantScreenshotArtifactStore.cs
+ M Agent/AssistantSessionStore.cs
+ M Agent/AssistantWebViewDiagnostics.cs
+ M Agent/AssistantWebViewHost.cs
+ M Agent/OpenAiAssistantService.cs
+ M AssistantPanel.cs
+ M AssistantWeb/dist/assistant-web.js
+ M AssistantWeb/scripts/verify-packaged-output-contract.mjs
+ M AssistantWeb/src/App.tsx
+ M AssistantWeb/src/bridge/blueBrickWebViewBridge.ts
+ M AssistantWeb/src/runtimeIdentity.ts
+ M BlueBrick.Relay/Models/RelayContracts.cs
+ M BlueBrick.Relay/Program.cs
+ M BlueBrick.UI.Tests/Agent/NativePortAndStartupTests.cs
+ M BlueBrick.UI.Tests/BlueBrick.UI.Tests.csproj
+ M BlueBrick.csproj
+ M config/appsettings.json
+ M config/appsettings.lab.json
+ M scripts/bluebrick.ps1
+ M tools/validate-lab-live.ps1
+?? Agent/RuntimeGenerationGuard.cs
+?? BlueBrick.UI.Tests/Agent/RecoveryContractTests.cs
+?? BlueBrick.UI.Tests/Agent/ScreenshotConversationTests.cs
+?? BlueBrick.UI.Tests/Agent/VisionRoutingTests.cs
+?? artifacts/beta-acceptance/BB-LAB-20260908-discovery/
+?? artifacts/beta-acceptance/BB-R06-20260910-SharedAI/
+?? artifacts/beta-acceptance/BB20-SOL-20260903-205554-R04/
+?? artifacts/beta-acceptance/BB20-UI-20260902-111609-R01/
+?? artifacts/beta-acceptance/BB20-UI-20260902-165104-R02/
+?? artifacts/beta-acceptance/BB20-UI-20260903-143600-R03/
+?? docs/beta/BB20_FRONTEND_DEPLOYMENT_CONTRACT.md
+?? docs/beta/BB20_RUNTIME_IDENTITY.json
+?? docs/beta/BB20_UI_ACTIVATION_ACCEPTANCE.md
+?? tools/deploy-lab-candidate.ps1

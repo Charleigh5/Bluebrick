@@ -35,7 +35,7 @@ export type PayloadFor<TName extends BrowserToHostMessageName> =
         : TName extends "search"
           ? { type: "search"; message: string; scopeId?: string }
           : TName extends "selectModel"
-            ? { type: "selectModel"; modelId: string }
+            ? { type: "selectModel"; modelId: string; operationId?: string }
             : TName extends "selectScope"
               ? { type: "selectScope"; scopeId: string }
               : TName extends "sendMessage"
@@ -47,6 +47,7 @@ export type PayloadFor<TName extends BrowserToHostMessageName> =
                     : TName extends "reviewScreenshotItem"
                       ? {
                           type: "reviewScreenshotItem";
+                          operationId?: string;
                           screenshotId: string;
                           targetType?: string;
                           targetId?: string;

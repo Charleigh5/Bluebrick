@@ -58,10 +58,10 @@ namespace BlueBrick.Agent
         {
         }
 
-        internal OpenAiAssistantService(AgentConfig config, AssistantToolService toolService)
+        internal OpenAiAssistantService(AgentConfig config, AssistantToolService toolService, AssistantSessionStore store = null)
         {
             _config = config;
-            _store = new AssistantSessionStore();
+            _store = store ?? new AssistantSessionStore();
             _registryCache = new RegistryCache(CacheTtl);
             _toolService = toolService;
         }
@@ -88,7 +88,11 @@ namespace BlueBrick.Agent
 
         public Task<AssistantScreenshotArtifact> CaptureScreenshotArtifactAsync(AssistantScreenshotCaptureRequest request)
         {
-            return Task.FromResult(AssistantImageTools.CaptureWindowArtifact(request));
+            // Resolve identity before capture so a status failure cannot orphan a newly captured artifact.
+            var runtimeBuildId = BuildStatus().RuntimeBuildId;
+            var artifact = AssistantImageTools.CaptureWindowArtifact(request);
+            _store.AttachScreenshot(artifact, _config.Assistant.Screenshots, runtimeBuildId);
+            return Task.FromResult(artifact);
         }
 
         public Task<AssistantScreenshotAnalysisResult> AnalyzeScreenshotAsync(AssistantScreenshotAnalysisRequest request)
@@ -126,11 +130,23 @@ namespace BlueBrick.Agent
 
         public Task<IList<AssistantModelProfile>> GetModelsAsync()
         {
-            return Task.FromResult<IList<AssistantModelProfile>>(GetCachedProfiles());
+            var models = GetCachedProfiles().Select(p =>
+            {
+                var copy = Newtonsoft.Json.JsonConvert.DeserializeObject<AssistantModelProfile>(Newtonsoft.Json.JsonConvert.SerializeObject(p));
+                var state = SharedRuntimeState(p);
+                copy.RuntimeEligible = state.Available;
+                copy.Available = state.Available ? (bool?)null : false;
+                copy.UnavailableReason = state.Reason;
+                copy.AvailabilityEvidence = "credential_presence_only; provider_health_unknown";
+                return copy;
+            }).ToList();
+            return Task.FromResult<IList<AssistantModelProfile>>(models);
         }
 
         public Task<AssistantPreviewStatus> SetModelAsync(string modelId)
         {
+            if (string.IsNullOrWhiteSpace(modelId))
+                throw new InvalidOperationException("MODEL_UNAVAILABLE: model ID is required.");
             var profile = ResolveProfile(modelId);
             Registry.SetValue(AppIdentity.RegistryRoot, AssistantModelValueName, profile.Id, RegistryValueKind.String);
             _registryCache.Invalidate(AssistantModelValueName);
@@ -261,23 +277,37 @@ namespace BlueBrick.Agent
             IList<string> attachmentPaths, string scopeId = null)
         {
             var session = _store.Get(sessionId) ?? _store.Create();
-            var uploadPaths = _config.Assistant.EnableUploads
-                ? attachmentPaths?.Where(File.Exists).ToList() ?? new List<string>()
-                : new List<string>();
+            List<string> uploadPaths;
+            try { uploadPaths = ResolveUploadPaths(session, attachmentPaths); }
+            catch (Exception ex) { return new AssistantSessionResponse { SessionId = session.SessionId,
+                AssistantAvailable = false, ErrorCode = "attachment_blocked", Error = ex.Message }; }
 
             var userMessage = new AssistantMessage
             {
                 Role = "user",
                 Text = message?.Trim() ?? string.Empty,
                 AttachmentPaths = uploadPaths,
+                AttachmentArtifactIds = new List<string>(session.PendingScreenshotIds),
                 CreatedUtc = DateTime.UtcNow
             };
+            // Get() returns a detached snapshot; keep the proposed turn in memory until success.
             session.Messages.Add(userMessage);
             TrimHistory(session);
-            _store.Save(session);
 
-            var status = BuildStatus();
-            if (string.Equals(status.AssistantMode, MockMode, StringComparison.OrdinalIgnoreCase))
+            AssistantModelProfile profile;
+            try { profile = ResolveMessageProfile(session); }
+            catch (Exception ex) { return new AssistantSessionResponse { SessionId = session.SessionId,
+                AssistantAvailable = false, ErrorCode = SessionHasImages(session) ? "vision_model_unavailable" : "model_unavailable", Error = ex.Message }; }
+            userMessage.ResolvedModelId = profile.Id;
+            var keyInfo = ResolveApiKeyInfo(profile);
+            var status = BuildStatusForProfile(profile);
+            if (SessionHasImages(session) && (!keyInfo.Configured || ResolveMode(keyInfo.Configured) == MockMode))
+                return new AssistantSessionResponse { SessionId = session.SessionId, Message = userMessage,
+                    AssistantAvailable = false, ErrorCode = "provider_dependency", Error = "BLOCKED_DEPENDENCY: resolved vision model requires configured credentials and real provider mode." };
+            if (status.AssistantMode == "unavailable")
+                return new AssistantSessionResponse { SessionId = session.SessionId, AssistantAvailable = false,
+                    ErrorCode = "model_unavailable", Error = "No enabled model is configured." };
+            if (!SessionHasImages(session) && string.Equals(status.AssistantMode, MockMode, StringComparison.OrdinalIgnoreCase))
             {
                 var mockMessage = new AssistantMessage
                 {
@@ -296,8 +326,7 @@ namespace BlueBrick.Agent
                 };
             }
 
-            var profile = ResolveProfile();
-            var keyInfo = ResolveApiKeyInfo(profile);
+
             if (!keyInfo.Configured)
             {
                 return new AssistantSessionResponse
@@ -316,7 +345,8 @@ namespace BlueBrick.Agent
 
             while (true)
             {
-                body = await SendChatCompletionAsync(BuildChatRequestBody(session, false, extraMessages.Count > 0 ? extraMessages : null), keyInfo.ApiKey, profile).ConfigureAwait(false);
+                body = await SendChatCompletionAsync(BuildChatRequestBody(session, profile, false, extraMessages.Count > 0 ? extraMessages : null), keyInfo.ApiKey, profile,
+                    () => _store.RecordTransmissionAttempt(session, profile.Id)).ConfigureAwait(false);
                 var responseJson = JObject.Parse(body);
                 var toolCalls = ExtractToolCalls(responseJson);
 
@@ -342,9 +372,11 @@ namespace BlueBrick.Agent
             {
                 Role = "assistant",
                 Text = ExtractAssistantText(body),
+                ResolvedModelId = profile.Id,
                 CreatedUtc = DateTime.UtcNow
             };
             session.Messages.Add(assistantMessage);
+            _store.ConsumePendingScreenshots(session, userMessage);
             TrimHistory(session);
             _store.Save(session);
             return new AssistantSessionResponse
@@ -371,23 +403,42 @@ namespace BlueBrick.Agent
         IList<string> attachmentPaths, Action<AssistantStreamChunk> onChunk, CancellationToken cancellationToken, string scopeId = null)
     {
         var session = _store.Get(sessionId) ?? _store.Create();
-        var uploadPaths = _config.Assistant.EnableUploads
-            ? attachmentPaths?.Where(File.Exists).ToList() ?? new List<string>()
-            : new List<string>();
+        List<string> uploadPaths;
+        try { uploadPaths = ResolveUploadPaths(session, attachmentPaths); }
+        catch (Exception ex) { onChunk(AssistantStreamChunk.Error("attachment_blocked", ex.Message));
+            onChunk(AssistantStreamChunk.Complete()); return; }
 
         var userMessage = new AssistantMessage
         {
             Role = "user",
             Text = message?.Trim() ?? string.Empty,
             AttachmentPaths = uploadPaths,
+                AttachmentArtifactIds = new List<string>(session.PendingScreenshotIds),
             CreatedUtc = DateTime.UtcNow
         };
+        // Get() returns a detached snapshot; keep the proposed turn in memory until success.
         session.Messages.Add(userMessage);
         TrimHistory(session);
-        _store.Save(session);
 
-        var status = BuildStatus();
-        if (string.Equals(status.AssistantMode, MockMode, StringComparison.OrdinalIgnoreCase))
+        AssistantModelProfile profile;
+        try { profile = ResolveMessageProfile(session, true); }
+        catch (Exception ex) { onChunk(AssistantStreamChunk.Error(SessionHasImages(session) ? "vision_model_unavailable" : "model_unavailable", ex.Message));
+            onChunk(AssistantStreamChunk.Complete()); return; }
+        userMessage.ResolvedModelId = profile.Id;
+        onChunk(new AssistantStreamChunk { Type = "model_resolved", Text = profile.Id });
+        var keyInfo = ResolveApiKeyInfo(profile);
+        var status = BuildStatusForProfile(profile);
+        if (SessionHasImages(session) && (!keyInfo.Configured || ResolveMode(keyInfo.Configured) == MockMode))
+        {
+            onChunk(AssistantStreamChunk.Error("provider_dependency", "BLOCKED_DEPENDENCY: resolved vision model requires configured credentials and real provider mode."));
+            onChunk(AssistantStreamChunk.Complete()); return;
+        }
+        if (status.AssistantMode == "unavailable")
+        {
+            onChunk(AssistantStreamChunk.Error("model_unavailable", "No enabled model is configured."));
+            return;
+        }
+        if (!SessionHasImages(session) && string.Equals(status.AssistantMode, MockMode, StringComparison.OrdinalIgnoreCase))
         {
             var mockText = BuildMockResponse(userMessage, status);
             var mockMessage = new AssistantMessage
@@ -410,8 +461,7 @@ namespace BlueBrick.Agent
             return;
         }
 
-        var profile = ResolveProfile();
-        var keyInfo = ResolveApiKeyInfo(profile);
+
         if (!keyInfo.Configured)
         {
             onChunk(AssistantStreamChunk.Error("key_missing",
@@ -425,18 +475,20 @@ namespace BlueBrick.Agent
             try
             {
                 var fallbackBody = await SendChatCompletionAsync(
-                    BuildChatRequestBody(session, false, null),
+                    BuildChatRequestBody(session, profile, false, null),
                     keyInfo.ApiKey,
-                    profile).ConfigureAwait(false);
+                    profile, () => _store.RecordTransmissionAttempt(session, profile.Id)).ConfigureAwait(false);
                 var fallbackText = ExtractAssistantText(fallbackBody);
                 onChunk(AssistantStreamChunk.TextDelta(fallbackText));
                 var fallbackMessage = new AssistantMessage
                 {
                     Role = "assistant",
                     Text = fallbackText,
+                    ResolvedModelId = profile.Id,
                     CreatedUtc = DateTime.UtcNow
                 };
                 session.Messages.Add(fallbackMessage);
+                _store.ConsumePendingScreenshots(session, userMessage);
                 TrimHistory(session);
                 _store.Save(session);
                 onChunk(AssistantStreamChunk.Complete());
@@ -464,7 +516,7 @@ namespace BlueBrick.Agent
             var roundText = new StringBuilder();
             var hasToolCalls = false;
 
-                await StreamChatCompletionAsync(BuildChatRequestBody(session, true, extraMessages.Count > 0 ? extraMessages : null), keyInfo.ApiKey, profile, chunk =>
+                await StreamChatCompletionAsync(BuildChatRequestBody(session, profile, true, extraMessages.Count > 0 ? extraMessages : null), keyInfo.ApiKey, profile, chunk =>
                 {
                     roundText.Append(chunk);
                     onChunk(AssistantStreamChunk.TextDelta(chunk));
@@ -474,7 +526,7 @@ namespace BlueBrick.Agent
                     var tc = new LlmToolCall { Id = id, Name = name, Arguments = args };
                     pendingToolCalls.Add(tc);
                     onChunk(AssistantStreamChunk.ToolCall(name, id, args));
-                }).ConfigureAwait(false);
+                }, () => _store.RecordTransmissionAttempt(session, profile.Id)).ConfigureAwait(false);
 
                 fullText.Append(roundText);
 
@@ -504,27 +556,18 @@ namespace BlueBrick.Agent
             {
                 Role = "assistant",
                 Text = fullText.ToString(),
+                ResolvedModelId = profile.Id,
                 CreatedUtc = DateTime.UtcNow
             };
             session.Messages.Add(assistantMessage);
+            _store.ConsumePendingScreenshots(session, userMessage);
             TrimHistory(session);
             _store.Save(session);
             onChunk(AssistantStreamChunk.Complete());
         }
         catch (OperationCanceledException)
         {
-            if (fullText.Length > 0)
-            {
-                var partialMessage = new AssistantMessage
-                {
-                    Role = "assistant",
-                    Text = fullText.ToString(),
-                    CreatedUtc = DateTime.UtcNow
-                };
-                session.Messages.Add(partialMessage);
-                TrimHistory(session);
-                _store.Save(session);
-            }
+            // Partial output was not a successful provider transaction; do not persist the proposed turn.
             onChunk(AssistantStreamChunk.Error("cancelled", "Request cancelled."));
             onChunk(AssistantStreamChunk.Complete());
         }
@@ -540,7 +583,29 @@ namespace BlueBrick.Agent
 
     private AssistantPreviewStatus BuildStatus()
         {
-            var profile = ResolveProfile();
+            return BuildStatusForProfile(null);
+        }
+
+    private AssistantPreviewStatus BuildStatusForProfile(AssistantModelProfile resolvedProfile)
+        {
+            AssistantModelProfile profile;
+            try { profile = resolvedProfile ?? ResolveProfile(); }
+            catch (InvalidOperationException)
+            {
+                return new AssistantPreviewStatus
+                {
+                    Model = "UNKNOWN", Configured = false, KeyConfigured = false,
+                    KeySource = "not_resolved", AssistantMode = "unavailable",
+                    ConfigPath = _config.ConfigurationDiagnostics?.ConfigPath,
+                    ConfigHash = _config.ConfigurationDiagnostics?.ConfigHash,
+                    ConfigSchemaVersion = _config.ConfigSchemaVersion,
+                    ConfigurationLoadStatus = _config.ConfigurationDiagnostics?.ConfigurationLoadStatus,
+                    BridgePort = _config.Agent?.BridgePort ?? AppIdentity.BridgePort,
+                    UseReactWebView = _config.Assistant.UseReactWebView,
+                    RuntimeGenerationStatus = "NOT_VERIFIED",
+                    Checklist = new[] { "MODEL_UNAVAILABLE: no enabled model is configured." }
+                };
+            }
             var keyInfo = ResolveApiKeyInfo(profile);
             var effectiveMode = ResolveMode(keyInfo.Configured);
             var checklist = new List<string>();
@@ -570,6 +635,20 @@ namespace BlueBrick.Agent
                 checklist.Add("Assistant real mode is selected but no API key is configured.");
             }
 
+            RuntimeGenerationCheck generation = null;
+            if (AppIdentity.IsLabBuild)
+            {
+                var assemblyPath = typeof(OpenAiAssistantService).Assembly.Location;
+                var assemblyRoot = Path.GetDirectoryName(assemblyPath);
+                generation = RuntimeGenerationGuard.Validate(
+                    Path.Combine(assemblyRoot, "runtime-manifest.json"),
+                    "Lab",
+                    assemblyPath,
+                    _config.ConfigurationDiagnostics?.ConfigPath,
+                    Path.Combine(assemblyRoot, "AssistantWeb", "dist"),
+                    _config.ConfigSchemaVersion);
+            }
+
             return new AssistantPreviewStatus
             {
                 AssistantMode = effectiveMode,
@@ -587,6 +666,15 @@ namespace BlueBrick.Agent
                 WorkingFolder = AppIdentity.DefaultWorkingFolder,
                 BridgePort = _config.Agent.BridgePort,
                 BridgeUrl = "http://127.0.0.1:" + _config.Agent.BridgePort,
+                UseReactWebView = _config.Assistant.UseReactWebView,
+                ConfigPath = _config.ConfigurationDiagnostics?.ConfigPath,
+                ConfigHash = _config.ConfigurationDiagnostics?.ConfigHash,
+                ConfigSchemaVersion = _config.ConfigurationDiagnostics?.ConfigSchemaVersion,
+                ConfigurationLoadStatus = _config.ConfigurationDiagnostics?.ConfigurationLoadStatus,
+                AssistantValueSource = _config.ConfigurationDiagnostics?.AssistantValueSource,
+                RuntimeGenerationStatus = generation?.Code ?? "NOT_REQUIRED_FOR_PRODUCTION",
+                RuntimeGenerationDetail = generation?.Detail,
+                RuntimeBuildId = generation?.BuildId,
                 LocalVaultExists = localVaultExists,
                 SampleSeedExists = sampleSeedExists,
                 AgentTokenConfigured = tokenConfigured,
@@ -599,9 +687,11 @@ namespace BlueBrick.Agent
             };
         }
 
-        private string BuildChatRequestBody(AssistantSession session, bool streaming = false, JArray extraMessages = null)
+        internal string BuildChatRequestBody(AssistantSession session, AssistantModelProfile profile, bool streaming = false, JArray extraMessages = null)
         {
-            var profile = ResolveProfile();
+            if (profile == null) throw new InvalidOperationException("MODEL_UNAVAILABLE: no resolved model.");
+            if (SessionHasImages(session) && !profile.SupportsVision)
+                throw new InvalidOperationException("VISION_MODEL_UNAVAILABLE: image input requires a compatible model.");
             var messages = new JArray();
             messages.Add(new JObject
             {
@@ -655,7 +745,7 @@ namespace BlueBrick.Agent
             return requestObj.ToString(Formatting.None);
         }
 
-        private JToken BuildMessageContent(AssistantMessage msg, string sessionId)
+        internal JToken BuildMessageContent(AssistantMessage msg, string sessionId, string screenshotRoot = null)
         {
             var content = new JArray
             {
@@ -666,34 +756,98 @@ namespace BlueBrick.Agent
                 }
             };
 
+            if (msg.Role == "user" && msg.AttachmentPaths.Count > 0 && !_config.Assistant.EnableUploads)
+                throw new InvalidOperationException("ATTACHMENT_BLOCKED: uploads are disabled.");
             if (_config.Assistant.EnableUploads && msg.Role == "user")
             {
                 long totalBytes = 0;
                 var maxBytes = _config.Assistant.MaxTotalAttachmentBytes;
                 var enforceCap = maxBytes > 0;
-                foreach (var attachmentPath in msg.AttachmentPaths.Select(path =>
-                    AssistantImageTools.PrepareAttachment(sessionId, path,
-                        _config.Assistant.MaxImageDimension, _config.Assistant.JpegQuality))
-                    .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path)))
+                foreach (var originalPath in msg.AttachmentPaths)
                 {
-                    var fi = new FileInfo(attachmentPath);
-                    if (enforceCap && totalBytes + fi.Length > maxBytes) break;
-                    totalBytes += fi.Length;
-
-                    var base64 = Convert.ToBase64String(File.ReadAllBytes(attachmentPath));
-                    content.Add(new JObject
+                    ValidateImagePath(originalPath);
+                    // Deny concurrent replacement while consent is checked and the image is converted/read.
+                    using (var sourceLock = File.Open(originalPath, FileMode.Open, FileAccess.Read, FileShare.Read))
                     {
-                        ["type"] = "image_url",
-                        ["image_url"] = new JObject
+                        AssistantScreenshotArtifactStore.EnsureAttachmentTransmissionAllowed(originalPath, screenshotRoot);
+                        var attachmentPath = AssistantImageTools.PrepareAttachment(sessionId, originalPath,
+                            _config.Assistant.MaxImageDimension, _config.Assistant.JpegQuality);
+                        if (string.IsNullOrWhiteSpace(attachmentPath) || !File.Exists(attachmentPath))
+                            throw new InvalidOperationException("ATTACHMENT_BLOCKED: image preparation failed.");
+                        var bytes = File.ReadAllBytes(attachmentPath);
+                        if (enforceCap && totalBytes + bytes.LongLength > maxBytes)
+                            throw new InvalidOperationException("ATTACHMENT_BLOCKED: image size limit exceeded.");
+                        totalBytes += bytes.LongLength;
+                        AssistantScreenshotArtifactStore.EnsureAttachmentTransmissionAllowed(originalPath, screenshotRoot);
+                        content.Add(new JObject
                         {
-                            ["url"] = "data:image/jpeg;base64," + base64,
-                            ["detail"] = _config.Assistant.Detail
-                        }
-                    });
+                            ["type"] = "image_url",
+                            ["image_url"] = new JObject
+                            {
+                                ["url"] = "data:image/jpeg;base64," + Convert.ToBase64String(bytes),
+                                ["detail"] = _config.Assistant.Detail
+                            }
+                        });
+                    }
                 }
             }
 
             return content.Count == 1 ? (JToken)content[0]["text"] : content;
+        }
+
+        private List<string> ResolveUploadPaths(AssistantSession session, IList<string> paths)
+        {
+            var result = (paths ?? new List<string>()).Concat(_store.ResolvePendingScreenshotPaths(session))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (result.Count > 0 && !_config.Assistant.EnableUploads)
+                throw new InvalidOperationException("ATTACHMENT_BLOCKED: uploads are disabled.");
+            foreach (var path in result) ValidateImagePath(path);
+            return result;
+        }
+
+        private static void ValidateImagePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                throw new InvalidOperationException("ATTACHMENT_BLOCKED: image is missing.");
+            var extension = Path.GetExtension(path).ToLowerInvariant();
+            if (extension != ".png" && extension != ".jpg" && extension != ".jpeg" && extension != ".bmp" && extension != ".gif")
+                throw new InvalidOperationException("ATTACHMENT_BLOCKED: document input is not supported by this image transport.");
+        }
+
+        private static bool SessionHasImages(AssistantSession session)
+        {
+            return session.Messages.Any(m => m.Role == "user" && m.AttachmentPaths != null && m.AttachmentPaths.Count > 0);
+        }
+
+        private AssistantModelProfile ResolveMessageProfile(AssistantSession session, bool streaming = false)
+        {
+            if (_config.SharedAiCatalog != null)
+            {
+                var profiles = GetCachedProfiles();
+                var vision = SessionHasImages(session);
+                var selected = _registryCache.GetValue(AppIdentity.RegistryRoot, AssistantModelValueName);
+                var resolved = SharedAiProfiles.Resolve(_config.SharedAiCatalog,
+                    profiles.ToDictionary(p => p.Id, SharedRuntimeState), vision, streaming, selected);
+                return profiles.Single(p => p.Id == resolved);
+            }
+            return ResolveImageProfile(ResolveProfile(), GetCachedProfiles(), SessionHasImages(session),
+                _config.Assistant.PreferredVisionModelId, _config.Assistant.VisionFallbackModelId);
+        }
+
+        // Capability declarations select the route. Credential presence is a separate dependency gate.
+        internal static AssistantModelProfile ResolveImageProfile(AssistantModelProfile selected,
+            IEnumerable<AssistantModelProfile> profiles, bool requiresImage, string preferredId, string fallbackId)
+        {
+            if (selected != null && selected.Enabled && selected.SupportsText && (!requiresImage || selected.SupportsVision))
+                return selected;
+            if (!requiresImage) throw new InvalidOperationException("MODEL_UNAVAILABLE: selected model cannot accept text.");
+            foreach (var id in new[] { preferredId, fallbackId })
+            {
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                var candidate = profiles.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+                if (candidate != null && candidate.Enabled && candidate.SupportsText && candidate.SupportsVision) return candidate;
+            }
+            throw new InvalidOperationException("VISION_MODEL_UNAVAILABLE: configure an enabled preferred or fallback vision model. No image was sent.");
         }
 
         private JArray GetToolSchemas()
@@ -917,7 +1071,7 @@ namespace BlueBrick.Agent
             classified.Message);
     }
 
-    private async Task<string> SendChatCompletionAsync(string requestBody, string apiKey, AssistantModelProfile profile)
+    private async Task<string> SendChatCompletionAsync(string requestBody, string apiKey, AssistantModelProfile profile, Action beforeTransport = null)
     {
         LogChatRequestShape(requestBody, profile);
 
@@ -930,6 +1084,7 @@ namespace BlueBrick.Agent
 
             try
             {
+                beforeTransport?.Invoke();
                 var response = await Client.SendAsync(request).ConfigureAwait(false);
                 var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
@@ -1047,7 +1202,7 @@ namespace BlueBrick.Agent
 
         private async Task StreamChatCompletionAsync(string requestBody, string apiKey,
             AssistantModelProfile profile, Action<string> onChunk, CancellationToken cancellationToken,
-            Action<string, string, string> onToolCall = null)
+            Action<string, string, string> onToolCall = null, Action beforeTransport = null)
         {
             using (var request = new HttpRequestMessage(HttpMethod.Post,
                 profile.ApiBaseUrl.TrimEnd('/') + "/chat/completions"))
@@ -1056,6 +1211,8 @@ namespace BlueBrick.Agent
                 request.Headers.Add("User-Agent", "BlueBrick-AI-Assistant/1.0");
                 request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
 
+                cancellationToken.ThrowIfCancellationRequested();
+                beforeTransport?.Invoke();
                 using (var response = await StreamClient.SendAsync(request,
                     HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false))
                 {
@@ -1212,23 +1369,30 @@ namespace BlueBrick.Agent
             }
         }
 
+        private SharedAI.RuntimeState SharedRuntimeState(AssistantModelProfile profile)
+        {
+            var configured = ResolveApiKeyInfo(profile).Configured;
+            return new SharedAI.RuntimeState { Available = profile.Enabled && configured,
+                Reason = !profile.Enabled ? "model_unavailable" : !configured ? "credential_missing" : null };
+        }
+
         private ApiKeyInfo ResolveApiKeyInfo(AssistantModelProfile profile)
         {
-            var envName = string.IsNullOrWhiteSpace(profile.KeyEnvironmentVariable)
-                ? "OPENAI_API_KEY"
-                : profile.KeyEnvironmentVariable;
+            if (string.IsNullOrWhiteSpace(profile.KeyEnvironmentVariable))
+                return new ApiKeyInfo(null, "missing_explicit_key_binding");
+            var envName = profile.KeyEnvironmentVariable;
             var env = Environment.GetEnvironmentVariable(envName);
             if (!string.IsNullOrWhiteSpace(env))
             {
                 return new ApiKeyInfo(env.Trim(), "environment:" + envName);
             }
 
-            env = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
-            if (!string.IsNullOrWhiteSpace(env))
-            {
-                return new ApiKeyInfo(env.Trim(), "environment:OPENAI_API_KEY");
-            }
+            // SharedAI binds each provider independently; never inherit another provider's registry credential.
+            if (profile.Source == "SharedAI") return new ApiKeyInfo(null, "missing");
 
+            // The legacy registry key belongs only to the configured primary endpoint.
+            if (!string.Equals(profile.ApiBaseUrl?.TrimEnd('/'), _config.Assistant.ApiBaseUrl?.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+                return new ApiKeyInfo(null, "missing");
             var key = _registryCache.GetValue(AppIdentity.RegistryRoot, AssistantApiKeyValueName);
             if (!string.IsNullOrWhiteSpace(key))
             {
@@ -1248,9 +1412,16 @@ namespace BlueBrick.Agent
             }
 
             var profile = profiles.FirstOrDefault(p => string.Equals(p.Id, activeId, StringComparison.OrdinalIgnoreCase));
-            if (profile != null) return profile;
-
-            return profiles.FirstOrDefault(p => p.IsDefault) ?? profiles.First();
+            if (!string.IsNullOrWhiteSpace(requestedId))
+            {
+                if (profile == null || !profile.Enabled)
+                    throw new InvalidOperationException("MODEL_UNAVAILABLE: requested model is unknown or disabled.");
+                return profile;
+            }
+            if (profile != null && profile.Enabled) return profile;
+            return profiles.FirstOrDefault(p => p.Enabled && p.IsDefault)
+                ?? profiles.FirstOrDefault(p => p.Enabled)
+                ?? throw new InvalidOperationException("MODEL_UNAVAILABLE: no enabled model is configured.");
         }
 
         private List<AssistantModelProfile> GetCachedProfiles()
@@ -1265,11 +1436,11 @@ namespace BlueBrick.Agent
         private IEnumerable<AssistantModelProfile> GetModelProfiles()
         {
             var configured = _config.Assistant.ModelProfiles;
-            if (configured != null && configured.Length > 0)
+            if (configured != null)
             {
                 foreach (var profile in configured)
                 {
-                    if (!string.IsNullOrWhiteSpace(profile.Id) &&
+                    if (profile != null && !string.IsNullOrWhiteSpace(profile.Id) &&
                         !string.IsNullOrWhiteSpace(profile.Model) &&
                         !string.IsNullOrWhiteSpace(profile.ApiBaseUrl))
                     {
@@ -1308,10 +1479,6 @@ namespace BlueBrick.Agent
             profile.BaseUrlAlias = DefaultIfEmpty(profile.BaseUrlAlias, InferBaseUrlAlias(profile.Provider, profile.ApiBaseUrl));
             profile.SecretRef = DefaultIfEmpty(profile.SecretRef, "runtime-only");
             profile.Source = DefaultIfEmpty(profile.Source, "config_example");
-            if (!profile.Enabled)
-            {
-                profile.Enabled = true;
-            }
             return profile;
         }
 

@@ -1,0 +1,18 @@
+[
+  {
+    "Path": "C:\\BlueBrick\\BlueBrick.dll",
+    "Hash": "C6C38DF37B5853D8D97D09D0FA7236735A4B6F0933CE7D4923E9C5D269CC10AE"
+  },
+  {
+    "Path": "C:\\BlueBrick\\config\\appsettings.json",
+    "Hash": "2BC0B3E19169ADCC6C59376956B2F5E3B30034235C507DB5EB5CB0E3F93A9091"
+  },
+  {
+    "Path": "C:\\BlueBrickLab\\BlueBrick.Lab.dll",
+    "Hash": "E4C7B4A684B4290D1FC89A001E7BDBEF54C94AAAFD1CA689DFAE423D73060845"
+  },
+  {
+    "Path": "C:\\BlueBrickLab\\config\\appsettings.lab.json",
+    "Hash": "482D118F62EF2C3071794A3DB375EFD4039E3FDBC8BDABFDA99FA59332355932"
+  }
+]
