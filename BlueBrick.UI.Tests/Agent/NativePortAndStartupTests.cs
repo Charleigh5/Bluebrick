@@ -435,6 +435,97 @@ namespace BlueBrick.UI.Tests.Agent
             Assert.IsTrue(server.Started);
         }
 
+        [TestMethod]
+        public void AgentClient_PlanUrl_UsesIdentityBridgePort()
+        {
+            Assert.AreEqual(
+                "http://127.0.0.1:" + AppIdentity.BridgePort + "/agent/plan",
+                AgentClient.PlanUrl);
+        }
+
+        [TestMethod]
+        public void AgentHttpServer_BuildQaRunUrl_UsesConfiguredPort()
+        {
+            var config = new AgentConfig { Agent = new AgentSettings { BridgePort = 23456 } };
+
+            Assert.AreEqual("http://127.0.0.1:23456/qa/run", AgentHttpServer.BuildQaRunUrl(config));
+        }
+
+        [TestMethod]
+        public void AgentHttpServer_BuildQaRunUrl_FallsBackToIdentityPortWhenUnconfigured()
+        {
+            Assert.AreEqual(
+                "http://127.0.0.1:" + AppIdentity.BridgePort + "/qa/run",
+                AgentHttpServer.BuildQaRunUrl(new AgentConfig { Agent = new AgentSettings { BridgePort = 0 } }));
+            Assert.AreEqual(
+                "http://127.0.0.1:" + AppIdentity.BridgePort + "/qa/run",
+                AgentHttpServer.BuildQaRunUrl(null));
+        }
+
+        [TestMethod]
+        public void AgentConfig_CreateInvalidFallback_UsesIdentityDefaultPortAndReportsStatus()
+        {
+            var configPath = Path.Combine(Path.GetTempPath(), "bb-fallback-" + Guid.NewGuid().ToString("N"), "config", Path.GetFileName(AppIdentity.ConfigPath("root")));
+            var failure = new AgentConfigurationException("CONFIG_PRESENT_INVALID", configPath, new InvalidDataException("bad config"));
+
+            var config = AgentConfig.CreateInvalidFallback(configPath, failure);
+
+            Assert.AreEqual(AppIdentity.BridgePort, config.Agent.BridgePort);
+            Assert.AreEqual("CONFIG_PRESENT_INVALID", config.ConfigurationDiagnostics.ConfigurationLoadStatus);
+            Assert.AreEqual("CONFIG_VALUE_DEFAULTED", config.ConfigurationDiagnostics.AssistantValueSource);
+            Assert.AreEqual(configPath, config.ConfigurationDiagnostics.ConfigPath);
+        }
+
+        [TestMethod]
+        public void SwAddin_StartAgentBridge_FallsBackToDefaultsWhenConfigIsInvalid()
+        {
+            var events = new List<string>();
+            AgentConfig fallbackSeen = null;
+            var configPath = Path.Combine(Path.GetTempPath(), "bb-fallback-" + Guid.NewGuid().ToString("N"), "config", Path.GetFileName(AppIdentity.ConfigPath("root")));
+            var failure = new AgentConfigurationException("CONFIG_PRESENT_INVALID", configPath, new InvalidDataException("bad config"));
+
+            var server = SwAddin.StartAgentBridge(
+                () =>
+                {
+                    events.Add("LOAD_CONFIG");
+                    throw failure;
+                },
+                loadedConfig =>
+                {
+                    loadedConfig.Agent.BridgePort = AgentConfig.ResolveBridgePort(
+                        loadedConfig.Agent.BridgePort,
+                        AppIdentity.BridgePort);
+                    events.Add("RESOLVE_CONFIGURE_PORT:" + loadedConfig.Agent.BridgePort);
+                    fallbackSeen = loadedConfig;
+                },
+                loadedConfig =>
+                {
+                    events.Add("CREATE_BRIDGE_SERVER");
+                    return new FakeBridgeServer();
+                },
+                createdServer =>
+                {
+                    events.Add("START_BRIDGE_SERVER");
+                    createdServer.Started = true;
+                },
+                msg => events.Add("LOG:" + msg));
+
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    "LOAD_CONFIG",
+                    "LOG:AgentConfig invalid (CONFIG_PRESENT_INVALID); starting bridge with default configuration: " + failure.Message,
+                    "RESOLVE_CONFIGURE_PORT:" + AppIdentity.BridgePort,
+                    "CREATE_BRIDGE_SERVER",
+                    "START_BRIDGE_SERVER"
+                },
+                events);
+            Assert.IsTrue(server.Started);
+            Assert.IsNotNull(fallbackSeen);
+            Assert.AreEqual(AppIdentity.BridgePort, fallbackSeen.Agent.BridgePort);
+            Assert.AreEqual("CONFIG_PRESENT_INVALID", fallbackSeen.ConfigurationDiagnostics.ConfigurationLoadStatus);
+        }
+
         private static string CreateConfigRoot()
         {
             var root = Path.Combine(

@@ -17,6 +17,8 @@ namespace BlueBrick.Agent
         
         private static readonly Lazy<string> _authToken = new Lazy<string>(LoadAuthToken);
         
+        internal static string PlanUrl => "http://127.0.0.1:" + AppIdentity.BridgePort + "/agent/plan";
+
         /// <summary>
         /// Send query to agent service asynchronously.
         /// </summary>
@@ -25,10 +27,11 @@ namespace BlueBrick.Agent
         /// <remarks>
         /// This method is fully async to prevent UI thread blocking (PERF-01 fix).
         /// Includes authentication token (CRITICAL-01/02 fix).
+        /// PlanUrl derives from AppIdentity.BridgePort so Lab builds target 17179, not Prod 17178.
         /// </remarks>
         internal static async Task<string> SendQueryAsync(string query)
         {
-            var request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:17178/agent/plan");
+            var request = new HttpRequestMessage(HttpMethod.Post, PlanUrl);
             
             // Add authentication header
             request.Headers.Add("X-Agent-Auth", _authToken.Value);

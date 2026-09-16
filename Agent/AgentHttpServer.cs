@@ -1129,7 +1129,13 @@ private string ResolveVaultName()
         }
     }
 
-    private async Task HandleQaRun(HttpListenerContext context, JObject json, string traceId)
+    internal static string BuildQaRunUrl(AgentConfig config)
+        {
+            var port = AgentConfig.ResolveBridgePort(config?.Agent?.BridgePort ?? 0, AppIdentity.BridgePort);
+            return "http://127.0.0.1:" + port + "/qa/run";
+        }
+
+        private async Task HandleQaRun(HttpListenerContext context, JObject json, string traceId)
         {
             var scriptId = json.Value<string>("scriptId");
             if (string.IsNullOrEmpty(scriptId))
@@ -1141,7 +1147,7 @@ private string ResolveVaultName()
 
             // proxy to agent service
             var payload = JsonConvert.SerializeObject(new { scriptId });
-            var request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:17178/qa/run");
+            var request = new HttpRequestMessage(HttpMethod.Post, BuildQaRunUrl(_config));
             request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
             if (!string.IsNullOrEmpty(traceId))
             {

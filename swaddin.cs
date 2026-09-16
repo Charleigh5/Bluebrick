@@ -76,9 +76,19 @@ namespace BlueBrick
             Func<AgentConfig> loadConfig,
             Action<AgentConfig> configurePort,
             Func<AgentConfig, TServer> createServer,
-            Action<TServer> startServer)
+            Action<TServer> startServer,
+            Action<string> log = null)
         {
-            var config = loadConfig();
+            AgentConfig config;
+            try
+            {
+                config = loadConfig();
+            }
+            catch (AgentConfigurationException ex)
+            {
+                log?.Invoke("AgentConfig invalid (" + ex.Status + "); starting bridge with default configuration: " + ex.Message);
+                config = AgentConfig.CreateInvalidFallback(ex.ConfigPath, ex);
+            }
             configurePort(config);
             var server = createServer(config);
             startServer(server);
@@ -424,7 +434,8 @@ namespace BlueBrick
                     {
                         server.Start();
                         TraceDiagnostic("AgentHttpServer started");
-                    });
+                    },
+                    msg => TraceDiagnostic(msg));
 #if LAB_BUILD
                 if (_assistantWindow == null || _assistantWindow.IsDisposed)
                 {

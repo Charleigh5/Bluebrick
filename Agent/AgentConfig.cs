@@ -158,6 +158,39 @@ namespace BlueBrick.Agent
             return config;
         }
 
+        internal static AgentConfig CreateInvalidFallback(string configPath, AgentConfigurationException ex)
+        {
+            var root = TryGetRootFromConfigPath(configPath)
+                ?? Path.GetDirectoryName(typeof(AgentConfig).Assembly.Location)
+                ?? AppDomain.CurrentDomain.BaseDirectory;
+            var config = CreateDefault(root);
+            config.ConfigurationDiagnostics = AgentConfigurationDiagnostics.Invalid(
+                string.IsNullOrWhiteSpace(configPath) ? AppIdentity.ConfigPath(root) : configPath,
+                config,
+                ex == null ? "CONFIG_PRESENT_INVALID" : ex.Status);
+            return config;
+        }
+
+        private static string TryGetRootFromConfigPath(string configPath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(configPath)) return null;
+                var dir = Path.GetDirectoryName(configPath);
+                if (string.IsNullOrWhiteSpace(dir)) return null;
+                if (string.Equals(Path.GetFileName(dir), "config", StringComparison.OrdinalIgnoreCase))
+                {
+                    var parent = Path.GetDirectoryName(dir);
+                    if (!string.IsNullOrWhiteSpace(parent)) return parent;
+                }
+                return dir;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private void ApplyDefaults(string root)
         {
             ConfigSchemaVersion = DefaultIfEmpty(ConfigSchemaVersion, SupportedSchemaVersion);
@@ -441,6 +474,11 @@ namespace BlueBrick.Agent
         internal static AgentConfigurationDiagnostics Missing(string path, AgentConfig config)
         {
             return Create(path, null, config, "CONFIG_MISSING", "CONFIG_VALUE_DEFAULTED");
+        }
+
+        internal static AgentConfigurationDiagnostics Invalid(string path, AgentConfig config, string status)
+        {
+            return Create(path, null, config, status, "CONFIG_VALUE_DEFAULTED");
         }
 
         internal static AgentConfigurationDiagnostics Present(string path, string hash, AgentConfig config, JObject assistant, bool legacySchema)
