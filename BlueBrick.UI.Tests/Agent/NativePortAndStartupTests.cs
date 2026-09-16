@@ -515,6 +515,115 @@ namespace BlueBrick.UI.Tests.Agent
         }
 
         [TestMethod]
+        public void AgentConfig_LoadFrom_LockedFileThrowsConfigReadFailed()
+        {
+            var root = CreateConfigRoot();
+            try
+            {
+                File.WriteAllText(AppIdentity.ConfigPath(root), "{}");
+                using (new FileStream(AppIdentity.ConfigPath(root), FileMode.Open, FileAccess.Read, FileShare.None))
+                {
+                    try
+                    {
+                        AgentConfig.LoadFrom(root);
+                        Assert.Fail("Expected AgentConfigurationException.");
+                    }
+                    catch (AgentConfigurationException ex)
+                    {
+                        Assert.AreEqual("CONFIG_READ_FAILED", ex.Status);
+                    }
+                }
+            }
+            finally
+            {
+                DeleteConfigRoot(root);
+            }
+        }
+
+        [TestMethod]
+        public void AgentConfig_LoadFrom_UnresolvableSharedAiReferenceThrowsPresentInvalid()
+        {
+            var root = CreateConfigRoot();
+            try
+            {
+                File.WriteAllText(
+                    AppIdentity.ConfigPath(root),
+                    "{\"Agent\":{\"BridgePort\":17179},\"Assistant\":{\"SharedAiModelIds\":[\"unknown\"]}}");
+                try
+                {
+                    AgentConfig.LoadFrom(root);
+                    Assert.Fail("Expected AgentConfigurationException.");
+                }
+                catch (AgentConfigurationException ex)
+                {
+                    Assert.AreEqual("CONFIG_PRESENT_INVALID", ex.Status);
+                }
+            }
+            finally
+            {
+                DeleteConfigRoot(root);
+            }
+        }
+
+        [TestMethod]
+        public void SwAddin_StartAgentBridge_FallsBackWhenConfigFileIsUnreadable()
+        {
+            var events = new List<string>();
+            AgentConfig fallbackSeen = null;
+            var root = CreateConfigRoot();
+            try
+            {
+                File.WriteAllText(AppIdentity.ConfigPath(root), "{}");
+                using (new FileStream(AppIdentity.ConfigPath(root), FileMode.Open, FileAccess.Read, FileShare.None))
+                {
+                    var server = SwAddin.StartAgentBridge(
+                        () =>
+                        {
+                            events.Add("LOAD_CONFIG");
+                            return AgentConfig.LoadFrom(root);
+                        },
+                        loadedConfig =>
+                        {
+                            loadedConfig.Agent.BridgePort = AgentConfig.ResolveBridgePort(
+                                loadedConfig.Agent.BridgePort,
+                                AppIdentity.BridgePort);
+                            events.Add("RESOLVE_CONFIGURE_PORT:" + loadedConfig.Agent.BridgePort);
+                            fallbackSeen = loadedConfig;
+                        },
+                        loadedConfig =>
+                        {
+                            events.Add("CREATE_BRIDGE_SERVER");
+                            return new FakeBridgeServer();
+                        },
+                        createdServer =>
+                        {
+                            events.Add("START_BRIDGE_SERVER");
+                            createdServer.Started = true;
+                        });
+
+                    Assert.IsTrue(server.Started);
+                }
+            }
+            finally
+            {
+                DeleteConfigRoot(root);
+            }
+
+            Assert.IsNotNull(fallbackSeen);
+            Assert.AreEqual(AppIdentity.BridgePort, fallbackSeen.Agent.BridgePort);
+            Assert.AreEqual("CONFIG_READ_FAILED", fallbackSeen.ConfigurationDiagnostics.ConfigurationLoadStatus);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    "LOAD_CONFIG",
+                    "RESOLVE_CONFIGURE_PORT:" + AppIdentity.BridgePort,
+                    "CREATE_BRIDGE_SERVER",
+                    "START_BRIDGE_SERVER"
+                },
+                events.FindAll(e => !e.StartsWith("LOG:")));
+        }
+
+        [TestMethod]
         public void SwAddin_StartAgentBridge_FallsBackToDefaultsWhenConfigIsInvalid()
         {
             var events = new List<string>();

@@ -60,7 +60,19 @@ namespace BlueBrick.Agent
                 return missing;
             }
 
-            var json = File.ReadAllText(cfgPath);
+            string json;
+            try
+            {
+                json = File.ReadAllText(cfgPath);
+            }
+            catch (IOException ex)
+            {
+                throw new AgentConfigurationException("CONFIG_READ_FAILED", cfgPath, ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new AgentConfigurationException("CONFIG_READ_FAILED", cfgPath, ex);
+            }
             var hash = ComputeSha256(json);
             JObject source;
             try
@@ -97,7 +109,30 @@ namespace BlueBrick.Agent
                 throw new AgentConfigurationException("CONFIG_PRESENT_INVALID", cfgPath, new InvalidDataException("Configuration root was null."));
 
             config.ConfigSchemaVersion = schemaVersion;
-            config.ApplyDefaults(root);
+            try
+            {
+                config.ApplyDefaults(root);
+            }
+            catch (AgentConfigurationException)
+            {
+                throw;
+            }
+            catch (InvalidDataException ex)
+            {
+                throw new AgentConfigurationException("CONFIG_PRESENT_INVALID", cfgPath, ex);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new AgentConfigurationException("CONFIG_PRESENT_INVALID", cfgPath, ex);
+            }
+            catch (IOException ex)
+            {
+                throw new AgentConfigurationException("CONFIG_PRESENT_INVALID", cfgPath, ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new AgentConfigurationException("CONFIG_PRESENT_INVALID", cfgPath, ex);
+            }
             config.ConfigurationDiagnostics = AgentConfigurationDiagnostics.Present(
                 cfgPath,
                 hash,
