@@ -440,7 +440,9 @@ namespace BlueBrick.Agent
                 try
                 {
                     var artifact = AssistantScreenshotArtifactStore.Review(json.Value<string>("screenshotId"),
-                        json.Value<string>("targetType"), json.Value<string>("targetId"), json.Value<string>("reviewStatus"));
+                        json.Value<string>("targetType"), json.Value<string>("targetId"), json.Value<string>("reviewStatus"),
+                        null, "MANUAL", "explicit-user-review", null,
+                        json.Value<string>("reviewNote"), json.Value<string>("reviewedBy"));
                     var conversationStore = new AssistantSessionStore();
                     if (artifact.ReviewStatus == "rejected")
                         conversationStore.DetachScreenshot(artifact.SessionId, artifact.ArtifactId);

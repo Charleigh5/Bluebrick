@@ -125,6 +125,8 @@ namespace BlueBrick.Agent
                     var previous = JsonConvert.DeserializeObject<AssistantScreenshotArtifact>(File.ReadAllText(artifact.MetadataPath));
                     artifact.ReviewStatus = previous?.ReviewStatus ?? "pending";
                     artifact.ReviewedUtc = previous?.ReviewedUtc;
+                    artifact.ReviewedBy = previous?.ReviewedBy;
+                    artifact.ReviewNote = previous?.ReviewNote;
                     artifact.CloudSendApproved = previous?.CloudSendApproved ?? false;
                     artifact.ApprovedContentHash = previous?.ApprovedContentHash;
                 }
@@ -145,7 +147,7 @@ namespace BlueBrick.Agent
             finally { if (File.Exists(temp)) File.Delete(temp); }
         }
 
-        internal static AssistantScreenshotArtifact Review(string screenshotId, string targetType, string targetId, string status, string root = null, string approvalMode = "MANUAL", string policySource = "explicit-user-review", string runtimeBuildId = null)
+        internal static AssistantScreenshotArtifact Review(string screenshotId, string targetType, string targetId, string status, string root = null, string approvalMode = "MANUAL", string policySource = "explicit-user-review", string runtimeBuildId = null, string reviewNote = null, string reviewedBy = null)
         {
             if (!Guid.TryParseExact(screenshotId, "N", out _) || screenshotId != targetId ||
                 (targetType != "screenshot" && targetType != "screenshot-upload") ||
@@ -179,6 +181,10 @@ namespace BlueBrick.Agent
                     artifact.ApprovedContentHash = null;
                 }
                 artifact.ReviewedUtc = DateTime.UtcNow;
+                // Null means "no note supplied" (e.g. auto-approval flows) and preserves
+                // any existing note; empty string explicitly clears it on re-review.
+                if (reviewNote != null) artifact.ReviewNote = reviewNote;
+                if (reviewedBy != null) artifact.ReviewedBy = reviewedBy;
                 artifact.Receipt = BuildReceipt(artifact);
                 WriteMetadataAtomically(metadata, artifact);
                 return artifact;

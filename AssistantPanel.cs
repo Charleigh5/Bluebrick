@@ -1522,6 +1522,8 @@ namespace BlueBrick
             return new JObject
             {
                 ["reviewStatus"] = artifact.Value<string>("ReviewStatus") ?? artifact.Value<string>("reviewStatus") ?? "pending",
+                ["reviewNote"] = artifact.Value<string>("ReviewNote") ?? artifact.Value<string>("reviewNote") ?? string.Empty,
+                ["reviewedBy"] = artifact.Value<string>("ReviewedBy") ?? artifact.Value<string>("reviewedBy") ?? string.Empty,
                 ["cloudSendApproved"] = artifact.Value<bool?>("CloudSendApproved") ?? artifact.Value<bool?>("cloudSendApproved") ?? false,
                 ["artifactId"] = artifactId,
                 ["screenshotId"] = screenshotId,

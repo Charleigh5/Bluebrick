@@ -82,6 +82,44 @@ namespace BlueBrick.UI.Tests.Agent
             Assert.IsFalse(saved.Receipt.LocalOnly); Assert.IsFalse(saved.SentToModel);
             Assert.AreEqual("ATTEMPTED_OUTCOME_UNKNOWN", saved.Receipt.TransmissionState);
         }
+        [TestMethod] public void ReviewPersistsNoteAndReviewer()
+        {
+            var session = store.Create(); var artifact = Capture(session.SessionId);
+            var reviewed = AssistantScreenshotArtifactStore.Review(artifact.ArtifactId, "screenshot", artifact.ArtifactId, "approved", root, "MANUAL", "explicit-user-review", "synthetic", "Looks correct on sheet 1.", "BlueBrick task pane");
+            Assert.AreEqual("Looks correct on sheet 1.", reviewed.ReviewNote);
+            Assert.AreEqual("BlueBrick task pane", reviewed.ReviewedBy);
+            var saved = AssistantScreenshotArtifactStore.FindArtifact(artifact.ArtifactId, root);
+            Assert.AreEqual("Looks correct on sheet 1.", saved.ReviewNote);
+            Assert.AreEqual("BlueBrick task pane", saved.ReviewedBy);
+        }
+        [TestMethod] public void ReviewWithoutNotePreservesExistingNote()
+        {
+            var session = store.Create(); var artifact = Capture(session.SessionId);
+            AssistantScreenshotArtifactStore.Review(artifact.ArtifactId, "screenshot", artifact.ArtifactId, "approved", root, "MANUAL", "explicit-user-review", "synthetic", "Keep this note.", "reviewer");
+            store.AttachScreenshot(artifact, new AssistantScreenshotSettings { AutoAttachToChat = true, AutoApproveLocalCaptureForContext = true }, "synthetic");
+            var saved = AssistantScreenshotArtifactStore.FindArtifact(artifact.ArtifactId, root);
+            Assert.AreEqual("Keep this note.", saved.ReviewNote);
+            Assert.AreEqual("reviewer", saved.ReviewedBy);
+            Assert.AreEqual("Keep this note.", artifact.ReviewNote);
+        }
+        [TestMethod] public void CaptureRefreshPreservesReviewNote()
+        {
+            var session = store.Create(); var artifact = Capture(session.SessionId);
+            AssistantScreenshotArtifactStore.Review(artifact.ArtifactId, "screenshot", artifact.ArtifactId, "approved", root, "MANUAL", "explicit-user-review", "synthetic", "Refresh-proof.", "reviewer");
+            AssistantScreenshotArtifactStore.CompleteArtifact(artifact);
+            var saved = AssistantScreenshotArtifactStore.FindArtifact(artifact.ArtifactId, root);
+            Assert.AreEqual("Refresh-proof.", saved.ReviewNote);
+            Assert.AreEqual("approved", saved.ReviewStatus);
+        }
+        [TestMethod] public void EmptyNoteExplicitlyClearsOnReReview()
+        {
+            var session = store.Create(); var artifact = Capture(session.SessionId);
+            AssistantScreenshotArtifactStore.Review(artifact.ArtifactId, "screenshot", artifact.ArtifactId, "approved", root, "MANUAL", "explicit-user-review", "synthetic", "Old note.", "reviewer");
+            AssistantScreenshotArtifactStore.Review(artifact.ArtifactId, "screenshot", artifact.ArtifactId, "rejected", root, "MANUAL", "explicit-user-review", "synthetic", string.Empty, string.Empty);
+            var saved = AssistantScreenshotArtifactStore.FindArtifact(artifact.ArtifactId, root);
+            Assert.AreEqual(string.Empty, saved.ReviewNote);
+            Assert.AreEqual("rejected", saved.ReviewStatus);
+        }
         [TestMethod] public void StaleMessageSaveCannotResurrectDetachedScreenshot()
         {
             var session = store.Create(); var artifact = Capture(session.SessionId);

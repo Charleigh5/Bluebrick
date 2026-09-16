@@ -77,6 +77,8 @@ namespace BlueBrick.Agent
             artifact.ApprovalMode = persisted.ApprovalMode;
             artifact.ApprovalPolicySource = persisted.ApprovalPolicySource;
             artifact.ReviewedUtc = persisted.ReviewedUtc;
+            artifact.ReviewedBy = persisted.ReviewedBy;
+            artifact.ReviewNote = persisted.ReviewNote;
             artifact.CloudSendApproved = persisted.CloudSendApproved;
             artifact.Receipt = persisted.Receipt;
             if (policy?.AutoAttachToChat != true || persisted.ReviewStatus != "approved") return;

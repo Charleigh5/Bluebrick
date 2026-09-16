@@ -54,6 +54,8 @@ namespace BlueBrick.Agent
         public string ModelProfileId { get; set; }
         public string ReviewStatus { get; set; } = "pending";
         public DateTime? ReviewedUtc { get; set; }
+        public string ReviewedBy { get; set; }
+        public string ReviewNote { get; set; }
         public bool CloudSendApproved { get; set; }
         public string ApprovedContentHash { get; set; }
         public List<AssistantScreenshotAnnotation> Annotations { get; set; } = new List<AssistantScreenshotAnnotation>();
