@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Text;
@@ -17,7 +18,16 @@ namespace BlueBrick.Agent
         
         private static readonly Lazy<string> _authToken = new Lazy<string>(LoadAuthToken);
         
-        internal static string PlanUrl => "http://127.0.0.1:" + AppIdentity.BridgePort + "/agent/plan";
+        private static string _baseUrl = "http://127.0.0.1:" + AppIdentity.BridgePort;
+
+        internal static string PlanUrl => _baseUrl.TrimEnd('/') + "/agent/plan";
+
+        internal static void Configure(AgentConfig config)
+        {
+            var bridgePort = AgentConfig.ResolveBridgePort(config?.Agent?.BridgePort ?? 0, AppIdentity.BridgePort);
+
+            _baseUrl = "http://127.0.0.1:" + bridgePort.ToString(CultureInfo.InvariantCulture);
+        }
 
         /// <summary>
         /// Send query to agent service asynchronously.
@@ -27,7 +37,8 @@ namespace BlueBrick.Agent
         /// <remarks>
         /// This method is fully async to prevent UI thread blocking (PERF-01 fix).
         /// Includes authentication token (CRITICAL-01/02 fix).
-        /// PlanUrl derives from AppIdentity.BridgePort so Lab builds target 17179, not Prod 17178.
+        /// PlanUrl derives from the configured BridgePort (via Configure) so Lab builds
+        /// and custom-port deployments target the right bridge instead of Prod 17178.
         /// </remarks>
         internal static async Task<string> SendQueryAsync(string query)
         {

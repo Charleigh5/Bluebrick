@@ -383,6 +383,7 @@ namespace BlueBrick
                     config =>
                     {
                         AgentPanelClient.Configure(config);
+                        AgentClient.Configure(config);
                         TraceDiagnostic("AgentConfig.Load complete");
                     },
                     config =>

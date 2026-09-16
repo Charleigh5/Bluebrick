@@ -436,11 +436,49 @@ namespace BlueBrick.UI.Tests.Agent
         }
 
         [TestMethod]
-        public void AgentClient_PlanUrl_UsesIdentityBridgePort()
+        public void AgentClient_PlanUrl_UsesIdentityBridgePortByDefault()
         {
+            AgentClient.Configure(null);
+
             Assert.AreEqual(
                 "http://127.0.0.1:" + AppIdentity.BridgePort + "/agent/plan",
                 AgentClient.PlanUrl);
+        }
+
+        [TestMethod]
+        public void AgentClient_Configure_UsesRuntimeConfiguredPort()
+        {
+            try
+            {
+                AgentClient.Configure(new AgentConfig { Agent = new AgentSettings { BridgePort = 23456 } });
+
+                Assert.AreEqual("http://127.0.0.1:23456/agent/plan", AgentClient.PlanUrl);
+            }
+            finally
+            {
+                AgentClient.Configure(null);
+            }
+        }
+
+        [TestMethod]
+        public void AgentClient_Configure_FallsBackToIdentityPortWhenUnconfigured()
+        {
+            try
+            {
+                AgentClient.Configure(new AgentConfig { Agent = new AgentSettings { BridgePort = 0 } });
+                Assert.AreEqual(
+                    "http://127.0.0.1:" + AppIdentity.BridgePort + "/agent/plan",
+                    AgentClient.PlanUrl);
+
+                AgentClient.Configure(new AgentConfig { Agent = new AgentSettings { BridgePort = 70000 } });
+                Assert.AreEqual(
+                    "http://127.0.0.1:" + AppIdentity.BridgePort + "/agent/plan",
+                    AgentClient.PlanUrl);
+            }
+            finally
+            {
+                AgentClient.Configure(null);
+            }
         }
 
         [TestMethod]
