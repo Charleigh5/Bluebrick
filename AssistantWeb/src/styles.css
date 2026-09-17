@@ -3,6 +3,10 @@
   --vira-cyan: #22b8d6;
   --vira-cyan-dark: #1289a3;
   --bluebrick-lime: #c8ff2e;
+  --accent: var(--bluebrick-lime);
+  --accent-ink: #111318;
+  --secondary: #2dd4bf;
+  --secondary-ink: #0b1512;
   --panel-bg: #0f141b;
   --panel-surface: #161c24;
   --panel-surface-2: #202833;
@@ -71,7 +75,7 @@ button:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 input:focus-visible {
-  outline: 2px solid var(--bluebrick-lime);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -227,15 +231,15 @@ input:focus-visible {
 }
 
 .scope.selected {
-  background: rgba(34, 184, 214, 0.14);
+  background: color-mix(in srgb, var(--secondary) 14%, transparent);
   color: var(--panel-text);
-  border-color: var(--vira-cyan);
+  border-color: var(--secondary);
 }
 
 .scope.selected::before {
   background: #fff;
-  border-color: var(--vira-cyan);
-  box-shadow: inset 0 0 0 3px var(--vira-cyan);
+  border-color: var(--secondary);
+  box-shadow: inset 0 0 0 3px var(--secondary);
 }
 
 .scope:disabled {
@@ -297,7 +301,7 @@ input:focus-visible {
   position: relative;
   width: 15px;
   height: 15px;
-  color: var(--vira-cyan);
+  color: var(--secondary);
   flex: 0 0 auto;
 }
 
@@ -386,20 +390,20 @@ input:focus-visible {
 }
 
 .action.primary {
-  background: var(--bluebrick-lime);
-  border-color: var(--bluebrick-lime);
-  color: #111318;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .action.primary .action-symbol {
-  color: #111318;
+  color: var(--accent-ink);
 }
 
 .action.active,
 .action:hover,
 .scope:hover {
-  border-color: var(--vira-cyan);
-  box-shadow: 0 0 0 2px rgba(34, 184, 214, 0.12);
+  border-color: var(--secondary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--secondary) 25%, transparent);
 }
 
 .route-strip {
@@ -641,26 +645,41 @@ input:focus-visible {
 }
 
 .msg {
-  background: var(--card);
-  color: var(--card-text);
-  border: 1px solid var(--card-border);
-  border-radius: 8px;
-  padding: 9px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
+  max-width: 88%;
+  align-self: flex-start;
+  background: var(--panel-surface-2);
+  color: var(--panel-text);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--secondary);
+  border-radius: 4px 14px 14px 14px;
+  padding: 8px 10px;
+  box-shadow: var(--shadow);
 }
 
 .msg.user {
-  background: #edf6ff;
-  border-color: #b9d7f5;
+  align-self: flex-end;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  border-radius: 14px 14px 4px 14px;
+}
+
+.msg.user .role {
+  color: var(--accent-ink);
+  opacity: 0.72;
+}
+
+.msg.user .text {
+  color: var(--accent-ink);
 }
 
 .role {
-  font-size: 10px;
+  font-size: 9px;
   text-transform: uppercase;
   color: var(--card-muted-text);
   font-weight: 700;
   margin-bottom: 3px;
-  letter-spacing: 0;
+  letter-spacing: 0.04em;
 }
 
 .text {
@@ -773,8 +792,8 @@ input:focus-visible {
 }
 
 .annotation-mark.arrow {
-  border-color: var(--bluebrick-lime);
-  background: rgba(200, 255, 46, 0.16);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .annotation-mark.text {
@@ -948,8 +967,8 @@ input:focus-visible {
 }
 
 .composer textarea:focus {
-  border-color: var(--vira-cyan);
-  box-shadow: 0 0 0 2px rgba(34, 184, 214, 0.15);
+  border-color: var(--secondary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--secondary) 30%, transparent);
 }
 
 .composer-actions {
@@ -969,9 +988,9 @@ input:focus-visible {
 }
 
 .send-button {
-  background: var(--bluebrick-lime) !important;
-  border-color: var(--bluebrick-lime) !important;
-  color: #111318 !important;
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-ink) !important;
 }
 
 .stop-button {
@@ -1873,4 +1892,109 @@ input:focus-visible {
 .safety-bridge {
   color: #cdd7e2;
   white-space: nowrap;
+}
+
+/* ---- Theme picker (accent + secondary, persisted default) ---- */
+.theme-wrap {
+  position: relative;
+}
+.theme-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: 212px;
+  background: var(--panel-surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+.theme-group-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.theme-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatches {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+}
+.swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+  background: var(--swatch, var(--accent));
+}
+.swatch[aria-pressed="true"] {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px var(--line-strong);
+}
+.theme-custom {
+  width: 26px;
+  height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0;
+  background: var(--panel-surface);
+}
+.theme-actions {
+  display: flex;
+  gap: 6px;
+}
+.theme-actions button {
+  flex: 1 1 auto;
+  min-height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-surface);
+  color: var(--panel-text);
+  font-size: 10px;
+  font-weight: 700;
+}
+.theme-actions button.save-default {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.theme-hint {
+  font-size: 9px;
+  color: var(--subtle);
+}
+
+/* ---- Review note input ---- */
+.note-input {
+  grid-column: 1 / -1;
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #0f141b;
+  color: var(--panel-text);
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.note-input::placeholder {
+  color: var(--panel-text-soft);
+}
+
+/* ---- Model availability note ---- */
+.model-note {
+  font-size: 10px;
+  color: var(--warn);
+  padding: 0 10px;
+}
+.model-note.ok {
+  color: var(--subtle);
 }

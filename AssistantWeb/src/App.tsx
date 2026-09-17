@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import "./styles.css";
 import {
   createBlueBrickWindowBridge,
@@ -33,6 +33,7 @@ type Model = {
   id: string;
   displayName: string;
   available?: boolean;
+  unavailableReason?: string;
   supportsVision?: boolean;
   supportsToolCalling?: boolean;
   supportsStructuredOutput?: boolean;
@@ -67,6 +68,32 @@ type ToolResult = {
 type BridgeStatus = "offline" | "connecting" | "connected" | "error";
 
 // ---------------------------------------------------------------------------
+// Theme (accent + secondary, persisted default)
+// ---------------------------------------------------------------------------
+const BUILT_IN_ACCENT = "#c8ff2e";
+const BUILT_IN_SECONDARY = "#2dd4bf";
+const ACCENT_PRESETS = ["#c8ff2e", "#22b8d6", "#fbbf24", "#a78bfa", "#fb923c"];
+const SECONDARY_PRESETS = ["#2dd4bf", "#22b8d6", "#38bdf8", "#fb7185", "#94a3b8"];
+
+function readThemeDefault(key: "accent" | "secondary", fallback: string): string {
+  try {
+    return window.localStorage.getItem("bb.theme." + key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function inkFor(hex: string): string {
+  const m = /^#([0-9a-f]{6})$/i.exec((hex ?? "").trim());
+  if (!m) return "#111318";
+  const v = parseInt(m[1], 16);
+  const r = (v >> 16) & 255;
+  const g = (v >> 8) & 255;
+  const b = v & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.55 ? "#111318" : "#f4f7fa";
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 export function App() {
@@ -82,6 +109,39 @@ export function App() {
   const [tools, setTools] = useState<unknown[]>([]);
   const [toolReceipts, setToolReceipts] = useState<unknown[]>([]);
   const [productCatalogs, setProductCatalogs] = useState<unknown>({});
+  const [accent, setAccent] = useState(() => readThemeDefault("accent", BUILT_IN_ACCENT));
+  const [secondary, setSecondary] = useState(() => readThemeDefault("secondary", BUILT_IN_SECONDARY));
+  const [themeOpen, setThemeOpen] = useState(false);
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--accent", accent);
+    root.style.setProperty("--accent-ink", inkFor(accent));
+    root.style.setProperty("--secondary", secondary);
+    root.style.setProperty("--secondary-ink", inkFor(secondary));
+  }, [accent, secondary]);
+
+  const saveThemeDefault = useCallback(() => {
+    try {
+      window.localStorage.setItem("bb.theme.accent", accent);
+      window.localStorage.setItem("bb.theme.secondary", secondary);
+    } catch {
+      /* storage unavailable: theme still applies for this session */
+    }
+    setThemeOpen(false);
+  }, [accent, secondary]);
+
+  const resetTheme = useCallback(() => {
+    try {
+      window.localStorage.removeItem("bb.theme.accent");
+      window.localStorage.removeItem("bb.theme.secondary");
+    } catch {
+      /* ignore */
+    }
+    setAccent(BUILT_IN_ACCENT);
+    setSecondary(BUILT_IN_SECONDARY);
+  }, []);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [input, setInput] = useState("");
@@ -234,12 +294,13 @@ export function App() {
     onSetModels: (rawModels: unknown[]) => {
       setModels(
         (rawModels ?? []).map((m) => {
-          const mo = m as Model & { Id?: string; Name?: string; DisplayName?: string; Available?: boolean; Enabled?: boolean; SupportsTools?: boolean; SupportsJsonMode?: boolean; SupportsVision?: boolean };
+          const mo = m as Model & { Id?: string; Name?: string; DisplayName?: string; Available?: boolean; UnavailableReason?: string; Enabled?: boolean; SupportsTools?: boolean; SupportsJsonMode?: boolean; SupportsVision?: boolean };
           const id = mo.id ?? mo.Id ?? String(mo.displayName ?? mo.DisplayName ?? mo.id ?? "unknown");
           return {
             id,
             displayName: mo.displayName ?? mo.DisplayName ?? mo.Name ?? id,
             available: mo.available ?? mo.Available ?? mo.Enabled,
+            unavailableReason: mo.unavailableReason ?? mo.UnavailableReason,
             supportsVision: mo.supportsVision ?? mo.SupportsVision,
             supportsToolCalling: mo.supportsToolCalling ?? mo.SupportsTools,
             supportsStructuredOutput: mo.supportsStructuredOutput ?? mo.SupportsJsonMode,
@@ -401,9 +462,8 @@ export function App() {
   // -------------------------------------------------------------------------
   // Actions
   // -------------------------------------------------------------------------
-  const handleSelectModel = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const id = e.target.value;
+  const requestModel = useCallback(
+    (id: string) => {
       if (pendingModelRef.current) return;
       if (!bridgeRef.current?.isHostAvailable()) { setOperationError("Model selection unavailable: host is offline."); return; }
       const operationId = cryptoId();
@@ -421,6 +481,31 @@ export function App() {
     },
     [],
   );
+
+  const handleSelectModel = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      lastAutoTargetRef.current = null;
+      requestModel(e.target.value);
+    },
+    [requestModel],
+  );
+
+  // Auto-select the first available model when the current selection is
+  // unknown or unavailable (e.g. its API key is missing). One attempt per
+  // models payload; an explicit user choice always wins.
+  const lastAutoTargetRef = useRef<string | null>(null);
+  useEffect(() => {
+    lastAutoTargetRef.current = null;
+  }, [models]);
+  useEffect(() => {
+    if (bridgeStatus !== "connected" || pendingModelRef.current || models.length === 0) return;
+    const current = models.find((m) => m.id === modelId);
+    if (current && current.available !== false) return;
+    const target = models.find((m) => m.available !== false) ?? models[0];
+    if (!target || target.id === modelId || target.id === lastAutoTargetRef.current) return;
+    lastAutoTargetRef.current = target.id;
+    requestModel(target.id);
+  }, [models, bridgeStatus, modelId, requestModel]);
 
   const handleSelectScope = useCallback(
     (s: Scope) => {
@@ -480,7 +565,7 @@ export function App() {
   }, [commitMessages, syncScreenshots]);
 
   const handleReview = useCallback(
-    (screenshotId: string, reviewStatus: "approved" | "rejected", targetType = "screenshot") => {
+    (screenshotId: string, reviewStatus: "approved" | "rejected", targetType = "screenshot", note = "") => {
       if (!bridgeRef.current?.isHostAvailable()) { setOperationError("Review unavailable: host is offline."); return; }
       const operationId = cryptoId();
       reviewOperationsRef.current[screenshotId] = operationId;
@@ -488,6 +573,13 @@ export function App() {
       setOperationError("");
       bridgeRef.current.post("reviewScreenshotItem", {
         type: "reviewScreenshotItem", screenshotId, targetType, targetId: screenshotId, reviewStatus, operationId,
+        reviewNote: note,
+      });
+      setReviewNotes((prev) => {
+        if (!(screenshotId in prev)) return prev;
+        const next = { ...prev };
+        delete next[screenshotId];
+        return next;
       });
       window.setTimeout(() => {
         if (reviewOperationsRef.current[screenshotId] !== operationId) return;
@@ -502,6 +594,11 @@ export function App() {
   // Derived state
   // -------------------------------------------------------------------------
   const availableModels = models.length > 0 ? models : [{ id: "UNKNOWN", displayName: "UNKNOWN" }];
+  const selectedModel = availableModels.find((m) => m.id === modelId);
+  const selectedModelIssue =
+    selectedModel && selectedModel.available === false
+      ? (selectedModel.unavailableReason ?? "This model is currently unavailable.")
+      : null;
   const statusObj = statusBlob as Record<string, unknown>;
   const connectionState =
     bridgeStatus !== "connected"
@@ -574,6 +671,60 @@ export function App() {
             >
               catalogs {productCatalogs && Object.keys(productCatalogs).length > 0 ? "loaded" : "none"}
             </span>
+            <div className="theme-wrap">
+              <button
+                className="chip"
+                aria-label="Theme settings"
+                title="Adjust accent and secondary colors"
+                aria-expanded={themeOpen}
+                onClick={() => setThemeOpen((v) => !v)}
+              >
+                🎨 theme
+              </button>
+              {themeOpen && (
+                <div className="theme-pop" role="dialog" aria-label="Theme settings">
+                  <span className="theme-group-label">Accent</span>
+                  <div className="theme-row">
+                    <div className="swatches">
+                      {ACCENT_PRESETS.map((c) => (
+                        <button
+                          key={c}
+                          className="swatch"
+                          style={{ "--swatch": c } as CSSProperties}
+                          title={c}
+                          aria-label={"Accent " + c}
+                          aria-pressed={accent.toLowerCase() === c}
+                          onClick={() => setAccent(c)}
+                        />
+                      ))}
+                    </div>
+                    <input type="color" className="theme-custom" value={accent} onChange={(e) => setAccent(e.target.value)} aria-label="Custom accent color" />
+                  </div>
+                  <span className="theme-group-label">Secondary</span>
+                  <div className="theme-row">
+                    <div className="swatches">
+                      {SECONDARY_PRESETS.map((c) => (
+                        <button
+                          key={c}
+                          className="swatch"
+                          style={{ "--swatch": c } as CSSProperties}
+                          title={c}
+                          aria-label={"Secondary " + c}
+                          aria-pressed={secondary.toLowerCase() === c}
+                          onClick={() => setSecondary(c)}
+                        />
+                      ))}
+                    </div>
+                    <input type="color" className="theme-custom" value={secondary} onChange={(e) => setSecondary(e.target.value)} aria-label="Custom secondary color" />
+                  </div>
+                  <div className="theme-actions">
+                    <button className="save-default" onClick={saveThemeDefault}>Set as default</button>
+                    <button onClick={resetTheme}>Reset</button>
+                  </div>
+                  <span className="theme-hint">Defaults are saved on this machine only.</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -590,8 +741,13 @@ export function App() {
               disabled={!!pendingModel || bridgeStatus !== "connected" || models.length === 0}
             >
               {availableModels.map((m) => (
-                <option key={m.id} value={m.id} disabled={m.available === false}>
-                  {m.displayName ?? formatModelLabel(m.id)}
+                <option
+                  key={m.id}
+                  value={m.id}
+                  disabled={m.available === false}
+                  title={m.available === false ? (m.unavailableReason ?? "Unavailable") : (m.displayName ?? m.id)}
+                >
+                  {(m.displayName ?? formatModelLabel(m.id)) + (m.available === false ? " (unavailable)" : "")}
                 </option>
               ))}
             </select>
@@ -605,6 +761,7 @@ export function App() {
               {models.length} models
             </span>
           </div>
+          {selectedModelIssue && <p className="model-note" role="status">Selected model unavailable: {selectedModelIssue}</p>}
 
           <div className="scope-chips">
             {scopes.map((s) => (
@@ -729,21 +886,28 @@ export function App() {
               </div>
             )}
             <div className="review-actions">
+              <input
+                className="note-input"
+                aria-label={"Review note for screenshot " + (s.screenshotId ?? "")}
+                placeholder="Add a review note (optional)…"
+                value={reviewNotes[s.screenshotId ?? ""] ?? ""}
+                onChange={(e) => setReviewNotes((prev) => ({ ...prev, [s.screenshotId ?? ""]: e.target.value }))}
+              />
               <button
                 aria-label={"Approve screenshot " + (s.screenshotId ?? "")}
                 disabled={screenshotReviews[s.screenshotId ?? ""] === "pending" || s.reviewStatus === "approved"}
-                onClick={() => s.screenshotId && handleReview(s.screenshotId, "approved")}
+                onClick={() => s.screenshotId && handleReview(s.screenshotId, "approved", "screenshot", reviewNotes[s.screenshotId ?? ""] ?? "")}
               >
                 Approve
               </button>
               <button aria-label="Reject screenshot review"
                 disabled={screenshotReviews[s.screenshotId ?? ""] === "pending"}
-                onClick={() => s.screenshotId && handleReview(s.screenshotId, "rejected")}>
+                onClick={() => s.screenshotId && handleReview(s.screenshotId, "rejected", "screenshot", reviewNotes[s.screenshotId ?? ""] ?? "")}>
                 Reject
               </button>
               <button
                 disabled={s.reviewStatus !== "approved" || s.cloudSendApproved === true || screenshotReviews[s.screenshotId ?? ""] === "pending"}
-                onClick={() => s.screenshotId && handleReview(s.screenshotId, "approved", "screenshot-upload")}>
+                onClick={() => s.screenshotId && handleReview(s.screenshotId, "approved", "screenshot-upload", reviewNotes[s.screenshotId ?? ""] ?? "")}>
                 Allow image upload
               </button>
               <span role="status">{screenshotReviews[s.screenshotId ?? ""] === "pending" ? "Saving decision…" : String(s.reviewStatus ?? "pending")}
