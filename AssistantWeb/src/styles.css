@@ -1998,3 +1998,100 @@ input:focus-visible {
 .model-note.ok {
   color: var(--subtle);
 }
+
+.shell.annotating {
+  position: relative;
+  grid-template-rows: auto minmax(80px, 1fr) auto auto;
+}
+.annotating,
+.annotating * {
+  cursor: crosshair !important;
+}
+.annotate-hover {
+  outline: 2px dashed var(--accent) !important;
+  outline-offset: 1px;
+}
+.pin-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+}
+.pin-badge {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+  pointer-events: auto;
+  box-shadow: var(--shadow);
+}
+.pin-badge.static {
+  position: static;
+  transform: none;
+}
+.pin-editor {
+  border-top: 1px solid var(--line);
+  background: var(--panel-surface);
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+  max-height: 40vh;
+  overflow: auto;
+}
+.pin-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pin-editor-actions {
+  display: flex;
+  gap: 6px;
+}
+.pin-editor-actions button,
+.pin-row > button {
+  min-height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-surface-2);
+  color: var(--panel-text);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 8px;
+}
+.pin-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: start;
+}
+.pin-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.pin-selector {
+  font-size: 9px;
+  color: var(--subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pin-export-area {
+  width: 100%;
+  font-size: 9px;
+  font-family: Consolas, monospace;
+  color: var(--muted);
+  background: var(--panel-surface-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  resize: vertical;
+}

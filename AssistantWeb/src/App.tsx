@@ -67,6 +67,13 @@ type ToolResult = {
 
 type BridgeStatus = "offline" | "connecting" | "connected" | "error";
 
+type AnnotationPin = {
+  id: string;
+  selector: string;
+  excerpt: string;
+  note: string;
+};
+
 // ---------------------------------------------------------------------------
 // Theme (accent + secondary, persisted default)
 // ---------------------------------------------------------------------------
@@ -113,6 +120,147 @@ export function App() {
   const [secondary, setSecondary] = useState(() => readThemeDefault("secondary", BUILT_IN_SECONDARY));
   const [themeOpen, setThemeOpen] = useState(false);
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [annotate, setAnnotate] = useState(false);
+  const [pins, setPins] = useState<AnnotationPin[]>(() => {
+    try {
+      const raw: unknown = JSON.parse(window.localStorage.getItem("bb.pins") ?? "[]");
+      const ids = new Set<string>();
+      return Array.isArray(raw) ? raw.filter((p): p is AnnotationPin => {
+        if (!p || ![p.id, p.selector, p.excerpt, p.note].every((v) => typeof v === "string") || !p.id || !p.selector || ids.has(p.id)) return false;
+        ids.add(p.id);
+        return true;
+      }) : [];
+    } catch { return []; }
+  });
+  const [pinPositions, setPinPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [pinsExported, setPinsExported] = useState(false);
+  const threadRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("bb.pins", JSON.stringify(pins));
+    } catch {}
+    setPinsExported(false);
+  }, [pins]);
+
+  const layoutPins = useCallback(() => {
+    const root = threadRef.current;
+    if (!root || !annotate) return;
+    const frame = root.getBoundingClientRect();
+    const next: Record<string, { x: number; y: number }> = {};
+    for (const pin of pins) {
+      try {
+        const el = root.querySelector(pin.selector) as HTMLElement | null;
+        if (!el) continue;
+        const box = el.getBoundingClientRect();
+        next[pin.id] = {
+          x: box.left - frame.left,
+          y: box.top - frame.top,
+        };
+      } catch {}
+    }
+    setPinPositions(next);
+  }, [pins, annotate]);
+
+  useLayoutEffect(() => {
+    layoutPins();
+  }, [layoutPins, annotate]);
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    const observer = new ResizeObserver(layoutPins);
+    observer.observe(thread);
+    Array.from(thread.children).forEach((child) => {
+      if (!child.classList.contains("pin-layer")) observer.observe(child);
+    });
+    thread.addEventListener("scroll", layoutPins, true);
+    thread.addEventListener("load", layoutPins, true);
+    window.addEventListener("resize", layoutPins);
+    if (!annotate) thread.querySelectorAll(".annotate-hover").forEach((node) => node.classList.remove("annotate-hover"));
+    return () => {
+      observer.disconnect();
+      thread.removeEventListener("scroll", layoutPins, true);
+      thread.removeEventListener("load", layoutPins, true);
+      window.removeEventListener("resize", layoutPins);
+    };
+  }, [layoutPins, annotate]);
+
+  const handleAnnotateClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!annotate) return;
+      const target = e.target as HTMLElement;
+      if (target.closest(".pin-editor,.pin-layer,[data-annotation-control]")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const el = target.closest(".msg,.shot,.tool-card,.empty,.catalog-card,.composer,.select-row,.scope-chips,.chip-row") ?? target;
+      const selector = cssPath(el);
+      const excerpt = (el.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 120);
+      setPins((prev) => [...prev, { id: cryptoId(), selector, excerpt, note: "" }]);
+      setPinsExported(false);
+    },
+    [annotate],
+  );
+
+  const handleAnnotateHover = useCallback(
+    (e: React.MouseEvent) => {
+      if (!annotate) return;
+      const root = threadRef.current;
+      if (!root) return;
+      root.querySelectorAll(".annotate-hover").forEach((n) => n.classList.remove("annotate-hover"));
+      const target = e.target as HTMLElement;
+      const el = target.closest(".msg,.shot,.tool-card,.empty,.catalog-card,.composer,.select-row,.scope-chips,.chip-row");
+      if (el && root.contains(el)) el.classList.add("annotate-hover");
+    },
+    [annotate],
+  );
+
+  const updatePinNote = useCallback((id: string, note: string) => {
+    setPins((prev) => prev.map((p) => (p.id === id ? { ...p, note } : p)));
+    setPinsExported(false);
+  }, []);
+
+  const removePin = useCallback((id: string) => {
+    setPins((prev) => prev.filter((p) => p.id !== id));
+    setPinsExported(false);
+  }, []);
+
+  const exportPins = useCallback(() => {
+    const bundle = {
+      app: "bluebrick-assistant",
+      exportedUtc: new Date().toISOString(),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      pins,
+    };
+    const text = JSON.stringify(bundle, null, 2);
+    const showJson = () => {
+      const area = document.querySelector<HTMLTextAreaElement>(".pin-export-area");
+      if (area) {
+        area.value = text;
+        area.hidden = false;
+      }
+    };
+    try {
+      const nav = window.navigator as Navigator & { clipboard?: { writeText?: (t: string) => Promise<void> } };
+      if (nav.clipboard?.writeText) {
+        nav.clipboard.writeText(text).then(
+          () => setPinsExported(true),
+          () => { showJson(); },
+        );
+        return;
+      }
+    } catch { /* fall through to textarea */ }
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.className = "pin-export-area";
+    document.body.appendChild(area);
+    area.select();
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch { copied = false; }
+    document.body.removeChild(area);
+    if (copied) setPinsExported(true);
+    else showJson();
+  }, [pins]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -593,6 +741,10 @@ export function App() {
   // -------------------------------------------------------------------------
   // Derived state
   // -------------------------------------------------------------------------
+  // Re-seat annotation badges whenever thread content changes.
+  useLayoutEffect(() => {
+    layoutPins();
+  }, [layoutPins, messages, screenshots, toolResults]);
   const availableModels = models.length > 0 ? models : [{ id: "UNKNOWN", displayName: "UNKNOWN" }];
   const selectedModel = availableModels.find((m) => m.id === modelId);
   const selectedModelIssue =
@@ -638,7 +790,12 @@ export function App() {
     );
   }
   return (
-    <main className="shell vira-command-surface">
+    <main
+      className={"shell vira-command-surface" + (annotate ? " annotating" : "")}
+      ref={threadRef}
+      onClickCapture={handleAnnotateClick}
+      onMouseOverCapture={handleAnnotateHover}
+    >
       <header className="top">
         <div className="brand-row">
           <div className="brand">
@@ -725,6 +882,16 @@ export function App() {
                 </div>
               )}
             </div>
+            <button
+              className={"chip" + (annotate ? " ok" : "")}
+              aria-label="Toggle annotation mode"
+              data-annotation-control
+              title="Toggle annotation mode to pin feedback anywhere in the assistant"
+              aria-pressed={annotate}
+              onClick={() => setAnnotate((v) => !v)}
+            >
+              Annotate{pins.length > 0 ? " " + pins.length : ""}
+            </button>
           </div>
         </div>
 
@@ -810,6 +977,22 @@ export function App() {
         </div>
       </header>
 
+        {annotate && (
+          <div className="pin-layer" aria-hidden="true">
+            {pins.map((p, i) => (
+              pinPositions[p.id] && (
+                <span
+                  key={p.id}
+                  className="pin-badge"
+                  style={{ left: pinPositions[p.id].x, top: pinPositions[p.id].y }}
+                  title={(p.excerpt || p.selector) + (p.note ? " — " + p.note : "")}
+                >
+                  {i + 1}
+                </span>
+              )
+            ))}
+          </div>
+        )}
       <section className="thread" aria-live="polite">
         {messages.length === 0 && screenshots.length === 0 && toolResults.length === 0 && (
           <div className="empty">
@@ -930,6 +1113,48 @@ export function App() {
         ))}
       </section>
 
+      {annotate && (
+        <section className="pin-editor" aria-label="Annotation pins">
+          <div className="pin-editor-head">
+            <strong>Annotations ({pins.length})</strong>
+            <div className="pin-editor-actions">
+              <button onClick={exportPins} disabled={pins.length === 0}>
+                {pinsExported ? "Copied ✓" : "Copy JSON"}
+              </button>
+              <button onClick={() => setPins([])} disabled={pins.length === 0}>Clear</button>
+            </div>
+          </div>
+          {pinsExported && <p className="model-note ok" role="status">Copied — paste it into chat and I will implement each pin.</p>}
+          <textarea
+            className="pin-export-area"
+            aria-label="Annotation JSON export"
+            readOnly
+            rows={5}
+            hidden
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          {pins.map((p, i) => (
+            <div key={p.id} className="pin-row">
+              <span className="pin-badge static" title={p.selector}>{i + 1}</span>
+              <div className="pin-body">
+                <code className="pin-selector" title={p.selector}>{p.selector}</code>
+                {p.excerpt && <div className="catalog-sub">{p.excerpt}</div>}
+                <textarea
+                  className="note-input"
+                  aria-label={"Note for pin " + (i + 1)}
+                  placeholder="What should change here?…"
+                  value={p.note}
+                  rows={2}
+                  onChange={(e) => updatePinNote(p.id, e.target.value)}
+                />
+              </div>
+              <button aria-label={"Remove pin " + (i + 1)} onClick={() => removePin(p.id)}>✕</button>
+            </div>
+          ))}
+          {pins.length === 0 && <p className="catalog-sub">Click anything above to pin it, then describe the change here.</p>}
+        </section>
+      )}
+
       <footer className="footer">
         <div className="composer">
           <textarea
@@ -996,6 +1221,41 @@ function cryptoId(): string {
     /* fall through */
   }
   return "id-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+}
+
+/**
+ * Compact CSS path for annotation pins: stable enough to re-locate the
+ * element for badge layout and to tell the implementer exactly which
+ * node a note refers to. Presentation-only; never sent to the host.
+ */
+function cssPath(el: Element | null): string {
+  if (!el || el === document.body) return "body";
+  const parts: string[] = [];
+  let node: Element | null = el;
+  while (node && node !== document.body && parts.length < 6) {
+    let part = node.tagName.toLowerCase();
+    const cls =
+      typeof node.className === "string"
+        ? node.className.split(/\s+/).filter((c) => c && !c.startsWith("annotate"))[0]
+        : "";
+    const id = node.getAttribute("id");
+    if (id) {
+      parts.unshift(part + "#" + id);
+      break;
+    }
+    if (cls) part += "." + cls;
+    const parent: Element | null = node.parentElement;
+    if (parent) {
+      const tag: string = (node as Element).tagName;
+      const sameTag: Element[] = Array.from(parent.children).filter(
+        (c: Element) => c.tagName === tag,
+      );
+      if (sameTag.length > 1) part += ":nth-of-type(" + (sameTag.indexOf(node as Element) + 1) + ")";
+    }
+    parts.unshift(part);
+    node = parent;
+  }
+  return parts.join(" > ");
 }
 
 /**

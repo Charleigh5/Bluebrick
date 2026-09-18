@@ -170,6 +170,24 @@ try {
   expect("model_selected", after.modelValue === "nvidia-llama-3-1-70b", `modelValue=${after.modelValue}`);
   expect("scopes_rendered", after.scopeButtons === 2, `scopeButtons=${after.scopeButtons}`);
   expect("scope_selected", (after.selectedScope ?? "").includes("Local Vault"), `selected=${after.selectedScope}`);
+
+  await page.click("button[aria-label='Toggle annotation mode']");
+  await page.click(".cap-count");
+  await page.waitForTimeout(300);
+  const pins = await page.evaluate(() => ({
+    badges: document.querySelectorAll(".pin-layer .pin-badge").length,
+    editor: !!document.querySelector(".pin-editor"),
+    rows: document.querySelectorAll(".pin-row").length,
+  }));
+  expect("annotate_badge", pins.badges === 1, `badges=${pins.badges}`);
+  expect("annotate_editor", pins.editor && pins.rows === 1, `editor=${pins.editor} rows=${pins.rows}`);
+  const exported = await page.evaluate(() => {
+    const area = document.querySelector(".pin-row textarea");
+    if (area) { area.focus(); document.execCommand("insertText", false, "make it lime"); }
+    document.querySelector(".pin-editor-actions button")?.click();
+    return document.querySelector(".pin-editor")?.textContent ?? "";
+  });
+  expect("annotate_note", exported.includes("make it lime"), "note text round-trip");
 } finally {
   await browser.close();
   staticServer.server.close();
