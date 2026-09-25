@@ -104,6 +104,16 @@ namespace BlueBrick.Agent
 
         internal void LogEvent(string eventType, string operation, bool success, double durationMs, object metadata)
         {
+            LogEventCore(eventType, operation, success, durationMs, metadata, false);
+        }
+
+        internal void LogRequiredEvent(string eventType, string operation, bool success, double durationMs, object metadata)
+        {
+            LogEventCore(eventType, operation, success, durationMs, metadata, true);
+        }
+
+        private void LogEventCore(string eventType, string operation, bool success, double durationMs, object metadata, bool required)
+        {
             lock (_lock)
             {
                 _totalRequests += 1;
@@ -119,7 +129,7 @@ namespace BlueBrick.Agent
                 }
             }
 
-            if (success)
+            if (success && !required)
             {
                 lock (_rng)
                 {

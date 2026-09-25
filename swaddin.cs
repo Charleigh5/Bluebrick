@@ -124,6 +124,11 @@ namespace BlueBrick
         public const int mainItemID25 = 3324;
         public const int mainItemID26 = 3325;
         public const int mainItemID27 = 3326;
+        public const int mainItemID28 = 3327;
+        // One-time tab-refresh trigger: bumps the known command-ID set so the
+        // CommandManager tab rebuilds once and picks up the drawing command
+        // (2026-09-23). Not bound to any command; harmless after first rebuild.
+        public const int mainItemID29 = 3328;
         public const int flyoutGroupID = 3436;
 #else
         public const int mainCmdGroupID = 2215;
@@ -153,6 +158,9 @@ namespace BlueBrick
         public const int mainItemID24 = 2323;
         public const int mainItemID25 = 2324;
         public const int mainItemID26 = 2325;
+        public const int mainItemID28 = 2326;
+        // One-time tab-refresh trigger (see LAB_BUILD note above, 2026-09-23).
+        public const int mainItemID29 = 2327;
         public const int flyoutGroupID = 2436;
 #endif
 
@@ -642,10 +650,12 @@ namespace BlueBrick
                 mainItemID23,
                 mainItemID24,
                 mainItemID25,
-mainItemID26
+                mainItemID26,
 #if LAB_BUILD
-        , mainItemID27
+                mainItemID27,
 #endif
+                mainItemID28,
+                mainItemID29
             };
             if (getDataResult)
                 if (!CompareIDs((int[])registryIDs, knownIDs)) //if the IDs don't match, reset the commandGroup
@@ -718,6 +728,10 @@ mainItemID26
             var cmdIndex11 = cmdGroup.AddCommandItem2("Sheet Rename", -1, "Renumber all sheets on drawing.",
                 "Sheet Rename", 11,
                 "barDrawRename", "", mainItemID25, menuToolbarOption);
+            var cmdIndex13 = cmdGroup.AddCommandItem2("Create Drawing from Faces", -1,
+                "Create a drawing from selected model faces using a chosen template.",
+                "Create Drawing from Faces", 13,
+                "barCreateDrawingFromFaces", "", mainItemID28, menuToolbarOption);
 var cmdIndex12 = cmdGroup.AddCommandItem2("Agent", -1, "Open VIRA Agent",
             "Agent", 12,
             "barAgent", "", mainItemID26, menuToolbarOption);
@@ -776,8 +790,8 @@ var cmdIndex12 = cmdGroup.AddCommandItem2("Agent", -1, "Open VIRA Agent",
                 if (cmdTab != null) continue;
                 cmdTab = CmdMgr.AddCommandTab(type, Title);
                 var cmdBox = cmdTab.AddCommandTabBox();
-                var cmdIDs = new int[14];
-                var TextType = new int[14];
+                var cmdIDs = new int[15];
+                var TextType = new int[15];
                 cmdIDs[0] = cmdGroup.CommandID[cmdIndex0];
                 TextType[0] = (int)swCommandTabButtonTextDisplay_e.swCommandTabButton_TextBelow;
                 cmdIDs[1] = cmdGroup.CommandID[cmdIndex1];
@@ -806,6 +820,8 @@ var cmdIndex12 = cmdGroup.AddCommandItem2("Agent", -1, "Open VIRA Agent",
                 TextType[12] = (int)swCommandTabButtonTextDisplay_e.swCommandTabButton_TextBelow;
                 cmdIDs[13] = cmdGroup.CommandID[cmdIndex12];
                 TextType[13] = (int)swCommandTabButtonTextDisplay_e.swCommandTabButton_TextBelow;
+                cmdIDs[14] = cmdGroup.CommandID[cmdIndex13];
+                TextType[14] = (int)swCommandTabButtonTextDisplay_e.swCommandTabButton_TextBelow;
                 cmdBox.AddCommands(cmdIDs, TextType);
 
                 var cmdBox1 = cmdTab.AddCommandTabBox();
@@ -961,6 +977,46 @@ var cmdIndex12 = cmdGroup.AddCommandItem2("Agent", -1, "Open VIRA Agent",
         public void barCopyDwg()
         {
             ClsTools.CopyDwg(TaskPanWinFormControl, SwApp);
+        }
+
+        public void barCreateDrawingFromFaces()
+        {
+            var macroPath = Path.Combine(
+                System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
+                "BlueBrick", "Macros", "CreateDrawingFromFaces.swp");
+
+            if (!File.Exists(macroPath))
+            {
+                MessageBox.Show("The drawing macro is not installed at:\n" + macroPath,
+                    "Create Drawing from Faces", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var model = SwApp?.ActiveDoc as IModelDoc2;
+            if (model == null ||
+                (model.GetType() != (int)swDocumentTypes_e.swDocPART &&
+                 model.GetType() != (int)swDocumentTypes_e.swDocASSEMBLY))
+            {
+                MessageBox.Show("Open a part or assembly before creating a drawing.",
+                    "Create Drawing from Faces", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                var ran = SwApp.RunMacro2(macroPath, "DrawingFromFaces", "main",
+                    (int)swRunMacroOption_e.swRunMacroDefault, out var error);
+                if (!ran)
+                {
+                    MessageBox.Show("SOLIDWORKS could not start the drawing macro (error " + error + ").",
+                        "Create Drawing from Faces", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("SOLIDWORKS could not start the drawing macro: " + ex.Message,
+                    "Create Drawing from Faces", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         public void barAgent()

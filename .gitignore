@@ -37,5 +37,8 @@ Forms/hello2.txt
 ## Acceptance-run binary snapshots (hashes live in manifests; DLLs redeploy from bin/)
 artifacts/**/build-lab/
 
+## Transient autobuild run logs (generator state, .trx, build logs)
+artifacts/autobuild/
+
 ## AssistantWeb dependencies
 AssistantWeb/node_modules/

@@ -916,6 +916,15 @@ namespace BlueBrick.Agent
             {
                 props["sessionId"] = new JObject { ["type"] = "string", ["description"] = "Optional session ID for the screenshot capture." };
             }
+            else if (tool.Name == "solidworks.set_custom_property")
+            {
+                props["file_path"] = new JObject { ["type"] = "string", ["description"] = "Path to the approved SOLIDWORKS file." };
+                props["property"] = new JObject { ["type"] = "string", ["description"] = "Custom property name to set." };
+                props["value"] = new JObject { ["type"] = "string", ["description"] = "Custom property value to set." };
+                required.Add("file_path");
+                required.Add("property");
+                required.Add("value");
+            }
 
             var schema = new JObject
             {

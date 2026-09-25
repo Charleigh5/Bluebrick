@@ -106,6 +106,30 @@ namespace BlueBrick.SolidWorks.Composition
         public SolidWorksRuntimeInfo Runtime => _runtime;
         public ISolidWorksMainThreadDispatcher Guard => _guard;
         public ICustomPropertyReadAdapter Adapter => _adapter;
+        /// <summary>
+        /// Retained-identity accessor for the activation slice (Sprint 04): resolves the live
+        /// active document plus the running application for the executor's final main-thread
+        /// write/save/reopen unit. Returns false (with null outs) when there is no live
+        /// target. Same try/catch shape as the private document-source resolver; the executor
+        /// revalidates identity before any write. Additive only.
+        /// </summary>
+        internal bool TryGetActiveMutationTarget(out IModelDoc2 model, out ISldWorks app)
+        {
+            model = null;
+            app = null;
+            try
+            {
+                app = _app;
+                model = _app.IActiveDoc2 as IModelDoc2;
+            }
+            catch
+            {
+                model = null;
+                app = null;
+                return false;
+            }
+            return model != null && app != null;
+        }
         public ISelectionReadAdapter SelectionAdapter => _selectionAdapter;
         public IFeatureTreeReadAdapter FeatureAdapter => _featureAdapter;
         public SelectionSnapshot GetSelectionSnapshot(string correlationId, string traceId, out System.Collections.Generic.List<AuditError> errors)

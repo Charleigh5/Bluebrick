@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -20,6 +21,9 @@ namespace BlueBrick
         private readonly TaskCompletionSource<bool> _pageReady = new TaskCompletionSource<bool>();
         private string _sessionId;
         private string _pendingAttachment;
+        private readonly List<string> _pendingAttachments = new List<string>();
+        private readonly HashSet<string> _webStagedAttachments = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly string _attachmentStagingRoot = Path.Combine(Path.GetTempPath(), "BlueBrick", "assistant-attachments", Guid.NewGuid().ToString("N"));
         private string _assistantMode;
         private string _activeModel = "AionUI";
         private JArray _toolCatalog = new JArray();
@@ -521,6 +525,9 @@ namespace BlueBrick
                 }
                 else if (string.Equals(type, "newSession", StringComparison.OrdinalIgnoreCase))
                 {
+                    CleanupWebStagedAttachments();
+                    _pendingAttachments.Clear();
+                    _pendingAttachment = null;
                     await StartSessionAsync().ConfigureAwait(true);
                 }
                 else if (string.Equals(type, "captureScreenshot", StringComparison.OrdinalIgnoreCase))
@@ -548,7 +555,12 @@ namespace BlueBrick
                 else if (string.Equals(type, "sendMessage", StringComparison.OrdinalIgnoreCase))
                 {
                     var message = msg.Value<string>("message") ?? string.Empty;
-                    if (!string.IsNullOrWhiteSpace(message))
+                    var attachments = msg["attachments"] as JArray;
+                    if (attachments != null && attachments.Count > 0)
+                    {
+                        StageWebAttachments(attachments);
+                    }
+                    if (!string.IsNullOrWhiteSpace(message) || _pendingAttachments.Count > 0)
                     {
                         txtChatInput.Text = message;
                         await SendAsync().ConfigureAwait(true);
@@ -1091,11 +1103,84 @@ namespace BlueBrick
             using (var dialog = new OpenFileDialog())
             {
                 dialog.Filter = "Images and PDFs|*.png;*.jpg;*.jpeg;*.bmp;*.pdf";
+                dialog.Multiselect = true;
                 if (dialog.ShowDialog() != DialogResult.OK) return;
-                _pendingAttachment = dialog.FileName;
-                lblChatStatus.Text = "Attached " + Path.GetFileName(dialog.FileName);
+                _pendingAttachments.Clear();
+                _pendingAttachments.AddRange(dialog.FileNames);
+                _pendingAttachment = dialog.FileNames[dialog.FileNames.Length - 1];
+                lblChatStatus.Text = dialog.FileNames.Length == 1
+                    ? "Attached " + Path.GetFileName(dialog.FileName)
+                    : "Attached " + dialog.FileNames.Length + " files";
                 lblChatStatus.Visible = false;
             }
+        }
+
+        private void StageWebAttachments(JArray attachments)
+        {
+            const int maxFiles = 8;
+            const int maxFileBytes = 10 * 1024 * 1024;
+            const int maxTotalBytes = 24 * 1024 * 1024;
+            var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".pdf", ".png", ".jpg", ".jpeg", ".bmp"
+            };
+            if (attachments.Count > maxFiles) throw new InvalidOperationException("Too many attachments.");
+
+            var staged = new List<string>();
+            var totalBytes = 0;
+            var batchRoot = Path.Combine(_attachmentStagingRoot, Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(batchRoot);
+            try
+            {
+                foreach (var token in attachments)
+                {
+                    var item = token as JObject;
+                    if (item == null) throw new InvalidOperationException("Invalid attachment payload.");
+                    var safeName = Path.GetFileName(item.Value<string>("name") ?? string.Empty);
+                    var extension = Path.GetExtension(safeName);
+                    if (string.IsNullOrWhiteSpace(safeName) || !allowedExtensions.Contains(extension))
+                        throw new InvalidOperationException("Unsupported attachment type.");
+
+                    var bytes = Convert.FromBase64String(item.Value<string>("base64Data") ?? string.Empty);
+                    if (bytes.Length == 0 || bytes.Length > maxFileBytes)
+                        throw new InvalidOperationException("Attachment exceeds the allowed size.");
+                    totalBytes += bytes.Length;
+                    if (totalBytes > maxTotalBytes)
+                        throw new InvalidOperationException("Attachments exceed the total allowed size.");
+
+                    var stagedPath = Path.Combine(batchRoot, safeName);
+                    File.WriteAllBytes(stagedPath, bytes);
+                    staged.Add(stagedPath);
+                    _webStagedAttachments.Add(stagedPath);
+                }
+            }
+            catch
+            {
+                foreach (var stagedPath in staged)
+                {
+                    try { File.Delete(stagedPath); } catch { }
+                    _webStagedAttachments.Remove(stagedPath);
+                }
+                throw;
+            }
+
+            _pendingAttachments.Clear();
+            _pendingAttachments.AddRange(staged);
+            _pendingAttachment = staged.Count > 0 ? staged[staged.Count - 1] : null;
+        }
+
+        private void CleanupWebStagedAttachments()
+        {
+            foreach (var path in _webStagedAttachments)
+            {
+                try { File.Delete(path); } catch { }
+            }
+            _webStagedAttachments.Clear();
+            try
+            {
+                if (Directory.Exists(_attachmentStagingRoot)) Directory.Delete(_attachmentStagingRoot, true);
+            }
+            catch { }
         }
 
         private bool HasSearchTools()
@@ -1615,7 +1700,7 @@ namespace BlueBrick
                         ["label"] = label,
                         ["query"] = string.Empty,
                         ["status"] = "pending",
-                        ["message"] = "Calling " + label + "...",
+                        ["message"] = AssistantPanelMutationPending.PendingMessage(toolName) ?? ("Calling " + label + "..."),
                         ["items"] = new JArray(),
                         ["receipt"] = NormalizeToolReceipt(chunk["receipt"] as JObject ?? chunk["Receipt"] as JObject)
                     }
@@ -1846,6 +1931,25 @@ namespace BlueBrick
             return text.Substring("[prov ".Length, end - "[prov ".Length).Trim();
         }
 
+        // Mutation approval pending card (Sprint 04 contract C6): the tool_call event
+        // already flows through bbAppendToolResult, so the pending indication needs only a
+        // tool-specific message here — no new chunk type, no WebView JS change. Narrower
+        // than the whole payload on purpose: model-facing paths stay redacted because the
+        // message carries no path at all.
+        internal static class AssistantPanelMutationPending
+        {
+            internal static bool IsMutationApprovalTool(string toolName)
+            {
+                return string.Equals(toolName, "solidworks.set_custom_property", StringComparison.OrdinalIgnoreCase);
+            }
+
+            internal static string PendingMessage(string toolName)
+            {
+                if (!IsMutationApprovalTool(toolName)) return null;
+                return "Awaiting native approval — edit and save this test file once.";
+            }
+        }
+
         private void RenderNormalizedAssistantStreamEvent(
             AssistantStreamEvent streamEvent,
             StringBuilder streamedText,
@@ -1930,7 +2034,7 @@ namespace BlueBrick
             if (!_initialized) return;
 
             var text = txtChatInput.Text.Trim();
-            if ((text.Length == 0 || text == "Chat") && string.IsNullOrWhiteSpace(_pendingAttachment)) return;
+            if ((text.Length == 0 || text == "Chat") && _pendingAttachments.Count == 0 && string.IsNullOrWhiteSpace(_pendingAttachment)) return;
             if (text == "Chat") text = "";
             if (string.IsNullOrWhiteSpace(_sessionId)) await StartSessionAsync();
 
@@ -1948,10 +2052,11 @@ namespace BlueBrick
                 ["sessionId"] = _sessionId,
                 ["message"] = userText,
                 ["scopeId"] = _selectedScopeId,
-                ["attachmentPaths"] = _pendingAttachment == null
-                ? new JArray()
-                : new JArray(_pendingAttachment)
+                ["attachmentPaths"] = _pendingAttachments.Count > 0
+                ? new JArray(_pendingAttachments)
+                : (_pendingAttachment == null ? new JArray() : new JArray(_pendingAttachment))
             };
+            _pendingAttachments.Clear();
             _pendingAttachment = null;
 
             _isStreaming = true;

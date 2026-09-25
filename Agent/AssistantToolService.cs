@@ -180,6 +180,22 @@ namespace BlueBrick.Agent
                     RequiresCredential = false,
                     AllowedModes = new[] { "READ_ONLY_ANALYST" },
                     FailureMode = "deny_safe"
+                },
+                new AssistantToolDescriptor
+                {
+                    Name = "solidworks.set_custom_property",
+                    DisplayName = "Set Custom Property",
+                    Category = "mutation",
+                    Description = "Sets one custom property on an explicitly approved SOLIDWORKS file.",
+                    ReadOnly = false,
+                    MutatesCad = true,
+                    Enabled = AppIdentity.IsLabBuild && (_config.Assistant?.Mutations?.Enabled ?? false),
+                    RiskLevel = "medium",
+                    AuditRequired = true,
+                    AllowedInChat = true,
+                    RequiresCredential = false,
+                    AllowedModes = new[] { "HUMAN_APPROVED_MUTATION" },
+                    FailureMode = "deny_safe"
                 }
             };
 
@@ -212,6 +228,13 @@ namespace BlueBrick.Agent
         internal async Task<AssistantToolResult> ExecuteAsync(AssistantToolRequest request, string traceId)
         {
             request = request ?? new AssistantToolRequest();
+            // Activation-slice divergence (Sprint 04 contract C1/C3): the mutation tool owns
+            // its freeze/policy/digest order and never flows through the generic scope block
+            // below. Every other tool keeps its exact current shape.
+            if (string.Equals(Normalize(request.ToolName), "solidworks.set_custom_property", StringComparison.OrdinalIgnoreCase))
+            {
+                return await ExecuteSetCustomPropertyAsync(request, traceId).ConfigureAwait(false);
+            }
             request.RequestId = string.IsNullOrWhiteSpace(request.RequestId) ? traceId : request.RequestId;
             request.Environment = string.IsNullOrWhiteSpace(request.Environment)
                 ? (AppIdentity.IsLabBuild ? "Lab" : "Production")
@@ -356,6 +379,71 @@ namespace BlueBrick.Agent
                 AssistantToolPolicyDecision.Deny("unsupported", "Tool execution is not implemented yet.", false),
                 descriptor,
                 traceId);
+        }
+
+        // Mutation activation path (Sprint 04): builds the executor with production
+        // composition. Null composition members fail closed inside the executor (denial
+        // before prompt); tests construct SetCustomPropertyExecutor directly with fakes.
+        private async Task<AssistantToolResult> ExecuteSetCustomPropertyAsync(AssistantToolRequest request, string traceId)
+        {
+            var catalog = GetCatalog();
+            var composition = _auditComposition;
+            BlueBrick.SolidWorks.Runtime.ISolidWorksMainThreadDispatcher dispatcher = null;
+            BlueBrick.SolidWorks.Adapters.ICustomPropertyReadAdapter adapter = null;
+            if (composition != null)
+            {
+                try
+                {
+                    dispatcher = composition.Guard;
+                }
+                catch
+                {
+                    dispatcher = null;
+                }
+                try
+                {
+                    adapter = composition.Adapter;
+                }
+                catch
+                {
+                    adapter = null;
+                }
+            }
+            var telemetryLogDir = System.IO.Path.Combine(
+                System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
+                AppIdentity.TelemetryFolderName,
+                "telemetry");
+            var telemetryLogger = new TelemetryLogger(telemetryLogDir, "events", 0.1, 7, 2048, 500);
+            var executor = new SetCustomPropertyExecutor(
+                _config,
+                _policy,
+                _auditLog,
+                new MutationTelemetryLoggerSink(telemetryLogger),
+                new AssistantApprovalLedger(),
+                new ApprovalLifecycleTelemetrySink(telemetryLogger),
+                dispatcher,
+                adapter,
+                catalog,
+                () => dispatcher == null ? null : (IApprovalPrompt)new ApprovalDialog(dispatcher),
+                // Sink parameters carry the executor's fakes in tests; production binds the
+                // concrete defaults the issuer runtime ctor requires (ledger + TelemetryLogger).
+                (prompt, builder, ledgerSink, issuerTelemetrySink) => new AssistantApprovalService(_config, prompt, builder, new AssistantApprovalLedger(), telemetryLogger),
+                () =>
+                {
+                    if (composition == null) return null;
+                    global::SolidWorks.Interop.sldworks.IModelDoc2 liveModel;
+                    global::SolidWorks.Interop.sldworks.ISldWorks liveApp;
+                    try
+                    {
+                        if (!composition.TryGetActiveMutationTarget(out liveModel, out liveApp) || liveModel == null || liveApp == null) return null;
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                    return new SwLiveMutationSession(liveModel, liveApp);
+                });
+            return await executor.ExecuteAsync(request, traceId).ConfigureAwait(false);
         }
 
     private async Task<AssistantToolResult> SearchAllScopesAsync(

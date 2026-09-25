@@ -3,9 +3,12 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BlueBrick.Agent;
+using BlueBrick.UI.Tests;
+using BlueBrick.UI.Tests.Stubs;
 using BlueBrick.Vault;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.Win32;
@@ -2262,6 +2265,24 @@ namespace BlueBrick.UI.Tests
         }
 
         [TestMethod]
+        public void AssistantScopeRegistry_AllScope_Excludes_SearchSalesforce_Until_Tool_Exists()
+        {
+            var service = new AssistantToolService(new AgentConfig());
+            var scopes = AssistantScopeRegistry.Build(new AgentConfig(), service.GetCatalog()).ToArray();
+            var all = scopes.Single(s => s.Id == AssistantScopeRegistry.All);
+
+            Assert.IsFalse(all.ToolNames.Contains("search_salesforce"),
+                "The all scope must not fan out to search_salesforce until a tool exists for it.");
+            Assert.IsFalse(all.ReadOnlyToolNames.Contains("search_salesforce"),
+                "The all scope must not declare search_salesforce read-only until a tool exists for it.");
+            Assert.IsTrue(all.ToolNames.Contains("search_local_vault"));
+            Assert.IsTrue(all.ToolNames.Contains("search_pdm"));
+            Assert.IsTrue(all.ToolNames.Contains("search_epicor"));
+            Assert.IsFalse(all.ToolNames.Any(t => t != null && t.ToLowerInvariant().Contains("salesforce")));
+            Assert.IsFalse(all.Description != null && all.Description.ToLowerInvariant().Contains("salesforce"));
+        }
+
+        [TestMethod]
         public async Task AssistantToolService_ScopeMismatch_Blocks_Search_Wrapper_Without_Pdm_Call()
         {
             var service = new AssistantToolService(new AgentConfig());
@@ -2460,6 +2481,164 @@ namespace BlueBrick.UI.Tests
             {
                 // Test cleanup only.
             }
+        }
+
+        // P0.2 cancellation regression tests (PLAN_P0_GATES_AND_BUG_FIXES.md Step 15).
+        // PostStreamingAsync has no catch of its own: OperationCanceledException and
+        // TimeoutException from the 90s idle read timeout must propagate to callers.
+        // AgentPanelClient.BaseUrl is redirected to the in-process test server for the
+        // duration of each test (same pattern as AgentClientTests).
+        [TestMethod]
+        public void PostStreaming_UserCancel_ThrowsOperationCanceled()
+        {
+            using (var server = new TestHttpServer(FindAvailablePort()))
+            {
+                server.RegisterRawHandler("/assistant/message/stream", async context =>
+                {
+                    context.Response.StatusCode = 200;
+                    context.Response.ContentType = "text/event-stream";
+                    var chunk = Encoding.UTF8.GetBytes("data: {\"text\":\"first\"}\n\n");
+                    await context.Response.OutputStream.WriteAsync(chunk, 0, chunk.Length);
+                    // Stall: the cancel token fires while the client waits for the next chunk.
+                    await Task.Delay(TimeSpan.FromSeconds(30));
+                });
+                server.Start();
+
+                var originalBaseUrl = AgentPanelClient.BaseUrl;
+                try
+                {
+                    AgentPanelClient.BaseUrl = server.BaseUrl.TrimEnd('/');
+
+                    using (var cancelled = new CancellationTokenSource(TimeSpan.FromSeconds(2)))
+                    {
+                        Exception thrown = null;
+                        try
+                        {
+                            AgentPanelClient.PostStreamingAsync(
+                                "/assistant/message/stream",
+                                new JObject(),
+                                chunk => { },
+                                cancelled.Token).GetAwaiter().GetResult();
+                        }
+                        catch (Exception ex)
+                        {
+                            thrown = ex;
+                        }
+
+                        Assert.IsNotNull(thrown, "PostStreamingAsync returned normally; an OperationCanceledException was expected mid-stream.");
+                        Assert.IsTrue(thrown is OperationCanceledException,
+                            "Expected OperationCanceledException (TaskCanceledException accepted), got: " + thrown.GetType().Name);
+                    }
+                }
+                finally
+                {
+                    AgentPanelClient.BaseUrl = originalBaseUrl;
+                }
+            }
+        }
+
+        [TestMethod]
+        public void PostStreaming_IdleTimeout_ThrowsTimeoutException()
+        {
+            using (var server = new TestHttpServer(FindAvailablePort()))
+            {
+                server.RegisterRawHandler("/assistant/message/stream", async context =>
+                {
+                    context.Response.StatusCode = 200;
+                    context.Response.SendChunked = true;
+                    // Headers + one non-processable SSE comment, then no data: the 90s
+                    // idle read timeout must fire instead of hanging forever.
+                    var keepalive = Encoding.UTF8.GetBytes(": keepalive\n\n");
+                    await context.Response.OutputStream.WriteAsync(keepalive, 0, keepalive.Length);
+                    await Task.Delay(TimeSpan.FromSeconds(120));
+                });
+                server.Start();
+
+                var originalBaseUrl = AgentPanelClient.BaseUrl;
+                try
+                {
+                    AgentPanelClient.BaseUrl = server.BaseUrl.TrimEnd('/');
+
+                    Exception thrown = null;
+                    try
+                    {
+                        AgentPanelClient.PostStreamingAsync(
+                            "/assistant/message/stream",
+                            new JObject(),
+                            chunk => { },
+                            CancellationToken.None).GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        thrown = ex;
+                    }
+
+                    Assert.IsNotNull(thrown, "PostStreamingAsync returned normally; a TimeoutException was expected after the 90s idle read timeout.");
+                    Assert.IsTrue(thrown is TimeoutException,
+                        "Expected TimeoutException, got: " + thrown.GetType().Name);
+                }
+                finally
+                {
+                    AgentPanelClient.BaseUrl = originalBaseUrl;
+                }
+            }
+        }
+
+        [TestMethod]
+        public void PostStreaming_UserCancel_BeforeHeaders_ThrowsOperationCanceled()
+        {
+            using (var server = new TestHttpServer(FindAvailablePort()))
+            {
+                server.RegisterRawHandler("/assistant/message/stream", async context =>
+                {
+                    context.Response.StatusCode = 200;
+                    context.Response.ContentType = "text/event-stream";
+                    await Task.Delay(TimeSpan.FromSeconds(30));
+                });
+                server.Start();
+
+                var originalBaseUrl = AgentPanelClient.BaseUrl;
+                try
+                {
+                    AgentPanelClient.BaseUrl = server.BaseUrl.TrimEnd('/');
+
+                    using (var cancelled = new CancellationTokenSource())
+                    {
+                        cancelled.Cancel();
+
+                        Exception thrown = null;
+                        try
+                        {
+                            AgentPanelClient.PostStreamingAsync(
+                                "/assistant/message/stream",
+                                new JObject(),
+                                chunk => { },
+                                cancelled.Token).GetAwaiter().GetResult();
+                        }
+                        catch (Exception ex)
+                        {
+                            thrown = ex;
+                        }
+
+                        Assert.IsNotNull(thrown, "PostStreamingAsync returned normally; a cancellation was expected before headers.");
+                        Assert.IsTrue(thrown is OperationCanceledException,
+                            "Expected OperationCanceledException (TaskCanceledException accepted), got: " + thrown.GetType().Name);
+                    }
+                }
+                finally
+                {
+                    AgentPanelClient.BaseUrl = originalBaseUrl;
+                }
+            }
+        }
+
+        private static int FindAvailablePort()
+        {
+            var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            listener.Start();
+            var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+            listener.Stop();
+            return port;
         }
     }
 }

@@ -482,25 +482,6 @@ namespace BlueBrick.UI.Tests.Agent
         }
 
         [TestMethod]
-        public void AgentHttpServer_BuildQaRunUrl_UsesConfiguredPort()
-        {
-            var config = new AgentConfig { Agent = new AgentSettings { BridgePort = 23456 } };
-
-            Assert.AreEqual("http://127.0.0.1:23456/qa/run", AgentHttpServer.BuildQaRunUrl(config));
-        }
-
-        [TestMethod]
-        public void AgentHttpServer_BuildQaRunUrl_FallsBackToIdentityPortWhenUnconfigured()
-        {
-            Assert.AreEqual(
-                "http://127.0.0.1:" + AppIdentity.BridgePort + "/qa/run",
-                AgentHttpServer.BuildQaRunUrl(new AgentConfig { Agent = new AgentSettings { BridgePort = 0 } }));
-            Assert.AreEqual(
-                "http://127.0.0.1:" + AppIdentity.BridgePort + "/qa/run",
-                AgentHttpServer.BuildQaRunUrl(null));
-        }
-
-        [TestMethod]
         public void AgentConfig_CreateInvalidFallback_UsesIdentityDefaultPortAndReportsStatus()
         {
             var configPath = Path.Combine(Path.GetTempPath(), "bb-fallback-" + Guid.NewGuid().ToString("N"), "config", Path.GetFileName(AppIdentity.ConfigPath("root")));

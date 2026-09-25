@@ -54,7 +54,7 @@ All routes require `X-Agent-Auth` at the bridge layer. `/sw/*` and `/pdm/*` also
 | `/pdm/search` | POST | Medium/Privacy | Implemented | Native route blocked at execution boundary; assistant wrapper is disabled by default and requires existing PDM login plus server permission | config/auth-no-login test |
 | `/pdm/get_props` | POST | Medium/Privacy | Implemented | Native route blocked at execution boundary; no assistant direct path | execution-boundary deny test |
 | `/pdm/get_file` | POST | High/Privacy | Implemented | Block until file-scope policy exists | deny from chat test |
-| `/qa/run` | POST | Medium | Implemented | Developer/test only | no production side-effect test |
+| `/qa/run` | POST | Medium | Removed (Sprint 00) | Returns 404; self-proxy handler deliberately deleted | route-removed regression test |
 | `/lab/vault/reindex` | POST | Medium | Implemented | User-triggered only | index receipt test |
 | `/lab/vault/reset` | POST | High/Destructive | Implemented | Human-confirmed only; never model-direct | deny from chat + confirmation test |
 | `/lab/vault/status` | POST | Low | Implemented | Allowed | schema test |

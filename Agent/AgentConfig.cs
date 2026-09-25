@@ -293,6 +293,10 @@ namespace BlueBrick.Agent
         Assistant.MaxTotalAttachmentBytes = Assistant.MaxTotalAttachmentBytes <= 0 ? 10 * 1024 * 1024 : Assistant.MaxTotalAttachmentBytes;
             Assistant.ReactDevServerUrl = DefaultIfEmpty(Assistant.ReactDevServerUrl, string.Empty);
 
+            Assistant.Mutations ??= new AssistantMutationSettings();
+            Assistant.Mutations.ApprovalTimeoutSeconds = Assistant.Mutations.ApprovalTimeoutSeconds <= 0 ? 60 : Assistant.Mutations.ApprovalTimeoutSeconds;
+            Assistant.Mutations.TestFileRoot = DefaultIfEmpty(Assistant.Mutations.TestFileRoot, Path.Combine(AppIdentity.DefaultWorkingFolder, "AssistantTestFiles"));
+
             AssistantTools.PdmMaxResults = AssistantTools.PdmMaxResults <= 0 ? 25 : Math.Min(AssistantTools.PdmMaxResults, 50);
             AssistantTools.EpicorMaxResults = AssistantTools.EpicorMaxResults <= 0 ? 25 : Math.Min(AssistantTools.EpicorMaxResults, 50);
             AssistantTools.EpicorConnectionStringEnvironmentVariable = DefaultIfEmpty(
@@ -444,6 +448,8 @@ namespace BlueBrick.Agent
     {
         [JsonProperty("Screenshots")]
         internal AssistantScreenshotSettings Screenshots { get; set; } = new AssistantScreenshotSettings();
+        [JsonProperty("Mutations")]
+        internal AssistantMutationSettings Mutations { get; set; } = new AssistantMutationSettings();
         [JsonProperty("PreferredVisionModelId")]
         internal string PreferredVisionModelId { get; set; }
         [JsonProperty("VisionFallbackModelId")]
@@ -491,6 +497,16 @@ namespace BlueBrick.Agent
         internal bool AutoAttachToChat { get; set; }
         [JsonProperty("AutoApproveLocalCaptureForContext")]
         internal bool AutoApproveLocalCaptureForContext { get; set; }
+    }
+
+    internal class AssistantMutationSettings
+    {
+        [JsonProperty("Enabled")]
+        internal bool Enabled { get; set; }
+        [JsonProperty("ApprovalTimeoutSeconds")]
+        internal int ApprovalTimeoutSeconds { get; set; } = 60;
+        [JsonProperty("TestFileRoot")]
+        internal string TestFileRoot { get; set; } = Path.Combine(AppIdentity.DefaultWorkingFolder, "AssistantTestFiles");
     }
 
     internal sealed class AgentConfigurationDiagnostics

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import "./styles.css";
 import {
   createBlueBrickWindowBridge,
@@ -10,6 +10,8 @@ import { ExecutionBoardApp } from "./execution-board/ExecutionBoardApp";
 import { ViraLabApp } from "./vira-lab/ViraLabApp";
 import { RuntimeIdentitySurface } from "./runtimeIdentity";
 import { resolveAssistantSurface } from "./surfaceRouting";
+import { analyzePacketFile, renderPacketPage } from "./packet-review/analyzePacketFile";
+import type { PacketReview } from "./packet-review/packetReview";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,6 +22,39 @@ type Message = {
   text: string;
   streaming?: boolean;
   attachment?: string;
+  attachments?: string[];
+  evidence?: EvidenceLink[];
+  /** Rendered only in the packet-demo surface; never exposed to the host transcript. */
+  presentationOnly?: boolean;
+  /** A local packet-demo note that must not be dispatched through the host bridge. */
+  localDemoOnly?: boolean;
+};
+
+type EvidenceLink = {
+  packetIndex: number;
+  pageNumber: number;
+  label: string;
+};
+
+type PacketPagePreview = {
+  packetIndex: number;
+  fileName: string;
+  pageNumber: number;
+  pageCount: number;
+  label: string;
+  imageUrl: string;
+  zoom: number;
+  fitMode: "custom" | "width" | "page";
+};
+
+type PendingAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  base64Data: string;
+  previewUrl?: string;
+  extraction: string;
 };
 
 type Scope = {
@@ -31,6 +66,7 @@ type Scope = {
 
 type Model = {
   id: string;
+  providerId?: string;
   displayName: string;
   available?: boolean;
   unavailableReason?: string;
@@ -74,13 +110,257 @@ type AnnotationPin = {
   note: string;
 };
 
+type ToolbarItem = {
+  id: string;
+  label: string;
+  description: string;
+  symbol: string;
+  category: "workspace" | "generator" | "macro";
+  hostRequired?: boolean;
+  source?: string;
+};
+
+type ToolbarPreferences = {
+  itemIds: string[];
+  rows: 1 | 2;
+  locked: boolean;
+  customItems: ToolbarItem[];
+};
+
 // ---------------------------------------------------------------------------
 // Theme (accent + secondary, persisted default)
 // ---------------------------------------------------------------------------
-const BUILT_IN_ACCENT = "#c8ff2e";
-const BUILT_IN_SECONDARY = "#2dd4bf";
-const ACCENT_PRESETS = ["#c8ff2e", "#22b8d6", "#fbbf24", "#a78bfa", "#fb923c"];
-const SECONDARY_PRESETS = ["#2dd4bf", "#22b8d6", "#38bdf8", "#fb7185", "#94a3b8"];
+const BUILT_IN_ACCENT = "#5de1ff";
+const BUILT_IN_SECONDARY = "#8da9ff";
+const ACCENT_PRESETS = ["#5de1ff", "#8da9ff", "#72e7c0", "#f7c873", "#f58da8"];
+const SECONDARY_PRESETS = ["#8da9ff", "#5de1ff", "#72e7c0", "#f58da8", "#c5d4ff"];
+const ACCEPTED_ATTACHMENT_TYPES = ".pdf,.png,.jpg,.jpeg,.bmp,application/pdf,image/png,image/jpeg,image/bmp";
+const MAX_ATTACHMENT_COUNT = 8;
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENT_TOTAL_BYTES = 24 * 1024 * 1024;
+const TOOLBAR_STORAGE_KEY = "bb.assistant.toolbar.v1";
+const BUILT_IN_TOOLBAR_ITEMS: ToolbarItem[] = [
+  { id: "new", label: "New", description: "Start a new assistant session", symbol: "new", category: "workspace" },
+  { id: "capture", label: "Capture", description: "Capture the current local screen", symbol: "capture", category: "workspace" },
+  { id: "search", label: "Search", description: "Search the selected engineering scope", symbol: "search", category: "workspace" },
+  { id: "packet-pdf", label: "Packet PDF", description: "Generate a governed drawing packet PDF", symbol: "pdf", category: "generator", hostRequired: true },
+  { id: "sheet-png", label: "Sheet PNG", description: "Export drawing sheets as PNG images", symbol: "png", category: "generator", hostRequired: true },
+  { id: "step-export", label: "STEP", description: "Export the active model as a STEP file", symbol: "step", category: "generator", hostRequired: true },
+  { id: "dxf-export", label: "DXF", description: "Export supported geometry as DXF", symbol: "dxf", category: "generator", hostRequired: true },
+];
+const DEFAULT_TOOLBAR_IDS = ["new", "capture", "search"];
+
+function readToolbarPreferences(): ToolbarPreferences {
+  const fallback: ToolbarPreferences = { itemIds: DEFAULT_TOOLBAR_IDS, rows: 1, locked: false, customItems: [] };
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(TOOLBAR_STORAGE_KEY) ?? "null");
+    if (!parsed || typeof parsed !== "object") return fallback;
+    const candidate = parsed as Partial<ToolbarPreferences>;
+    const customItems = Array.isArray(candidate.customItems)
+      ? candidate.customItems.filter((item): item is ToolbarItem => Boolean(
+        item && typeof item.id === "string" && typeof item.label === "string" &&
+        typeof item.description === "string" && typeof item.symbol === "string" &&
+        item.category === "macro" && typeof item.source === "string",
+      ))
+      : [];
+    const validIds = new Set([...BUILT_IN_TOOLBAR_ITEMS.map((item) => item.id), ...customItems.map((item) => item.id)]);
+    const itemIds = Array.isArray(candidate.itemIds)
+      ? Array.from(new Set(candidate.itemIds.filter((id): id is string => typeof id === "string" && validIds.has(id))))
+      : DEFAULT_TOOLBAR_IDS;
+    return {
+      itemIds: itemIds.length ? itemIds : DEFAULT_TOOLBAR_IDS,
+      rows: candidate.rows === 2 ? 2 : 1,
+      locked: candidate.locked === true,
+      customItems,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+type PromptTemplate = { id: string; label: string; prompt: string };
+const TEMPLATE_STORAGE_KEY = "bb.assistant.templates.v1";
+const BUILT_IN_PROMPT_TEMPLATES: PromptTemplate[] = [
+  { id: "tpl-packet-review", label: "Review packet", prompt: "Review the attached drawing packet: list part numbers, BOM rows, dimensions, and notes. Call out anything missing or inconsistent, and separate confirmed facts from unknowns." },
+  { id: "tpl-bom-audit", label: "Audit BOM", prompt: "Audit the BOM in the attached drawings: compare quantities and part numbers against the title blocks and flag discrepancies with page references." },
+  { id: "tpl-dim-check", label: "Check dimensions", prompt: "Check the dimensions in the attached drawings against the stated tolerances and title-block data. List each deviation with its page number." },
+  { id: "tpl-release-summary", label: "Release summary", prompt: "Draft a release summary for this session: what was reviewed, key findings, open questions, and the recommended next actions." },
+];
+
+function readCustomTemplates(): PromptTemplate[] {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(TEMPLATE_STORAGE_KEY) ?? "null");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is PromptTemplate => Boolean(
+      item && typeof item === "object" && typeof (item as PromptTemplate).id === "string" &&
+      typeof (item as PromptTemplate).label === "string" && typeof (item as PromptTemplate).prompt === "string",
+    ));
+  } catch {
+    return [];
+  }
+}
+
+const TOOLBAR_ICON_PATHS: Record<string, string[]> = {
+  new: [
+    "M14 2.5H6A1.5 1.5 0 0 0 4.5 4v16A1.5 1.5 0 0 0 6 21.5h12a1.5 1.5 0 0 0 1.5-1.5V8z",
+    "M14 2.5V8h5.5",
+    "M12 11.5v6",
+    "M9 14.5h6",
+  ],
+  capture: [
+    "M3 8.5A1.5 1.5 0 0 1 4.5 7h2.6l1.7-2.5h6.4L16.9 7h2.6A1.5 1.5 0 0 1 21 8.5v10a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z",
+    "M12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z",
+  ],
+  attach: [
+    "m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48",
+  ],
+  search: [
+    "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z",
+    "m21 21-4.35-4.35",
+  ],
+  pdf: [
+    "M14 2.5H6A1.5 1.5 0 0 0 4.5 4v16A1.5 1.5 0 0 0 6 21.5h12a1.5 1.5 0 0 0 1.5-1.5V8z",
+    "M14 2.5V8h5.5",
+    "M9 13h6",
+    "M9 17h4",
+  ],
+  png: [
+    "M5 3.5h14A1.5 1.5 0 0 1 20.5 5v14a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V5A1.5 1.5 0 0 1 5 3.5z",
+    "M9.5 10.25a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5z",
+    "m20.5 14.5-4.5-4.5L5.5 20.5",
+  ],
+  step: [
+    "M12 2.5 20.5 7.1v10L12 21.5l-8.5-4.4v-10z",
+    "m20.5 7.1-8.5 4.9-8.5-4.9",
+    "M12 12v9.5",
+  ],
+  dxf: [
+    "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z",
+    "m15 5 4 4",
+  ],
+  macro: [
+    "m8 5.5 11 6.5-11 6.5z",
+  ],
+};
+
+function ToolbarIcon({ symbol }: { symbol: string }) {
+  const paths = TOOLBAR_ICON_PATHS[symbol] ?? TOOLBAR_ICON_PATHS.new;
+  return (
+    <svg
+      className="toolbar-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {paths.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  );
+}
+
+function toolbarTipEdge(index: number, columns: number, count: number): string {
+  const col = index % columns;
+  const row = Math.floor(index / columns);
+  const rowLast = Math.min((row + 1) * columns - 1, count - 1);
+  if (col === 0 && rowLast !== 0) return "start";
+  if (index === rowLast && col !== 0) return "end";
+  return "";
+}
+const PACKET_DEMO_MODELS: Model[] = [
+  { id: "nvidia-llama-3-1-70b", providerId: "nvidia", displayName: "NVIDIA Llama 3.1 70B", available: true },
+  { id: "openai-gpt-4-1-mini", providerId: "openai", displayName: "OpenAI GPT-4.1 Mini", available: true },
+  { id: "aionui-default", providerId: "aionui_broker", displayName: "AionUI Default", available: true },
+];
+const PACKET_DEMO_INTRO: Message[] = [
+  {
+    id: "packet-demo-intro",
+    role: "assistant",
+    text: "DEMO · local packet intake ready\n\nSelect or drop exactly two PDF fixtures. BlueBrick will read both locally, preserve their order, and generate the intake receipt and evidence findings from the actual page text.",
+  },
+];
+const PACKET_DEMO_INITIAL_MESSAGES: Message[] = [
+  ...PACKET_DEMO_INTRO,
+  {
+    id: "packet-demo-example-user-prompt",
+    role: "user",
+    text: BUILT_IN_PROMPT_TEMPLATES[0].prompt,
+    presentationOnly: true,
+  },
+];
+
+function packetEvidenceSummary(reviews: PacketReview[]): string {
+  return reviews.map((review, index) => {
+    const identifiers = review.partNumbers.length ? review.partNumbers.join(", ") : "none detected";
+    const bom = review.bomRecords.length
+      ? review.bomRecords.map((row) => `p.${row.pageNumber} item ${row.item} · qty ${row.quantity} · ${row.partNumber} · ${row.description}`).join("\n  ")
+      : "none detected";
+    const dimensions = review.dimensions.length
+      ? review.dimensions.map((item) => `p.${item.pageNumber} ${item.text}`).join("; ")
+      : "none detected";
+    const notes = review.notes.filter((item) => !review.dimensions.some((dimension) => dimension.pageNumber === item.pageNumber && dimension.text === item.text));
+    return `PACKET ${index + 1} · ${review.fileName}\n${review.pageCount} pages · ${review.titleBlocks.length} title-block markers · ${review.bomRecords.length} BOM rows\nIdentifiers: ${identifiers}\nBOM:\n  ${bom}\nDimensions: ${dimensions}\nNotes: ${notes.length ? notes.map((item) => `p.${item.pageNumber} ${item.text}`).join("; ") : "none detected"}`;
+  }).join("\n\n");
+}
+
+function packetEvidenceLinks(reviews: PacketReview[]): EvidenceLink[] {
+  const links: EvidenceLink[] = [];
+  const seen = new Set<string>();
+  reviews.forEach((review, packetIndex) => {
+    const add = (pageNumber: number, label: string) => {
+      const key = `${packetIndex}:${pageNumber}:${label}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      links.push({ packetIndex, pageNumber, label: `Packet ${packetIndex + 1} · p.${pageNumber} · ${label}` });
+    };
+    review.titleBlocks.forEach((item) => add(item.pageNumber, "title block"));
+    review.bomRecords.forEach((row) => add(row.pageNumber, `BOM item ${row.item}`));
+    review.dimensions.forEach((item) => add(item.pageNumber, item.text));
+    review.notes.forEach((item) => add(item.pageNumber, item.text));
+  });
+  return links;
+}
+
+function attachmentExtraction(name: string, mimeType: string): string {
+  if (mimeType === "application/pdf" || name.toLowerCase().endsWith(".pdf")) {
+    return "PDF: page text, drawing identifiers, title blocks, BOM rows, dimensions, notes, and deterministic findings.";
+  }
+  return "Image: visual evidence for the session; OCR and interpretation depend on the selected model's vision support.";
+}
+
+function fileToAttachment(file: File): Promise<PendingAttachment> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      if (comma < 0) return reject(new Error(`Could not encode ${file.name}.`));
+      const mimeType = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream");
+      resolve({
+        id: cryptoId(),
+        name: file.name,
+        mimeType,
+        size: file.size,
+        base64Data: result.slice(comma + 1),
+        previewUrl: mimeType.startsWith("image/") ? result : undefined,
+        extraction: attachmentExtraction(file.name, mimeType),
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function readableBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function readThemeDefault(key: "accent" | "secondary", fallback: string): string {
   try {
@@ -119,6 +399,16 @@ export function App() {
   const [accent, setAccent] = useState(() => readThemeDefault("accent", BUILT_IN_ACCENT));
   const [secondary, setSecondary] = useState(() => readThemeDefault("secondary", BUILT_IN_SECONDARY));
   const [themeOpen, setThemeOpen] = useState(false);
+  const [toolbarPreferences, setToolbarPreferences] = useState<ToolbarPreferences>(readToolbarPreferences);
+  const [toolbarOpen, setToolbarOpen] = useState(false);
+  const [toolbarNotice, setToolbarNotice] = useState("");
+  const [draggedToolbarId, setDraggedToolbarId] = useState<string | null>(null);
+  const [macroName, setMacroName] = useState("");
+  const [macroSource, setMacroSource] = useState("");
+  const [customTemplates, setCustomTemplates] = useState<PromptTemplate[]>(readCustomTemplates);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templatePrompt, setTemplatePrompt] = useState("");
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [annotate, setAnnotate] = useState(false);
   const [pins, setPins] = useState<AnnotationPin[]>(() => {
@@ -135,6 +425,20 @@ export function App() {
   const [pinPositions, setPinPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [pinsExported, setPinsExported] = useState(false);
   const threadRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TOOLBAR_STORAGE_KEY, JSON.stringify(toolbarPreferences));
+    } catch {
+      /* The toolbar remains usable for the current session when storage is unavailable. */
+    }
+  }, [toolbarPreferences]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(customTemplates));
+    } catch {}
+  }, [customTemplates]);
 
   useEffect(() => {
     try {
@@ -290,18 +594,31 @@ export function App() {
     setAccent(BUILT_IN_ACCENT);
     setSecondary(BUILT_IN_SECONDARY);
   }, []);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() =>
+    new URLSearchParams(window.location.search).get("demo") === "packet-upload"
+      ? PACKET_DEMO_INITIAL_MESSAGES
+      : [],
+  );
   const [streaming, setStreaming] = useState(false);
   const [input, setInput] = useState("");
   const [screenshots, setScreenshots] = useState<ScreenshotArtifact[]>([]);
   const [toolResults, setToolResults] = useState<ToolResult[]>([]);
   const [screenshotReviews, setScreenshotReviews] = useState<Record<string, string>>({});
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>("offline");
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [packetPagePreview, setPacketPagePreview] = useState<PacketPagePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [packetDemoNotice, setPacketDemoNotice] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const modelPickerRef = useRef<HTMLDetailsElement | null>(null);
+  const demoPacketFilesRef = useRef<File[]>([]);
+  const isPacketDemo = new URLSearchParams(window.location.search).get("demo") === "packet-upload";
 
   const reviewOperationsRef = useRef<Record<string, string>>({});
   const bridgeRef = useRef<BlueBrickBridge | null>(null);
   const streamingIdRef = useRef<string | null>(null);
-  const messagesRef = useRef<Message[]>([]);
+  const messagesRef = useRef<Message[]>(messages);
   const screenshotsRef = useRef<ScreenshotArtifact[]>([]);
 
   // Synchronous bridge-state mirror: messagesRef.current is the canonical
@@ -339,10 +656,12 @@ export function App() {
       streamingIdRef.current = null;
       screenshotsRef.current = [];
       reviewOperationsRef.current = {};
-      commitMessages([]);
+      commitMessages(isPacketDemo ? PACKET_DEMO_INITIAL_MESSAGES : []);
       syncScreenshots();
       setScreenshotReviews({});
       setToolResults([]);
+      setPendingAttachments([]);
+      setPacketDemoNotice("");
       setStreaming(false);
     },
 
@@ -442,10 +761,11 @@ export function App() {
     onSetModels: (rawModels: unknown[]) => {
       setModels(
         (rawModels ?? []).map((m) => {
-          const mo = m as Model & { Id?: string; Name?: string; DisplayName?: string; Available?: boolean; UnavailableReason?: string; Enabled?: boolean; SupportsTools?: boolean; SupportsJsonMode?: boolean; SupportsVision?: boolean };
+          const mo = m as Model & { Id?: string; ProviderId?: string; Name?: string; DisplayName?: string; Available?: boolean; UnavailableReason?: string; Enabled?: boolean; SupportsTools?: boolean; SupportsJsonMode?: boolean; SupportsVision?: boolean };
           const id = mo.id ?? mo.Id ?? String(mo.displayName ?? mo.DisplayName ?? mo.id ?? "unknown");
           return {
             id,
+            providerId: mo.providerId ?? mo.ProviderId,
             displayName: mo.displayName ?? mo.DisplayName ?? mo.Name ?? id,
             available: mo.available ?? mo.Available ?? mo.Enabled,
             unavailableReason: mo.unavailableReason ?? mo.UnavailableReason,
@@ -546,6 +866,16 @@ export function App() {
           delete reviewOperationsRef.current[u.screenshotId];
           setScreenshotReviews((previous) => ({ ...previous, [u.screenshotId!]: u.reviewError ? "failed" : "acknowledged" }));
           if (u.reviewError) setOperationError(String(u.reviewError));
+          else {
+            // Clear the typed note only after the host acknowledges the review;
+            // a failed or timed-out review keeps it so the user can retry.
+            setReviewNotes((previous) => {
+              if (!(u.screenshotId! in previous)) return previous;
+              const next = { ...previous };
+              delete next[u.screenshotId!];
+              return next;
+            });
+          }
         }
         screenshotsRef.current = screenshotsRef.current.map((s) =>
           s.screenshotId === u.screenshotId ? { ...s, ...u } : s,
@@ -555,7 +885,7 @@ export function App() {
     },
 
     onGetTranscript: () => {
-      return messagesRef.current.map((m) => ({
+      return messagesRef.current.filter((m) => !m.presentationOnly && !m.localDemoOnly).map((m) => ({
         role: m.role,
         text: m.text ?? "",
       }));
@@ -631,11 +961,13 @@ export function App() {
   );
 
   const handleSelectModel = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
+    (model: Model) => {
+      if (model.available === false || pendingModel || bridgeStatus !== "connected") return;
       lastAutoTargetRef.current = null;
-      requestModel(e.target.value);
+      requestModel(model.id);
+      modelPickerRef.current?.removeAttribute("open");
     },
-    [requestModel],
+    [bridgeStatus, pendingModel, requestModel],
   );
 
   // Auto-select the first available model when the current selection is
@@ -668,7 +1000,152 @@ export function App() {
     bridgeRef.current?.post("captureScreenshot", { type: "captureScreenshot" });
   }, []);
 
-  const handleAttach = useCallback(() => bridgeRef.current?.post("attach", { type: "attach" }), []);
+  const queueFiles = useCallback(async (incoming: FileList | File[]) => {
+    const files = Array.from(incoming);
+    if (!files.length) return;
+    const accepted = files.filter((file) => /\.(pdf|png|jpe?g|bmp)$/i.test(file.name));
+    if (accepted.length !== files.length) {
+      setOperationError("Only PDF, PNG, JPG, JPEG, and BMP files can be attached.");
+      return;
+    }
+    if (accepted.some((file) => file.size > MAX_ATTACHMENT_BYTES)) {
+      setOperationError("Each attachment must be 10 MB or smaller.");
+      return;
+    }
+    if (isPacketDemo && (accepted.length !== 2 || accepted.some((file) => !file.name.toLowerCase().endsWith(".pdf")))) {
+      setOperationError("The packet demo requires exactly two PDF files selected together.");
+      return;
+    }
+    try {
+      const work = [Promise.all(accepted.map(fileToAttachment))];
+      const analysis = isPacketDemo ? Promise.all(accepted.map(analyzePacketFile)) : null;
+      const pendingAssistantId = isPacketDemo ? cryptoId() : "";
+      if (isPacketDemo) {
+        commitMessages((current) => [
+          ...current.filter((message) => !message.presentationOnly),
+          {
+            id: cryptoId(),
+            role: "user",
+            text: "Review these drawing packets in upload order and separate confirmed evidence from unknowns.",
+            attachments: accepted.map((file) => file.name),
+          },
+          { id: pendingAssistantId, role: "assistant", text: "Reading both PDF packets locally…", streaming: true },
+        ]);
+      }
+      const [encoded] = await Promise.all(work);
+      if (analysis) {
+        const reviews = await analysis;
+        demoPacketFilesRef.current = accepted;
+        const intake = reviews.map((review, index) => `${index + 1}. ${review.fileName} · ${review.pageCount} page${review.pageCount === 1 ? "" : "s"}`).join("\n");
+        commitMessages((current) => [
+          ...current.filter((message) => message.id !== pendingAssistantId),
+          {
+            id: cryptoId(),
+            role: "assistant",
+            text: `DEMO · local intake receipt\n\nBoth PDFs were read from their actual page text and linked to this browser session in order:\n${intake}\n\nExtraction lanes: identifiers, title blocks, BOM rows, dimensions, notes, and deterministic findings. No file left this browser.`,
+            attachments: accepted.map((file) => file.name),
+          },
+          {
+            id: cryptoId(),
+            role: "assistant",
+            text: `DEMO · generated packet findings\n\n${packetEvidenceSummary(reviews)}\n\nBOUNDARY\nThese findings are confirmed from local PDF text only. CAD geometry, configurations, mass properties, and PDM revision remain unknown because no live engineering system was queried.`,
+            evidence: packetEvidenceLinks(reviews),
+          },
+        ]);
+        setPendingAttachments([]);
+        setPacketDemoNotice("Both PDFs were processed locally in upload order. The receipt and findings below are deterministic demo output; no file left this browser.");
+        setOperationError("");
+        return;
+      }
+      setPendingAttachments((current) => {
+        const next = [...current, ...encoded];
+        const totalBytes = next.reduce((sum, file) => sum + file.size, 0);
+        if (next.length > MAX_ATTACHMENT_COUNT || totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
+          setOperationError("Attach up to 8 files and 24 MB total per message.");
+          return current;
+        }
+        setOperationError("");
+        return next;
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "One or more files could not be read.";
+      setOperationError(message);
+      if (isPacketDemo) {
+        commitMessages((current) => current.map((item) => item.streaming ? { ...item, text: `Packet analysis failed: ${message}`, streaming: false } : item));
+      }
+    }
+  }, [commitMessages, isPacketDemo]);
+
+  const openPacketEvidence = useCallback(async (evidence: EvidenceLink) => {
+    const file = demoPacketFilesRef.current[evidence.packetIndex];
+    if (!file) {
+      setOperationError("That packet is no longer available in this browser session.");
+      return;
+    }
+    setPreviewLoading(true);
+    setOperationError("");
+    try {
+      const rendered = await renderPacketPage(file, evidence.pageNumber);
+      setPacketPagePreview({
+        packetIndex: evidence.packetIndex,
+        fileName: file.name,
+        pageNumber: evidence.pageNumber,
+        pageCount: rendered.pageCount,
+        label: evidence.label,
+        imageUrl: rendered.imageUrl,
+        zoom: 1,
+        fitMode: "width",
+      });
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : "The PDF page preview could not be rendered.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, []);
+
+  const navigatePacketPreview = useCallback(async (pageNumber: number) => {
+    const current = packetPagePreview;
+    if (!current || pageNumber < 1 || pageNumber > current.pageCount || previewLoading) return;
+    const file = demoPacketFilesRef.current[current.packetIndex];
+    if (!file) {
+      setOperationError("That packet is no longer available in this browser session.");
+      return;
+    }
+    setPreviewLoading(true);
+    setOperationError("");
+    try {
+      const rendered = await renderPacketPage(file, pageNumber);
+      setPacketPagePreview((preview) => preview ? {
+        ...preview,
+        pageNumber,
+        pageCount: rendered.pageCount,
+        imageUrl: rendered.imageUrl,
+        label: `Page ${pageNumber} of ${rendered.pageCount}`,
+      } : null);
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : "The PDF page preview could not be rendered.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [packetPagePreview, previewLoading]);
+
+  const adjustPacketPreviewZoom = useCallback((delta: number) => {
+    setPacketPagePreview((preview) => preview ? {
+      ...preview,
+      zoom: Math.min(2, Math.max(0.5, Number((preview.zoom + delta).toFixed(2)))),
+      fitMode: "custom",
+    } : null);
+  }, []);
+
+  const handleAttach = useCallback(() => fileInputRef.current?.click(), []);
+  const removeAttachment = useCallback((id: string) => {
+    setPendingAttachments((current) => current.filter((file) => file.id !== id));
+  }, []);
+  const handleThreadDrop = useCallback((event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    setIsDraggingFiles(false);
+    void queueFiles(event.dataTransfer.files);
+  }, [queueFiles]);
 
   const handleSearch = useCallback(() => {
     const msg = input.trim();
@@ -677,9 +1154,19 @@ export function App() {
     }
   }, [input, scopeId]);
 
-  const handleSend = useCallback(() => {
-    const msg = input.trim();
-    if (!msg) return;
+  const handleSend = useCallback((overrideText?: string) => {
+    const msg = (overrideText ?? input).trim();
+    if (!msg && pendingAttachments.length === 0) return;
+    if (isPacketDemo) {
+      if (!msg) return;
+      commitMessages((current) => [
+        ...current.filter((message) => !message.presentationOnly),
+        { id: cryptoId(), role: "user", text: msg, localDemoOnly: true },
+      ]);
+      setInput("");
+      setPacketDemoNotice("Demo note kept locally — it was not sent to the BlueBrick host or an AI model.");
+      return;
+    }
     if (!bridgeRef.current?.isHostAvailable()) { setOperationError("Send unavailable: host is offline."); return; }
     // Single transaction: the ref must contain the exact user + pending
     // assistant records BEFORE the host can later call bbGetTranscript.
@@ -687,13 +1174,25 @@ export function App() {
     streamingIdRef.current = pendingAssistantId;
     commitMessages((current) => [
       ...current,
-      { id: cryptoId(), role: "user", text: msg },
+      { id: cryptoId(), role: "user", text: msg, attachments: pendingAttachments.map((file) => file.name) },
       { id: pendingAssistantId, role: "assistant", text: "", streaming: true },
     ]);
     setInput("");
     setStreaming(true);
-    bridgeRef.current?.post("sendMessage", { type: "sendMessage", message: msg, scopeId });
-  }, [input, scopeId, commitMessages]);
+    bridgeRef.current?.post("sendMessage", {
+      type: "sendMessage",
+      message: msg,
+      scopeId,
+      attachments: pendingAttachments.map(({ id, name, mimeType, size, base64Data }) => ({
+        clientId: id,
+        name,
+        mimeType,
+        size,
+        base64Data,
+      })),
+    });
+    setPendingAttachments([]);
+  }, [input, scopeId, pendingAttachments, commitMessages, isPacketDemo]);
 
   const handleStop = useCallback(() => {
     bridgeRef.current?.post("cancelMessage", { type: "cancelMessage" });
@@ -712,6 +1211,98 @@ export function App() {
     bridgeRef.current.post("newSession", { type: "newSession" });
   }, [commitMessages, syncScreenshots]);
 
+  const toolbarCatalog = [...BUILT_IN_TOOLBAR_ITEMS, ...toolbarPreferences.customItems];
+  const toolbarItems = toolbarPreferences.itemIds
+    .map((id) => toolbarCatalog.find((item) => item.id === id))
+    .filter((item): item is ToolbarItem => Boolean(item));
+  const toolbarColumns = Math.max(1, Math.ceil(toolbarItems.length / toolbarPreferences.rows));
+  const allTemplates = [...BUILT_IN_PROMPT_TEMPLATES, ...customTemplates];
+
+  const runToolbarItem = useCallback((item: ToolbarItem) => {
+    setToolbarNotice("");
+    if (item.id === "new") return handleNewSession();
+    if (item.id === "capture") return handleCapture();
+    if (item.id === "search") return handleSearch();
+    setToolbarNotice(`${item.label} is configured as a host-required ${item.category} action. This browser demo does not execute SOLIDWORKS or PDM operations.`);
+  }, [handleCapture, handleNewSession, handleSearch]);
+
+  const runTemplate = useCallback((template: PromptTemplate) => {
+    handleSend(template.prompt);
+  }, [handleSend]);
+
+  const addToolbarItem = useCallback((id: string) => {
+    setToolbarPreferences((current) => current.locked || current.itemIds.includes(id)
+      ? current
+      : { ...current, itemIds: [...current.itemIds, id] });
+  }, []);
+
+  const removeToolbarItem = useCallback((id: string) => {
+    setToolbarPreferences((current) => current.locked
+      ? current
+      : { ...current, itemIds: current.itemIds.filter((itemId) => itemId !== id) });
+  }, []);
+
+  const moveToolbarItem = useCallback((id: string, direction: -1 | 1) => {
+    setToolbarPreferences((current) => {
+      if (current.locked) return current;
+      const from = current.itemIds.indexOf(id);
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= current.itemIds.length) return current;
+      const itemIds = [...current.itemIds];
+      [itemIds[from], itemIds[to]] = [itemIds[to], itemIds[from]];
+      return { ...current, itemIds };
+    });
+  }, []);
+
+  const dropToolbarItem = useCallback((targetId: string) => {
+    if (!draggedToolbarId || draggedToolbarId === targetId) return;
+    setToolbarPreferences((current) => {
+      if (current.locked) return current;
+      const itemIds = current.itemIds.filter((id) => id !== draggedToolbarId);
+      const targetIndex = itemIds.indexOf(targetId);
+      itemIds.splice(targetIndex < 0 ? itemIds.length : targetIndex, 0, draggedToolbarId);
+      return { ...current, itemIds };
+    });
+    setDraggedToolbarId(null);
+  }, [draggedToolbarId]);
+
+  const addCustomMacro = useCallback(() => {
+    const label = macroName.trim();
+    const source = macroSource.trim();
+    if (!label || !source || toolbarPreferences.locked) return;
+    const customItem: ToolbarItem = {
+      id: `macro-${cryptoId()}`,
+      label,
+      description: `Custom macro metadata · ${source}`,
+      symbol: "macro",
+      category: "macro",
+      hostRequired: true,
+      source,
+    };
+    setToolbarPreferences((current) => ({
+      ...current,
+      customItems: [...current.customItems, customItem],
+      itemIds: [...current.itemIds, customItem.id],
+    }));
+    setMacroName("");
+    setMacroSource("");
+    setToolbarNotice(`${label} was added as UI-only macro metadata. No file was opened or executed.`);
+  }, [macroName, macroSource, toolbarPreferences.locked]);
+
+  const addCustomTemplate = useCallback(() => {
+    const label = templateName.trim();
+    const prompt = templatePrompt.trim();
+    if (!label || !prompt) return;
+    const template: PromptTemplate = { id: `tpl-${cryptoId()}`, label, prompt };
+    setCustomTemplates((current) => [...current, template]);
+    setTemplateName("");
+    setTemplatePrompt("");
+  }, [templateName, templatePrompt]);
+
+  const removeCustomTemplate = useCallback((id: string) => {
+    setCustomTemplates((current) => current.filter((template) => template.id !== id));
+  }, []);
+
   const handleReview = useCallback(
     (screenshotId: string, reviewStatus: "approved" | "rejected", targetType = "screenshot", note = "") => {
       if (!bridgeRef.current?.isHostAvailable()) { setOperationError("Review unavailable: host is offline."); return; }
@@ -722,12 +1313,6 @@ export function App() {
       bridgeRef.current.post("reviewScreenshotItem", {
         type: "reviewScreenshotItem", screenshotId, targetType, targetId: screenshotId, reviewStatus, operationId,
         reviewNote: note,
-      });
-      setReviewNotes((prev) => {
-        if (!(screenshotId in prev)) return prev;
-        const next = { ...prev };
-        delete next[screenshotId];
-        return next;
       });
       window.setTimeout(() => {
         if (reviewOperationsRef.current[screenshotId] !== operationId) return;
@@ -751,6 +1336,13 @@ export function App() {
     selectedModel && selectedModel.available === false
       ? (selectedModel.unavailableReason ?? "This model is currently unavailable.")
       : null;
+  const selectedModelLabel = selectedModel?.displayName ?? formatModelLabel(modelId);
+  const pickerModels = models.length > 0 ? models : isPacketDemo ? PACKET_DEMO_MODELS : availableModels;
+  const modelsByProvider = pickerModels.reduce<Record<string, Model[]>>((groups, model) => {
+    const provider = model.providerId?.trim() || model.displayName.split("·")[0]?.trim() || "Other";
+    (groups[provider] ??= []).push(model);
+    return groups;
+  }, {});
   const statusObj = statusBlob as Record<string, unknown>;
   const connectionState =
     bridgeStatus !== "connected"
@@ -791,7 +1383,7 @@ export function App() {
   }
   return (
     <main
-      className={"shell vira-command-surface" + (annotate ? " annotating" : "")}
+      className={"shell vira-command-surface" + (isPacketDemo ? " packet-demo" : "") + (annotate ? " annotating" : "")}
       ref={threadRef}
       onClickCapture={handleAnnotateClick}
       onMouseOverCapture={handleAnnotateHover}
@@ -806,130 +1398,11 @@ export function App() {
             </div>
           </div>
           <RuntimeIdentitySurface />
-          <div className="chip-row">
-            <span
-              className={"chip conn " + (connectionState === "HOST CONNECTED" ? "ok" : "warn")}
-              title={"Host connection: " + connectionState}
-            >
-              ● {String(connectionState)}
-            </span>
-            <span className="chip" title={"Model provider: " + providerState}>
-              MODEL {providerState}
-            </span>
-            <span className="chip" title={"Tools available in the selected scope: " + tools.length}>
-              tools {tools.length}
-            </span>
-            <span className="chip" title={"Tool receipts recorded: " + toolReceipts.length}>
-              receipts {toolReceipts.length}
-            </span>
-            <span
-              className="chip"
-              title={"Product catalogs: " + (productCatalogs && Object.keys(productCatalogs).length > 0 ? "loaded from host" : "not loaded")}
-            >
-              catalogs {productCatalogs && Object.keys(productCatalogs).length > 0 ? "loaded" : "none"}
-            </span>
-            <div className="theme-wrap">
-              <button
-                className="chip"
-                aria-label="Theme settings"
-                title="Adjust accent and secondary colors"
-                aria-expanded={themeOpen}
-                onClick={() => setThemeOpen((v) => !v)}
-              >
-                🎨 theme
-              </button>
-              {themeOpen && (
-                <div className="theme-pop" role="dialog" aria-label="Theme settings">
-                  <span className="theme-group-label">Accent</span>
-                  <div className="theme-row">
-                    <div className="swatches">
-                      {ACCENT_PRESETS.map((c) => (
-                        <button
-                          key={c}
-                          className="swatch"
-                          style={{ "--swatch": c } as CSSProperties}
-                          title={c}
-                          aria-label={"Accent " + c}
-                          aria-pressed={accent.toLowerCase() === c}
-                          onClick={() => setAccent(c)}
-                        />
-                      ))}
-                    </div>
-                    <input type="color" className="theme-custom" value={accent} onChange={(e) => setAccent(e.target.value)} aria-label="Custom accent color" />
-                  </div>
-                  <span className="theme-group-label">Secondary</span>
-                  <div className="theme-row">
-                    <div className="swatches">
-                      {SECONDARY_PRESETS.map((c) => (
-                        <button
-                          key={c}
-                          className="swatch"
-                          style={{ "--swatch": c } as CSSProperties}
-                          title={c}
-                          aria-label={"Secondary " + c}
-                          aria-pressed={secondary.toLowerCase() === c}
-                          onClick={() => setSecondary(c)}
-                        />
-                      ))}
-                    </div>
-                    <input type="color" className="theme-custom" value={secondary} onChange={(e) => setSecondary(e.target.value)} aria-label="Custom secondary color" />
-                  </div>
-                  <div className="theme-actions">
-                    <button className="save-default" onClick={saveThemeDefault}>Set as default</button>
-                    <button onClick={resetTheme}>Reset</button>
-                  </div>
-                  <span className="theme-hint">Defaults are saved on this machine only.</span>
-                </div>
-              )}
-            </div>
-            <button
-              className={"chip" + (annotate ? " ok" : "")}
-              aria-label="Toggle annotation mode"
-              data-annotation-control
-              title="Toggle annotation mode to pin feedback anywhere in the assistant"
-              aria-pressed={annotate}
-              onClick={() => setAnnotate((v) => !v)}
-            >
-              Annotate{pins.length > 0 ? " " + pins.length : ""}
-            </button>
-          </div>
         </div>
 
         {operationError && <p role="alert">{operationError}</p>}
         {pendingModel && <p role="status">Waiting for the host to acknowledge model selection…</p>}
         <div className="controls">
-          <div className="select-row">
-            <select
-              id="assistant-model"
-              className="select"
-              aria-label="Select assistant model"
-              value={modelId}
-              onChange={handleSelectModel}
-              disabled={!!pendingModel || bridgeStatus !== "connected" || models.length === 0}
-            >
-              {availableModels.map((m) => (
-                <option
-                  key={m.id}
-                  value={m.id}
-                  disabled={m.available === false}
-                  title={m.available === false ? (m.unavailableReason ?? "Unavailable") : (m.displayName ?? m.id)}
-                >
-                  {(m.displayName ?? formatModelLabel(m.id)) + (m.available === false ? " (unavailable)" : "")}
-                </option>
-              ))}
-            </select>
-            <span
-              className="cap-count"
-              title={
-                "Active model: " + (availableModels.find((m) => m.id === modelId)?.displayName ?? formatModelLabel(modelId)) +
-                " · Models available from host: " + models.length
-              }
-            >
-              {models.length} models
-            </span>
-          </div>
-          {selectedModelIssue && <p className="model-note" role="status">Selected model unavailable: {selectedModelIssue}</p>}
-
           <div className="scope-chips">
             {scopes.map((s) => (
               <button
@@ -947,32 +1420,84 @@ export function App() {
             ))}
           </div>
 
-          <div className="primary-action-rail">
-            <button className="action" aria-label="New session" title="New session — reset the conversation" onClick={handleNewSession}>
-              <span className="action-symbol new" />
-              <span className="action-label">New</span>
-            </button>
-            <button className="action" aria-label="Capture local screenshot" title="Capture — grab a local screenshot for analysis" onClick={handleCapture}>
-              <span className="action-symbol capture" />
-              <span className="action-label">Capture</span>
-            </button>
-            <button
-              className="action"
-              aria-label="Attach image or PDF"
-              title="Attach — attach an image or PDF to your next message"
-              onClick={handleAttach}
-            >
-              <span className="action-symbol attach" />
-              <span className="action-label">Attach</span>
-            </button>
-            <button className="action" aria-label="Search the selected scope" title="Search — search the selected scope" onClick={handleSearch}>
-              <span className="action-symbol search" />
-              <span className="action-label">Search</span>
-            </button>
-            <button className="action primary" aria-label="More actions" title="More actions are unavailable" disabled>
-              <span className="action-symbol more" />
-              <span className="action-label">More</span>
-            </button>
+          <div className="toolbar-shell">
+            <div className="toolbar-heading">
+              <button type="button" className="toolbar-config-toggle" aria-expanded={toolbarOpen} aria-controls="toolbar-configurator" onClick={() => setToolbarOpen((open) => !open)}>
+                <span className="action-symbol more" aria-hidden="true" />
+                Customize
+              </button>
+            </div>
+            <div className={`primary-action-rail toolbar-rows-${toolbarPreferences.rows}`} style={{ "--toolbar-columns": toolbarColumns } as CSSProperties} aria-label="Customizable assistant toolbar">
+              {toolbarItems.map((item, index) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  className={`action toolbar-action ${draggedToolbarId === item.id ? "dragging" : ""}`}
+                  aria-label={item.label}
+                  data-tip={`${item.label} — ${item.description}${item.hostRequired ? " (host required)" : ""}`}
+                  data-tip-edge={toolbarTipEdge(index, toolbarColumns, toolbarItems.length)}
+                  draggable={!toolbarPreferences.locked}
+                  onDragStart={(event) => {
+                    if (toolbarPreferences.locked) return;
+                    setDraggedToolbarId(item.id);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", item.id);
+                  }}
+                  onDragEnd={() => setDraggedToolbarId(null)}
+                  onDragOver={(event) => { if (!toolbarPreferences.locked) event.preventDefault(); }}
+                  onDrop={(event) => { event.preventDefault(); dropToolbarItem(item.id); }}
+                  onClick={() => runToolbarItem(item)}
+                >
+                  <ToolbarIcon symbol={item.symbol} />
+                  {item.hostRequired ? <span className="host-required-dot" aria-hidden="true" /> : null}
+                </button>
+              ))}
+            </div>
+
+            {toolbarOpen ? (
+              <section id="toolbar-configurator" className="toolbar-configurator" aria-label="Toolbar configurator">
+                <div className="toolbar-config-controls">
+                  <div className="toolbar-segmented" aria-label="Toolbar rows">
+                    <button type="button" disabled={toolbarPreferences.locked} aria-pressed={toolbarPreferences.rows === 1} onClick={() => setToolbarPreferences((current) => ({ ...current, rows: 1 }))}>1 row</button>
+                    <button type="button" disabled={toolbarPreferences.locked} aria-pressed={toolbarPreferences.rows === 2} onClick={() => setToolbarPreferences((current) => ({ ...current, rows: 2 }))}>2 rows</button>
+                  </div>
+                  <button type="button" className="toolbar-lock" aria-pressed={toolbarPreferences.locked} onClick={() => setToolbarPreferences((current) => ({ ...current, locked: !current.locked }))}>
+                    {toolbarPreferences.locked ? "Unlock layout" : "Lock layout"}
+                  </button>
+                </div>
+
+                <div className="toolbar-order-list" aria-label="Current toolbar order">
+                  {toolbarItems.map((item, index) => (
+                    <div key={item.id} className="toolbar-order-item">
+                      <ToolbarIcon symbol={item.symbol} />
+                      <span title={item.description}>{item.label}</span>
+                      <button type="button" title={`Move ${item.label} left`} disabled={toolbarPreferences.locked || index === 0} onClick={() => moveToolbarItem(item.id, -1)}>←</button>
+                      <button type="button" title={`Move ${item.label} right`} disabled={toolbarPreferences.locked || index === toolbarItems.length - 1} onClick={() => moveToolbarItem(item.id, 1)}>→</button>
+                      <button type="button" title={`Remove ${item.label}`} disabled={toolbarPreferences.locked} onClick={() => removeToolbarItem(item.id)}>×</button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="toolbar-catalog">
+                  <strong>Tool catalog</strong>
+                  <div>
+                    {toolbarCatalog.filter((item) => !toolbarPreferences.itemIds.includes(item.id)).map((item) => (
+                      <button type="button" key={item.id} disabled={toolbarPreferences.locked} onClick={() => addToolbarItem(item.id)} title={item.description}><span>+</span> {item.label}</button>
+                    ))}
+                    {toolbarCatalog.every((item) => toolbarPreferences.itemIds.includes(item.id)) ? <small>All available tools are on the toolbar.</small> : null}
+                  </div>
+                </div>
+
+                <div className="toolbar-macro-form">
+                  <strong>Add custom macro</strong>
+                  <input aria-label="Custom macro title" placeholder="Toolbar title" value={macroName} disabled={toolbarPreferences.locked} onChange={(event) => setMacroName(event.target.value)} />
+                  <input aria-label="PDM vault relative macro path" placeholder="Vault relative path · Macros\\MyMacro.swp" value={macroSource} disabled={toolbarPreferences.locked} onChange={(event) => setMacroSource(event.target.value)} />
+                  <button type="button" disabled={toolbarPreferences.locked || !macroName.trim() || !macroSource.trim()} onClick={addCustomMacro}>Add macro</button>
+                  <small>Stores toolbar metadata only. This browser demo never opens or runs the macro.</small>
+                </div>
+              </section>
+            ) : null}
+            {toolbarNotice ? <p className="toolbar-notice" role="status">{toolbarNotice}</p> : null}
           </div>
         </div>
       </header>
@@ -993,27 +1518,28 @@ export function App() {
             ))}
           </div>
         )}
-      <section className="thread" aria-live="polite">
-        {messages.length === 0 && screenshots.length === 0 && toolResults.length === 0 && (
-          <div className="empty">
-            <div className="empty-title">{bridgeStatus === "connected" ? "Start a conversation" : "BlueBrick host is offline"}</div>
-            <p className="empty-copy">
-              Ask about the active model, capture the screen, or attach engineering context.
-            </p>
-            <div className="empty-actions">
-              <button className="empty-action" aria-label="Capture local screenshot" title="Capture a local screenshot for analysis" onClick={handleCapture}>
-                Capture
-              </button>
-              <button className="empty-action" aria-label="Attach image or PDF" title="Attach an image or PDF to your next message" onClick={handleAttach}>
-                Attach
-              </button>
-            </div>
-          </div>
-        )}
+      <section
+        className={"thread" + (isDraggingFiles ? " file-drag-active" : "")}
+        aria-live="polite"
+        onDragEnter={(event) => {
+          if (event.dataTransfer.types.includes("Files")) {
+            event.preventDefault();
+            setIsDraggingFiles(true);
+          }
+        }}
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingFiles(false);
+        }}
+        onDrop={handleThreadDrop}
+      >
+        {isDraggingFiles ? <div className="drop-overlay" role="status">Drop files to add them in this order</div> : null}
 
         {messages.map((m) => (
-          <div key={m.id} className={"msg" + (m.role === "user" ? " user" : "")}>
-            <div className="role">{m.role}</div>
+          <div key={m.id} className={"msg" + (m.role === "user" ? " user" : "") + (isPacketDemo && m.role === "user" ? " packet-demo-user" : "") + (m.presentationOnly ? " packet-demo-example" : "")}>
+            <div className="role">{m.presentationOnly ? "demo example · user" : m.role}</div>
             <div className="text">
               {m.text}
               {m.streaming && <span className="streaming-cursor">▋</span>}
@@ -1023,8 +1549,85 @@ export function App() {
                 <span>Attachment: {m.attachment}</span>
               </div>
             )}
+            {m.attachments?.length ? (
+              <div className="message-attachments" aria-label="Message attachments">
+                {m.attachments.map((name, index) => (
+                  <span key={`${m.id}-${name}-${index}`}>{index + 1}. {name}</span>
+                ))}
+              </div>
+            ) : null}
+            {m.evidence?.length ? (
+              <div className="evidence-links" aria-label="Packet page evidence">
+                {m.evidence.map((evidence, index) => (
+                  <button
+                    type="button"
+                    key={`${m.id}-${evidence.packetIndex}-${evidence.pageNumber}-${index}`}
+                    onClick={() => void openPacketEvidence(evidence)}
+                    disabled={previewLoading}
+                  >
+                    <span aria-hidden="true">↗</span> {evidence.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         ))}
+
+        {packetPagePreview ? (
+          <aside className="packet-page-preview" aria-label={`PDF evidence preview for ${packetPagePreview.fileName}`}>
+            <div className="packet-page-preview-head">
+              <div>
+                <span>Local PDF evidence</span>
+                <strong>{packetPagePreview.fileName} · page {packetPagePreview.pageNumber}</strong>
+              </div>
+              <button type="button" onClick={() => setPacketPagePreview(null)} aria-label="Close PDF evidence preview">Close</button>
+            </div>
+            <div className="packet-page-preview-label">{packetPagePreview.label}</div>
+            <div className="packet-page-preview-controls" aria-label="PDF page and zoom controls">
+              <div className="packet-page-navigation">
+                <button
+                  type="button"
+                  onClick={() => void navigatePacketPreview(packetPagePreview.pageNumber - 1)}
+                  disabled={previewLoading || packetPagePreview.pageNumber <= 1}
+                  aria-label="Previous PDF page"
+                >← Previous</button>
+                <span aria-live="polite">{packetPagePreview.pageNumber} / {packetPagePreview.pageCount}</span>
+                <button
+                  type="button"
+                  onClick={() => void navigatePacketPreview(packetPagePreview.pageNumber + 1)}
+                  disabled={previewLoading || packetPagePreview.pageNumber >= packetPagePreview.pageCount}
+                  aria-label="Next PDF page"
+                >Next →</button>
+              </div>
+              <div className="packet-page-zoom">
+                <button
+                  type="button"
+                  className="packet-page-fit-button"
+                  onClick={() => setPacketPagePreview((preview) => preview ? { ...preview, zoom: 1, fitMode: "width" } : null)}
+                  aria-label="Fit PDF to width"
+                  aria-pressed={packetPagePreview.fitMode === "width"}
+                >Fit width</button>
+                <button
+                  type="button"
+                  className="packet-page-fit-button"
+                  onClick={() => setPacketPagePreview((preview) => preview ? { ...preview, zoom: 1, fitMode: "page" } : null)}
+                  aria-label="Fit entire PDF page"
+                  aria-pressed={packetPagePreview.fitMode === "page"}
+                >Fit page</button>
+                <button type="button" onClick={() => adjustPacketPreviewZoom(-0.25)} disabled={packetPagePreview.zoom <= 0.5} aria-label="Zoom out">−</button>
+                <button type="button" onClick={() => setPacketPagePreview((preview) => preview ? { ...preview, zoom: 1, fitMode: "custom" } : null)} aria-label="Reset PDF zoom">{packetPagePreview.fitMode === "custom" ? `${Math.round(packetPagePreview.zoom * 100)}%` : "100%"}</button>
+                <button type="button" onClick={() => adjustPacketPreviewZoom(0.25)} disabled={packetPagePreview.zoom >= 2} aria-label="Zoom in">+</button>
+              </div>
+            </div>
+            <div className={`packet-page-preview-canvas is-fit-${packetPagePreview.fitMode}`}>
+              <img
+                src={packetPagePreview.imageUrl}
+                alt={`${packetPagePreview.fileName}, page ${packetPagePreview.pageNumber}`}
+                style={packetPagePreview.fitMode === "custom" ? { width: `${packetPagePreview.zoom * 100}%` } : undefined}
+              />
+            </div>
+          </aside>
+        ) : null}
 
         {screenshots.map((s) => (
           <div key={s.screenshotId ?? s.artifactId ?? s.fileName ?? "screenshot"} className="shot">
@@ -1156,23 +1759,146 @@ export function App() {
       )}
 
       <footer className="footer">
+        {pendingAttachments.length ? (
+          <div className="attachment-tray" aria-label="Files linked to the next message">
+            {pendingAttachments.map((file, index) => (
+              <div className="attachment-item" key={file.id} tabIndex={0}>
+                <div className={"attachment-thumbnail" + (file.previewUrl ? " image" : " pdf")}>
+                  {file.previewUrl ? <img src={file.previewUrl} alt="" /> : <span>PDF</span>}
+                  <b aria-label={`Attachment order ${index + 1}`}>{index + 1}</b>
+                </div>
+                <div className="attachment-popout" role="tooltip">
+                  <strong>{file.name}</strong>
+                  <span>{readableBytes(file.size)} · linked as context #{index + 1}</span>
+                  <span>{file.extraction}</span>
+                  <button type="button" onClick={() => removeAttachment(file.id)} aria-label={`Remove ${file.name}`}>Remove</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="composer">
-          <textarea
-            aria-label="Message BlueBrick Assistant"
-            placeholder="Type a message..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (streaming) {
-                  handleStop();
-                } else {
-                  handleSend();
-                }
-              }
+          <input
+            ref={fileInputRef}
+            className="file-input"
+            type="file"
+            accept={ACCEPTED_ATTACHMENT_TYPES}
+            multiple
+            aria-label="Choose PDF or image files"
+            onChange={(event) => {
+              if (event.currentTarget.files) void queueFiles(event.currentTarget.files);
+              event.currentTarget.value = "";
             }}
           />
+          <div className="composer-template-rail" aria-label="Prompt templates">
+            {allTemplates.map((template) => (
+              <button
+                type="button"
+                key={template.id}
+                className="template-chip"
+                title={template.prompt}
+                onClick={() => runTemplate(template)}
+              >
+                {template.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="template-add"
+              aria-expanded={templatesOpen}
+              aria-controls="template-configurator"
+              title="Add or remove custom prompt templates"
+              onClick={() => setTemplatesOpen((open) => !open)}
+            >
+              +
+            </button>
+          </div>
+          {templatesOpen ? (
+            <section id="template-configurator" className="template-configurator" aria-label="Prompt template configurator">
+              <div className="template-custom-form">
+                <strong>Add custom template</strong>
+                <input aria-label="Custom template label" placeholder="Chip label" value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
+                <input aria-label="Custom template prompt text" placeholder="Prompt text sent when the chip is clicked" value={templatePrompt} onChange={(event) => setTemplatePrompt(event.target.value)} />
+                <button type="button" disabled={!templateName.trim() || !templatePrompt.trim()} onClick={addCustomTemplate}>Add template</button>
+                <small>Stored on this machine. Clicking a chip sends its prompt with the current attachments.</small>
+              </div>
+              {customTemplates.length ? (
+                <div className="template-custom-list" aria-label="Custom templates">
+                  {customTemplates.map((template) => (
+                    <div key={template.id} className="template-custom-item">
+                      <span title={template.prompt}>{template.label}</span>
+                      <button type="button" title={`Remove ${template.label}`} onClick={() => removeCustomTemplate(template.id)}>×</button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+          <div className="composer-input-shell">
+            <textarea
+              aria-label="Message BlueBrick Assistant"
+              placeholder="Ask anything, attach files, or use the controls below"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (streaming) handleStop();
+                  else handleSend();
+                }
+              }}
+            />
+            <div className="composer-context-rail">
+              <details className="model-picker" ref={modelPickerRef}>
+                <summary aria-label={`Choose provider and model. Current model: ${selectedModelLabel}`}>
+                  <span className="model-picker-mark" aria-hidden="true">◆</span>
+                  <span className="model-picker-label">{selectedModelLabel}</span>
+                  <span className="model-picker-chevron" aria-hidden="true">⌄</span>
+                </summary>
+                <div className="model-picker-menu" role="dialog" aria-label="Choose an AI provider and model">
+                  <div className="model-picker-menu-head">
+                    <strong>Provider & model</strong>
+                    <span>{models.length > 0 ? `${models.length} from host` : isPacketDemo ? "Demo catalog · host offline" : "0 from host"}</span>
+                  </div>
+                  {models.length === 0 && !isPacketDemo ? (
+                    <p className="model-picker-empty">No models received. Connect the BlueBrick host to load configured providers.</p>
+                  ) : Object.entries(modelsByProvider).map(([provider, providerModels]) => (
+                    <details className="provider-group" key={provider} open={providerModels.some((model) => model.id === modelId)}>
+                      <summary>
+                        <span>{formatProviderLabel(provider)}</span>
+                        <small>{providerModels.length}</small>
+                      </summary>
+                      <div className="provider-models">
+                        {providerModels.map((model) => (
+                          <button
+                            type="button"
+                            key={model.id}
+                            className={model.id === modelId ? "selected" : ""}
+                            disabled={model.available === false || !!pendingModel || bridgeStatus !== "connected"}
+                            onClick={() => handleSelectModel(model)}
+                            title={model.available === false ? (model.unavailableReason ?? "Unavailable") : model.displayName}
+                          >
+                            <span>{model.displayName}</span>
+                            <small>{model.id === modelId ? "Active" : model.available === false ? "Unavailable" : "Select"}</small>
+                          </button>
+                        ))}
+                      </div>
+                    </details>
+                  ))}
+                  {selectedModelIssue && <p className="model-picker-empty" role="status">Selected model unavailable: {selectedModelIssue}</p>}
+                </div>
+              </details>
+              <button
+                type="button"
+                className="paperclip-button"
+                aria-label="Attach PDF or image files"
+                title="Attach multiple files"
+                onClick={handleAttach}
+              >
+                <ToolbarIcon symbol="attach" />
+              </button>
+            </div>
+          </div>
           <div className="composer-actions">
             {streaming ? (
               <button
@@ -1186,14 +1912,15 @@ export function App() {
               <button
                 className="send-button"
                 aria-label="Send message"
-                onClick={handleSend}
-                disabled={!input.trim()}
+                onClick={() => handleSend()}
+                disabled={!input.trim() && pendingAttachments.length === 0}
               >
                 Send
               </button>
             )}
           </div>
         </div>
+        {isPacketDemo && packetDemoNotice ? <p className="packet-demo-notice" role="status">{packetDemoNotice}</p> : null}
         <div
           className="safety-footer"
           title="Local-first: screenshots stay local unless explicitly approved. Bridge status reflects the local host connection."
@@ -1211,6 +1938,12 @@ export function App() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+function formatProviderLabel(provider: string): string {
+  return provider
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function cryptoId(): string {
   // crypto.randomUUID when available, deterministic fallback otherwise.
   try {

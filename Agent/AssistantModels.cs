@@ -130,6 +130,9 @@ namespace BlueBrick.Agent
         public bool SentToModel { get; set; }
         public string RetentionPolicy { get; set; }
         public string ReviewStatus { get; set; }
+        public DateTime? ReviewedUtc { get; set; }
+        public string ReviewedBy { get; set; }
+        public string ReviewNote { get; set; }
     }
 
     internal class AssistantExtractedContact

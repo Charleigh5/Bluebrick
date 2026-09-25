@@ -39,7 +39,19 @@ export type PayloadFor<TName extends BrowserToHostMessageName> =
             : TName extends "selectScope"
               ? { type: "selectScope"; scopeId: string }
               : TName extends "sendMessage"
-                ? { type: "sendMessage"; message: string; scopeId?: string; modelId?: string }
+                ? {
+                    type: "sendMessage";
+                    message: string;
+                    scopeId?: string;
+                    modelId?: string;
+                    attachments?: Array<{
+                      clientId: string;
+                      name: string;
+                      mimeType: string;
+                      size: number;
+                      base64Data: string;
+                    }>;
+                  }
                 : TName extends "cancelMessage"
                   ? { type: "cancelMessage" }
                   : TName extends "saveScreenshotAnnotation"

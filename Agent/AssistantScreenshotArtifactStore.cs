@@ -111,7 +111,10 @@ namespace BlueBrick.Agent
                 Sha256 = artifact.Sha256,
                 SentToModel = artifact.SentToModel,
                 RetentionPolicy = artifact.RetentionPolicy,
-                ReviewStatus = artifact.ReviewStatus ?? "pending"
+                ReviewStatus = artifact.ReviewStatus ?? "pending",
+                ReviewedUtc = artifact.ReviewedUtc,
+                ReviewedBy = artifact.ReviewedBy,
+                ReviewNote = artifact.ReviewNote
             };
         }
 

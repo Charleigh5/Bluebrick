@@ -17,6 +17,7 @@ namespace BlueBrick.UI.Tests
         private readonly HttpListener _listener;
         private readonly CancellationTokenSource _cts;
         private readonly ConcurrentDictionary<string, Func<HttpListenerRequest, object>> _endpoints;
+        private readonly ConcurrentDictionary<string, Func<HttpListenerContext, Task>> _rawHandlers;
         private readonly ConcurrentDictionary<string, int> _callCounts;
         private Task _listenerTask;
 
@@ -36,6 +37,7 @@ namespace BlueBrick.UI.Tests
         public TestHttpServer()
         {
             _endpoints = new ConcurrentDictionary<string, Func<HttpListenerRequest, object>>();
+            _rawHandlers = new ConcurrentDictionary<string, Func<HttpListenerContext, Task>>();
             _callCounts = new ConcurrentDictionary<string, int>();
             _cts = new CancellationTokenSource();
 
@@ -77,6 +79,19 @@ namespace BlueBrick.UI.Tests
         public void RegisterEndpoint(string path, object response)
         {
             RegisterEndpoint(path, _ => response);
+        }
+
+        /// <summary>
+        /// Registers a raw handler that owns the HttpListenerContext, enabling streamed,
+        /// stalled, or withheld responses (e.g., SSE regression tests).
+        /// </summary>
+        /// <param name="path">The URL path (e.g., "/assistant/message/stream")</param>
+        /// <param name="handler">Async function that writes to and closes the response itself.</param>
+        public void RegisterRawHandler(string path, Func<HttpListenerContext, Task> handler)
+        {
+            var normalizedPath = path.StartsWith("/") ? path : "/" + path;
+            _rawHandlers[normalizedPath] = handler;
+            _callCounts[normalizedPath] = 0;
         }
 
         /// <summary>
@@ -122,7 +137,7 @@ namespace BlueBrick.UI.Tests
             }
         }
 
-        private void HandleRequest(HttpListenerContext context)
+        private async Task HandleRequest(HttpListenerContext context)
         {
             var request = context.Request;
             var response = context.Response;
@@ -133,6 +148,16 @@ namespace BlueBrick.UI.Tests
 
                 // Increment call count
                 _callCounts.AddOrUpdate(path, 1, (_, count) => count + 1);
+
+                if (_rawHandlers.TryGetValue(path, out var rawHandler))
+                {
+                    // Raw handlers own the response. Client aborts mid-stream are expected
+                    // and must not fall into the JSON 500 path below.
+                    try { await rawHandler(context); }
+                    catch (HttpListenerException) { }
+                    catch (ObjectDisposedException) { }
+                    return;
+                }
 
                 if (_endpoints.TryGetValue(path, out var handler))
                 {
@@ -160,17 +185,24 @@ namespace BlueBrick.UI.Tests
             catch (Exception ex)
             {
                 // Return 500 for handler errors
-                var errorJson = JsonConvert.SerializeObject(new { error = ex.Message });
-                var buffer = Encoding.UTF8.GetBytes(errorJson);
+                try
+                {
+                    var errorJson = JsonConvert.SerializeObject(new { error = ex.Message });
+                    var buffer = Encoding.UTF8.GetBytes(errorJson);
 
-                response.ContentType = "application/json";
-                response.ContentLength64 = buffer.Length;
-                response.StatusCode = 500;
-                response.OutputStream.Write(buffer, 0, buffer.Length);
+                    response.ContentType = "application/json";
+                    response.ContentLength64 = buffer.Length;
+                    response.StatusCode = 500;
+                    response.OutputStream.Write(buffer, 0, buffer.Length);
+                }
+                catch
+                {
+                    // Response already gone (client aborted mid-stream)
+                }
             }
             finally
             {
-                response.Close();
+                try { response.Close(); } catch { /* already closed or client aborted */ }
             }
         }
 

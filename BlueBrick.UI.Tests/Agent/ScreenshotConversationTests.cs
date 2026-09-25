@@ -92,6 +92,16 @@ namespace BlueBrick.UI.Tests.Agent
             Assert.AreEqual("Looks correct on sheet 1.", saved.ReviewNote);
             Assert.AreEqual("BlueBrick task pane", saved.ReviewedBy);
         }
+        [TestMethod] public void ReviewReceiptCarriesReviewerIdentity()
+        {
+            var session = store.Create(); var artifact = Capture(session.SessionId);
+            AssistantScreenshotArtifactStore.Review(artifact.ArtifactId, "screenshot", artifact.ArtifactId, "approved", root, "MANUAL", "explicit-user-review", "synthetic", "Signed off.", "BlueBrick task pane");
+            var saved = AssistantScreenshotArtifactStore.FindArtifact(artifact.ArtifactId, root);
+            Assert.AreEqual("approved", saved.Receipt.ReviewStatus);
+            Assert.AreEqual("Signed off.", saved.Receipt.ReviewNote);
+            Assert.AreEqual("BlueBrick task pane", saved.Receipt.ReviewedBy);
+            Assert.IsTrue(saved.Receipt.ReviewedUtc.HasValue);
+        }
         [TestMethod] public void ReviewWithoutNotePreservesExistingNote()
         {
             var session = store.Create(); var artifact = Capture(session.SessionId);

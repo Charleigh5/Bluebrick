@@ -69,6 +69,12 @@
         <Compile Include="Agent\AssistantScreenshotAnalyzer.cs" />
         <Compile Include="Agent\AssistantSessionStore.cs" />
         <Compile Include="Agent\AssistantToolAuditLog.cs" />
+        <Compile Include="Agent\AssistantApprovalLedger.cs" />
+        <Compile Include="Agent\AssistantApprovalService.cs" />
+        <Compile Include="Agent\ApprovalDialog.cs" />
+        <Compile Include="Agent\CustomPropertyApprovalPreviewBuilder.cs" />
+        <Compile Include="Agent\SetCustomPropertyExecutor.cs" />
+        <Compile Include="Agent\MutationExecutionJournal.cs" />
         <Compile Include="Agent\AssistantToolAuthorization.cs" />
         <Compile Include="Agent\AssistantToolExecutionReceipt.cs" />
         <Compile Include="Agent\AssistantToolPolicy.cs" />

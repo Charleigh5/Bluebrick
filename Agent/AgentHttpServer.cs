@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
-using System.Net.Http;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -39,7 +38,6 @@ namespace BlueBrick.Agent
         private readonly RelayTunnelClient _relayTunnel;
         private HttpListener _listener;
         private CancellationTokenSource _cts;
-        private static readonly HttpClient _httpClient = new HttpClient();
 
         internal BlueBrick.SolidWorks.Composition.SolidWorksAuditComposition AuditComposition => _auditComposition;
 
@@ -502,9 +500,6 @@ case "/pdm/check_out":
         case "/pdm/get_file":
             await HandlePdmGetFile(context, json, traceId);
             return;
-                case "/qa/run":
-                    await HandleQaRun(context, json, traceId);
-                    return;
                 case "/sw/live-review/start":
                 case "/sw/generate-review":
                     await HandleGenerateReview(context, json, traceId);
@@ -1130,36 +1125,6 @@ private string ResolveVaultName()
             await WriteJson(context, new { status = "fail", error = ex.Message, traceId });
         }
     }
-
-    internal static string BuildQaRunUrl(AgentConfig config)
-        {
-            var port = AgentConfig.ResolveBridgePort(config?.Agent?.BridgePort ?? 0, AppIdentity.BridgePort);
-            return "http://127.0.0.1:" + port + "/qa/run";
-        }
-
-        private async Task HandleQaRun(HttpListenerContext context, JObject json, string traceId)
-        {
-            var scriptId = json.Value<string>("scriptId");
-            if (string.IsNullOrEmpty(scriptId))
-            {
-                context.Response.StatusCode = 400;
-                await WriteJson(context, new { error = "scriptId required", traceId });
-                return;
-            }
-
-            // proxy to agent service
-            var payload = JsonConvert.SerializeObject(new { scriptId });
-            var request = new HttpRequestMessage(HttpMethod.Post, BuildQaRunUrl(_config));
-            request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
-            if (!string.IsNullOrEmpty(traceId))
-            {
-                request.Headers.Add("X-Trace-Id", traceId);
-            }
-            var res = await _httpClient.SendAsync(request);
-            var body = await res.Content.ReadAsStringAsync();
-            context.Response.StatusCode = (int)res.StatusCode;
-            await WriteRaw(context, body);
-        }
 
         private async Task HandleGenerateReview(HttpListenerContext context, JObject json, string traceId)
         {

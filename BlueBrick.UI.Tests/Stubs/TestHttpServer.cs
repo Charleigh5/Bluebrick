@@ -10,6 +10,7 @@ namespace BlueBrick.UI.Tests.Stubs
     {
         private readonly HttpListener _listener;
         private readonly Dictionary<string, Func<HttpListenerContext, string>> _handlers = new Dictionary<string, Func<HttpListenerContext, string>>();
+        private readonly Dictionary<string, Func<HttpListenerContext, Task>> _rawHandlers = new Dictionary<string, Func<HttpListenerContext, Task>>();
         private bool _running;
 
         public string BaseUrl { get; }
@@ -39,6 +40,17 @@ namespace BlueBrick.UI.Tests.Stubs
             _handlers[path.ToLower()] = handler;
         }
 
+        /// <summary>
+        /// Registers a raw handler that owns the HttpListenerContext, enabling streamed,
+        /// stalled, or withheld responses (e.g., SSE cancellation regression tests).
+        /// Register before Start; handlers run off the listener loop and close the
+        /// response themselves.
+        /// </summary>
+        public void RegisterRawHandler(string path, Func<HttpListenerContext, Task> handler)
+        {
+            _rawHandlers[path.ToLower()] = handler;
+        }
+
         private async Task HandleRequests()
         {
             while (_running)
@@ -47,7 +59,20 @@ namespace BlueBrick.UI.Tests.Stubs
                 {
                     var context = await _listener.GetContextAsync();
                     var path = context.Request.Url.AbsolutePath.ToLower();
-                    
+
+                    if (_rawHandlers.TryGetValue(path, out var rawHandler))
+                    {
+                        // Raw handlers own the response; client aborts mid-stream are expected.
+                        _ = Task.Run(async () =>
+                        {
+                            try { await rawHandler(context); }
+                            catch (HttpListenerException) { }
+                            catch (ObjectDisposedException) { }
+                            finally { try { context.Response.Close(); } catch { } }
+                        });
+                        continue;
+                    }
+
                     if (_handlers.TryGetValue(path, out var handler))
                     {
                         var response = handler(context);

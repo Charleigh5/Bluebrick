@@ -46,6 +46,9 @@
     <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
       <HintPath>..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath>
     </Reference>
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>..\lib\SolidWorks.Interop.sldworks.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
@@ -98,6 +101,14 @@
     <Compile Include="Agent\ProtectedRouteIngressTests.cs" />
     <Compile Include="SolidWorks\T5LiveEvidenceTests.cs" />
     <Compile Include="SolidWorks\FeatureTreeSnapshotTests.cs" />
+    <!-- P0.6 bridge security tests + /qa/run self-proxy regression (real AgentHttpServer on loopback). -->
+    <Compile Include="Agent\AgentHttpServerSecurityTests.cs" />
+    <Compile Include="Agent\AssistantApprovalLedgerTests.cs" />
+    <Compile Include="Agent\AssistantApprovalServiceTests.cs" />
+    <Compile Include="Agent\ApprovalDialogTests.cs" />
+    <Compile Include="Agent\CustomPropertyPreviewBuilderTests.cs" />
+    <Compile Include="Agent\SetCustomPropertyExecutorTests.cs" />
+    <Compile Include="Agent\SetCustomPropertyDescriptorTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BlueBrick.csproj">
