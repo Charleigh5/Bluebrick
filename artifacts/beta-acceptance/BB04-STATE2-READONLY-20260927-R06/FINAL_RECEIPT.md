@@ -9,7 +9,7 @@
 - **Source commit:** `c877aa4be2402bb92a7e175702fae19ed98d3e60`
 - **Gates:** 28/28 PASS
 - **CAD/PDM/provider/Production mutation:** none
-- **Repair commit:** pending; `SolidWorksAuditComposition.cs` has a disjoint Sprint 05 hunk that must not be staged with this repair
+- **Repair commit:** `5a01afeacf135c609e219e3355d82f0ad1220229`; the Sprint 05 `VerifyAccess` hunk remains unstaged
 
 ## Vertical slice
 

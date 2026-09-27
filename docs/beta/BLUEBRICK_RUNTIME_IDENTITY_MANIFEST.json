@@ -1,7 +1,8 @@
 {
   "schema": "bluebrick.runtime-identity-manifest.v1",
-  "runId": "20260902-095413",
-  "sourceCommit": "9a26e89bb2c7e320924b39a7edc65fa86fa0559f",
+  "runId": "BB04-STATE2-READONLY-20260927-R06",
+  "sourceCommit": "c877aa4be2402bb92a7e175702fae19ed98d3e60",
+  "repairCommit": "5a01afeacf135c609e219e3355d82f0ad1220229",
   "expected": {
     "environment": "LAB",
     "product": "BlueBrick 2.0",
@@ -9,32 +10,62 @@
     "sourceDirectory": "AssistantWeb",
     "entrypoint": "AssistantWeb/src/main.tsx -> App.tsx",
     "framework": "React 19 + Vite 8.0.16",
-    "buildCommand": "VITE_BLUEBRICK_ENVIRONMENT=LAB VITE_BLUEBRICK_SOURCE_COMMIT=<commit> VITE_BLUEBRICK_BUILD_ID=<run-id> VITE_BLUEBRICK_BUILD_UTC=<utc> npm run build",
-    "buildId": "20260902-095413",
-    "buildUtc": "2026-09-02T13:54:24.2747056Z",
+    "buildId": "BB04-STATE2-READONLY-20260927-R05",
+    "buildUtc": "2026-09-27T12:01:03.9410273Z",
     "packageVersion": "0.1.0",
     "schemaVersion": "2026-06-01.v1",
-    "assetManifest": ["index.html","assistant-index.css","assistant-web.js"],
+    "assetManifest": ["index.html", "assistant-index.css", "assistant-web.js"],
     "loadedWebViewUri": "https://bluebrick-ui.invalid/index.html",
-    "backend": {"environment":"Lab","dll":"C:\\BlueBrickLab\\BlueBrick.Lab.dll","dllSha256":"32B5271C35D89DB55C5C566B6B905B11C43555B86E21DFBDB606033C5F97D9FE","config":"C:\\BlueBrickLab\\config\\appsettings.lab.json","configSha256":"D4EC9F049E09F4815428406AC6E09F2F48C8A5BE42478C9F98ED471E5AE1C3B5","bridge":"127.0.0.1:17179"}
+    "backend": {
+      "environment": "Lab",
+      "dll": "C:\\BlueBrickLab\\BlueBrick.Lab.dll",
+      "dllSha256": "2A90967F8B783B7852723A24DD258D80F3C304EF7CE1D6F4FC82E152A764A98E",
+      "config": "C:\\BlueBrickLab\\config\\appsettings.lab.json",
+      "configSha256": "DDBE298D76D5A5B86EFA766C6B2A51818949DD7E1D708A847F2B39661330F558",
+      "bridge": "127.0.0.1:17179"
+    }
   },
   "builtArtifact": {
-    "identityLabel": "LAB | BlueBrick 2.0 | 9a26e89bb2c7e320924b39a7edc65fa86fa0559f | 20260902-095413",
+    "identityLabel": "LAB | BlueBrick 2.0 | c877aa4be2402bb92a7e175702fae19ed98d3e60 | BB04-STATE2-READONLY-20260927-R05",
     "assetSha256": {
-      "AssistantWeb/dist/index.html":"E370C9711592F2695CF0651F702AE809A69AC0DE9B635C6C5B4CC8A4A6C7237B",
-      "AssistantWeb/dist/assistant-index.css":"8B0281A263CD60E9A83A3CE332DC6D0C9A3BE2525337F3E3847080CFB5C87B27",
-      "AssistantWeb/dist/assistant-web.js":"E5A698929EAF2EEAC9B2F348C36F427EAD052BA5B5FE55E4F3659407E4CEE20F"
+      "AssistantWeb/dist/index.html": "493DAA428FB90C5A03BC2D54B3E50B2045A76455C739986AF412184147101E3B",
+      "AssistantWeb/dist/assistant-index.css": "DC6EDCD83C5154B6411EAB90A2194F29FBC991455AE568D71BE2BECFC09D3CC7",
+      "AssistantWeb/dist/assistant-web.js": "9FB50F9803A994A0DD275FF53385D30EB01713288C1A4D62833B11266592FF2F"
     },
     "sourceToBinLabByteParity": "PASS",
-    "sourceToLabRootByteParity": "NOT_VERIFIED_AFTER_ROLLBACK"
+    "sourceToLabRootByteParity": "PASS"
   },
   "observedLive": {
-    "loadedWebViewUri": "UNKNOWN",
-    "frontendDomIdentity": "UNKNOWN",
-    "labProcess": {"pid":23756,"windowTitle":"SOLIDWORKS Professional 2025 SP5.0","mainWindowHandleObserved":true,"blueBrickLabDllLoaded":false},
-    "bridge17179": "NOT_LISTENING",
-    "freshWebViewTelemetry": "NOT_OBSERVED",
-    "result": "LIVE_IDENTITY_NOT_PROVEN",
-    "failureCode": "LIVE_RUNTIME_NOT_ACTIVATED"
-  }
+    "acceptanceRunId": "BB04-STATE2-READONLY-20260927-R06",
+    "loadedWebViewUri": "https://bluebrick-ui.invalid/index.html",
+    "frontendDomIdentity": "LAB | BlueBrick 2.0 | c877aa4be2402bb92a7e175702fae19ed98d3e60 | BB04-STATE2-READONLY-20260927-R05",
+    "reactMounted": true,
+    "bbCallbackCount": 17,
+    "telemetryErrors": 0,
+    "labProcess": {
+      "pid": 43908,
+      "windowTitle": "SOLIDWORKS Professional 2025 SP5.0 - [bb04-state2-part.sldprt]",
+      "blueBrickLabDllLoaded": true
+    },
+    "bridge17179": "LISTENING_DURING_RUN",
+    "runtimeClassification": "Sw2025Target",
+    "runtimeVersion": "33.5.0",
+    "activeDocument": {
+      "type": "Part",
+      "configuration": "Default",
+      "dirtyBefore": false,
+      "dirtyAfter": false,
+      "documentIdentityHash": "b2e8289b6fb6ba8cb9fade6530b18e2b39471590741d3e2d9dbb194af01a046c"
+    },
+    "capability": "solidworks.get_active_document_snapshot",
+    "gatesPassed": 28,
+    "gatesTotal": 28,
+    "result": "LIVE_IDENTITY_PROVEN",
+    "stateResult": "STATE_2_UI_BETA_READY"
+  },
+  "notes": [
+    "The read-only vertical slice executed host/API to host because the React shell exposes no control for this capability.",
+    "interop_GetPropertyNames_unavailable remains a recorded limitation.",
+    "The Sprint 05 VerifyAccess hunk in SolidWorksAuditComposition.cs was excluded from repair commit 5a01afe."
+  ]
 }

@@ -93,7 +93,7 @@ Production timestamps remained unchanged; port 17178 remained owned by PID 4. `p
 
 | priority | defect | status |
 |---|---|---|
-| P0 | Lab add-in/WebView/17179 activation not proven | BLOCKED |
+| P0 | Lab add-in/WebView/17179 activation not proven | FIXED — STATE 2 receipt `artifacts/beta-acceptance/BB04-STATE2-READONLY-20260927-R06` |
 | P1 | Screenshot review route/payload mismatch | UNREPAIRED |
 | P1 | Hardware CAD endpoint absent; Reject/More handlers absent | UNREPAIRED |
 | P1 | Database, PDM, Epicor runtime acceptance absent | BLOCKED_EXTERNAL |
@@ -105,29 +105,30 @@ Runtime Identity 35/100; Frontend Wiring 55/100; SOLIDWORKS Integration 20/100; 
 
 ## 15. Promotion Decision
 
-`NOT_BETA_READY`
-
-Highest evidence-supported state: `STATE 0 NOT_LIVE`.
+`STATE_2_UI_BETA_READY` as of 2026-09-27, based on the R06 read-only CAD vertical-slice receipt. The earlier `NOT_BETA_READY` / `STATE 0 NOT_LIVE` result remains historical for the original run.
 
 ## 16. Chief Beta Test Entry Point
 
-- Chief can test the static frontend bundle and fixture-only execution-board/VIRA Lab lanes; a live BlueBrick 2.0 SOLIDWORKS beta is not yet available.
+- Chief can test the live Lab beta surface; the current STATE 2 evidence is in `artifacts/beta-acceptance/BB04-STATE2-READONLY-20260927-R06`.
 - The Lab launch was rolled back after activation failed. Do not use the existing dirty SOLIDWORKS session for acceptance.
 - The expected UI identity is `LAB | BlueBrick 2.0 | 9a26e89bb2c7e320924b39a7edc65fa86fa0559f | 20260902-095413`.
 - First five eventual live tests: identity/URI readback; real active-document context; local-vault known/no-result search; read-only PDM known/no-result search; read-only Epicor known/no-result search.
-- Known limitations: Lab activation/bridge absent; PDM/Epicor disabled; legacy parity incomplete; no writes were tested.
+- Known limitations: the read-only slice has no React UI trigger; `interop_GetPropertyNames_unavailable` remains; PDM/Epicor disabled; no CAD writes were tested.
 - Report a defect with the exact run ID, control/action, observed state, screenshot or sanitized receipt, and whether the failure is static or live.
 
 ## 17. Execution Receipt
 
-STATUS: `COMPLETED_WITH_DECLARED_GAPS`  
-HIGHEST PROVEN STATE: `STATE 0 NOT_LIVE`  
-RUN ID: `20260902-095413`  
-SOURCE COMMIT: `9a26e89bb2c7e320924b39a7edc65fa86fa0559f`  
-TESTED BUILD: Lab DLL `32B5271C35D89DB55C5C566B6B905B11C43555B86E21DFBDB606033C5F97D9FE`; frontend build `20260902-095413`  
-PRODUCTION MUTATED: NO  
-ROLLBACK VERIFIED: YES  
-CRITICAL FAILURES: Lab add-in/WebView/17179 activation not proven; existing Lab UI identity not observed  
-DATA GAPS: live WebView URI/DOM, backend route behavior, database/PDM/Epicor runtime, legacy core parity  
-NEXT DEPENDENCY: owned Lab SOLIDWORKS activation/bridge and safe Computer Use or typed host evidence  
-NEXT MOVE: diagnose why the fresh Lab process does not load the registered add-in, then begin a new acceptance run after repair
+STATUS: `STATE_2_UI_BETA_READY`
+HIGHEST PROVEN STATE: `STATE 2 UI_BETA_READY`
+RUN ID: `BB04-STATE2-READONLY-20260927-R06`
+SOURCE COMMIT: `c877aa4be2402bb92a7e175702fae19ed98d3e60`
+REPAIR COMMIT: `5a01afeacf135c609e219e3355d82f0ad1220229`
+TESTED BUILD: Lab DLL `2A90967F8B783B7852723A24DD258D80F3C304EF7CE1D6F4FC82E152A764A98E`; frontend build `BB04-STATE2-READONLY-20260927-R05`
+CAPABILITY: `solidworks.get_active_document_snapshot`
+GATES: 28/28 applicable gates PASS
+PRODUCTION MUTATED: NO
+ROLLBACK VERIFIED: YES
+CAD/PDM/PROVIDER/DATABASE MUTATED: NO
+EVIDENCE: `artifacts/beta-acceptance/BB04-STATE2-READONLY-20260927-R06`
+LIMITATIONS: host/API slice has no React trigger; `interop_GetPropertyNames_unavailable`; no CAD writes tested
+NEXT DEPENDENCY: none for STATE 2; mutation/UI-trigger follow-ups remain separate

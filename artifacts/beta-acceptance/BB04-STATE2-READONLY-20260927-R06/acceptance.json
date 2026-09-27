@@ -18,7 +18,7 @@
   "gatesPassed": 28,
   "gatesTotal": 28,
   "failureCode": "NONE",
-  "repairCommit": "PENDING",
+  "repairCommit": "5a01afeacf135c609e219e3355d82f0ad1220229",
   "notes": ["State 1 identity and real SOLIDWORKS context are proven for the R05 bundle.","Capability executed host/API to host because the React shell exposes no control for this read-only tool; no UI-triggered capability execution is claimed.","interop_GetPropertyNames_unavailable remains recorded in the snapshot scopes.","Tool receipt DocumentType is Unknown while the audit receipt and tool Item are Part.","External Sprint 05 smoke asset was baselined before R06 and unchanged after; it is not part of this read-only slice.","Native visual capture was unavailable because the owned SOLIDWORKS window could not be foregrounded into the capture session; no image evidence is claimed."],
   "productionMutated": false,
   "cadMutated": false,
