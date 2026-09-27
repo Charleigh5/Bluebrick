@@ -1,0 +1,53 @@
+{
+  "schema": "bluebrick-lab-runtime-manifest.v2",
+  "sharedAiCatalog": {
+    "artifacts": {
+      "providers.json": {
+        "sha256": "7B8DC5F512AC4E1494040268FBD0C6FCB28F83E3298EEA55E940D55010992D3A"
+      },
+      "models.json": {
+        "sha256": "68C1AB7AF63ECB1CEB46C84C32237D6048C749A4E2668BF78ED628D5CDEEEF16"
+      },
+      "routes.json": {
+        "sha256": "F865DE52D7A7BDA71D75D6E6EE21DBED60A0E8663F35F15D62DF38FC273AF991"
+      }
+    }
+  },
+  "product": "BlueBrick",
+  "channel": "Lab",
+  "targetVersion": "2.0-beta",
+  "gitCommit": "c877aa4be2402bb92a7e175702fae19ed98d3e60",
+  "buildId": "BB04-STATE2-READONLY-20260927-R02",
+  "frontendBuildId": "BB04-STATE2-READONLY-20260927-R02",
+  "deployedUtc": "2026-09-27T04:41:17.4150032Z",
+  "bridgePort": 17179,
+  "configSchemaVersion": "1",
+  "dll": {
+    "path": "C:\\BlueBrickLab\\BlueBrick.Lab.dll",
+    "sha256": "2B8BDE55B9CFDCDEEBE9F9E32E9C27A337D4BE6C0F7F0F28AA841A0F98EB1703"
+  },
+  "frontend": {
+    "root": "C:\\BlueBrickLab\\AssistantWeb\\dist",
+    "artifacts": {
+      "index.html": {
+        "path": "C:\\BlueBrickLab\\AssistantWeb\\dist\\index.html",
+        "sha256": "135AB300463C92710857C7043F149689EDBB573B77A98EC1ECE213EB2D19D7AF",
+        "size": 471
+      },
+      "assistant-index.css": {
+        "path": "C:\\BlueBrickLab\\AssistantWeb\\dist\\assistant-index.css",
+        "sha256": "DC6EDCD83C5154B6411EAB90A2194F29FBC991455AE568D71BE2BECFC09D3CC7",
+        "size": 67771
+      },
+      "assistant-web.js": {
+        "path": "C:\\BlueBrickLab\\AssistantWeb\\dist\\assistant-web.js",
+        "sha256": "52E1820634539E5DB6A40D82FE4581CE495BC56EA2B5BFD3FA1A6696626B6700",
+        "size": 2425404
+      }
+    }
+  },
+  "config": {
+    "path": "C:\\BlueBrickLab\\config\\appsettings.lab.json",
+    "sha256": "DDBE298D76D5A5B86EFA766C6B2A51818949DD7E1D708A847F2B39661330F558"
+  }
+}

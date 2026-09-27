@@ -1,0 +1,39 @@
+2026-09-27T08:01:16.0137936-04:00 | AssemblyResolve handler registered
+2026-09-27T08:01:16.0137936-04:00 | ConnectToSW start
+2026-09-27T08:01:16.0137936-04:00 | SetAddinCallbackInfo complete
+2026-09-27T08:01:16.2063007-04:00 | Command manager initialized
+2026-09-27T08:01:16.2140558-04:00 | Event handlers attached
+2026-09-27T08:01:16.2200567-04:00 | Task pane icons prepared
+2026-09-27T08:01:16.2543192-04:00 | Creating FrmPane instance
+2026-09-27T08:01:17.6656715-04:00 | FrmPane constructed
+2026-09-27T08:01:17.6877364-04:00 | FrmPane handle created: 3477484
+2026-09-27T08:01:18.1074491-04:00 | Task pane hosted from handle
+2026-09-27T08:01:18.1084768-04:00 | Task pane created
+2026-09-27T08:01:18.1100997-04:00 | AgentConfig.Load complete
+2026-09-27T08:01:18.1121066-04:00 | AgentOverlay created
+2026-09-27T08:01:18.1153800-04:00 | AuditComposition dispatcher control ready: True
+2026-09-27T08:01:18.1158727-04:00 | AuditComposition wired: Sw2025Target
+2026-09-27T08:01:18.1228754-04:00 | AgentHttpServer created
+2026-09-27T08:01:18.1288817-04:00 | AgentHttpServer started
+2026-09-27T08:01:18.1590732-04:00 | Assistant window shown
+2026-09-27T08:01:18.1590732-04:00 | ConnectToSW success
+2026-09-27T08:01:47.6310414-04:00 | DisconnectFromSW start
+2026-09-27T08:01:47.6310414-04:00 | Cleanup begin (development sandbox)
+2026-09-27T08:01:47.6320597-04:00 | Cleanup complete (development sandbox)
+2026-09-27T08:01:47.6320597-04:00 | Cleanup begin (assistant preview)
+2026-09-27T08:01:47.6722905-04:00 | Cleanup complete (assistant preview)
+2026-09-27T08:01:47.6728391-04:00 | Cleanup begin (command manager)
+2026-09-27T08:01:47.6891138-04:00 | Cleanup complete (command manager)
+2026-09-27T08:01:47.6891138-04:00 | Cleanup begin (event handlers)
+2026-09-27T08:01:47.6930990-04:00 | Cleanup complete (event handlers)
+2026-09-27T08:01:47.6940986-04:00 | Cleanup begin (audit composition)
+2026-09-27T08:01:47.6940986-04:00 | Cleanup complete (audit composition)
+2026-09-27T08:01:47.6940986-04:00 | Cleanup begin (agent server)
+2026-09-27T08:01:47.6950985-04:00 | Cleanup complete (agent server)
+2026-09-27T08:01:47.6950985-04:00 | Cleanup begin (agent overlay)
+2026-09-27T08:01:47.6961632-04:00 | Cleanup complete (agent overlay)
+2026-09-27T08:01:47.6961632-04:00 | Cleanup begin (task pane)
+2026-09-27T08:01:47.7504001-04:00 | Cleanup complete (task pane)
+2026-09-27T08:01:47.7504001-04:00 | Cleanup begin (COM release)
+2026-09-27T08:01:47.7513952-04:00 | Cleanup complete (COM release)
+2026-09-27T08:01:47.7750806-04:00 | DisconnectFromSW success

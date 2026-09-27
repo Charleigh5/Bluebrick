@@ -1,0 +1,24 @@
+{
+  "schema": "bluebrick.beta-runtime-identity.v1",
+  "runId": "BB04-STATE2-READONLY-20260927-R06",
+  "buildId": "BB04-STATE2-READONLY-20260927-R05",
+  "sourceCommit": "c877aa4be2402bb92a7e175702fae19ed98d3e60",
+  "expected": {
+    "environment": "LAB",
+    "buildId": "BB04-STATE2-READONLY-20260927-R05",
+    "loadedWebViewUri": "https://bluebrick-ui.invalid/index.html",
+    "bridge": "127.0.0.1:17179"
+  },
+  "observedLive": {
+    "processId": 43908,
+    "windowTitle": "SOLIDWORKS Professional 2025 SP5.0 - [bb04-state2-part.sldprt]",
+    "loadedWebViewUri": "https://bluebrick-ui.invalid/index.html",
+    "frontendDomIdentity": "LAB | BlueBrick 2.0 | c877aa4be2402bb92a7e175702fae19ed98d3e60 | BB04-STATE2-READONLY-20260927-R05",
+    "reactMounted": true,
+    "bridge17179": "LISTENING_DURING_RUN",
+    "runtimeClassification": "Sw2025Target",
+    "telemetryErrors": 0,
+    "result": "LIVE_IDENTITY_PROVEN"
+  },
+  "result": "STATE_2_UI_BETA_READY_RUNTIME"
+}

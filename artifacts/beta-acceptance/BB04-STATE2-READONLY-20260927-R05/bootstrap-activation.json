@@ -1,0 +1,52 @@
+﻿{
+  "capturedUtc": "2026-09-27T11:58:45.2035877Z",
+  "reason": "activation_01",
+  "coreReady": true,
+  "readback": {
+    "bbCallbacks": [
+      "bbReset",
+      "bbAppend",
+      "bbTypingStart",
+      "bbAppendChunk",
+      "bbTypingStop",
+      "bbSetModel",
+      "bbSetModels",
+      "bbSetScope",
+      "bbSetScopes",
+      "bbSetStatus",
+      "bbSetTools",
+      "bbSetToolReceipts",
+      "bbSetProductCatalogs",
+      "bbAppendToolResult",
+      "bbAppendScreenshotArtifact",
+      "bbUpdateScreenshotArtifact",
+      "bbGetTranscript"
+    ],
+    "blueBrickHeaderPresent": true,
+    "bodyTextLength": 234,
+    "documentUrl": "https://bluebrick-ui.invalid/index.html",
+    "frontendBuildId": "BB04-STATE2-READONLY-20260927-R05",
+    "frontendEnvironment": "LAB",
+    "frontendSourceCommit": "c877aa4be2402bb92a7e175702fae19ed98d3e60",
+    "reactMounted": true,
+    "readyState": "complete",
+    "rootChildCount": 1,
+    "scriptTags": [
+      {
+        "crossOrigin": "anonymous",
+        "src": "https://bluebrick-ui.invalid/assistant-web.js",
+        "type": "module"
+      }
+    ],
+    "telemetry": {
+      "errors": [],
+      "installedAt": 1790510325126.0,
+      "resourceErrors": [],
+      "unhandledRejections": []
+    },
+    "titleLength": 19,
+    "transcript": [],
+    "visibilityState": "hidden"
+  },
+  "result": "BOOTSTRAP_RECEIPT_COMPLETE"
+}

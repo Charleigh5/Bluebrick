@@ -102,7 +102,11 @@ namespace BlueBrick.SolidWorks.Runtime
                 return new SolidWorksVersion { RawRevisionString = revisionString ?? string.Empty };
             }
             var v = new SolidWorksVersion { RawRevisionString = revisionString, DisplayVersion = revisionString };
-            if (revisionString.Contains("2024")) v.MajorVersion = 2024;
+            var trimmed = revisionString.Trim();
+            if (trimmed.StartsWith("32.", StringComparison.OrdinalIgnoreCase)) v.MajorVersion = 2024;
+            else if (trimmed.StartsWith("33.", StringComparison.OrdinalIgnoreCase)) v.MajorVersion = 2025;
+            else if (trimmed.StartsWith("34.", StringComparison.OrdinalIgnoreCase)) v.MajorVersion = 2026;
+            else if (revisionString.Contains("2024")) v.MajorVersion = 2024;
             else if (revisionString.Contains("2025")) v.MajorVersion = 2025;
             else if (revisionString.Contains("2026")) v.MajorVersion = 2026;
             return v;
@@ -111,6 +115,10 @@ namespace BlueBrick.SolidWorks.Runtime
         private static SolidWorksRuntimeClassification ClassifyLive(string revisionString)
         {
             if (string.IsNullOrEmpty(revisionString)) return SolidWorksRuntimeClassification.UnknownReadOnly;
+            var trimmed = revisionString.Trim();
+            if (trimmed.StartsWith("32.", StringComparison.OrdinalIgnoreCase)) return SolidWorksRuntimeClassification.Sw2024Sp5Regression;
+            if (trimmed.StartsWith("33.", StringComparison.OrdinalIgnoreCase)) return SolidWorksRuntimeClassification.Sw2025Target;
+            if (trimmed.StartsWith("34.", StringComparison.OrdinalIgnoreCase)) return SolidWorksRuntimeClassification.Sw2026ForwardUnverified;
             if (revisionString.Contains("2026")) return SolidWorksRuntimeClassification.Sw2026ForwardUnverified;
             if (revisionString.Contains("2025")) return SolidWorksRuntimeClassification.Sw2025Target;
             if (revisionString.Contains("2024")) return SolidWorksRuntimeClassification.Sw2024Sp5Regression;

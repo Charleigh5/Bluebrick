@@ -1,0 +1,11 @@
+{
+  "AcceptanceRunId": "BB04-STATE2-READONLY-20260927-R01",
+  "LaunchBuildId": "BB20-LIVE-RELOAD-CLEANUP-20260925-R03",
+  "SourceCommit": "c877aa4be2402bb92a7e175702fae19ed98d3e60",
+  "Donor": "C:\\Program Files\\SOLIDWORKS Corp\\SOLIDWORKS\\data\\GenerateAssembly\\Part.SLDPRT",
+  "DonorHash": "D171DAFB4FA34A02AAD2BA3C83BE314097E0E8A8BFE1671D71CBEE2E1234DDC3",
+  "DisposablePart": "C:\\Users\\cweir\\AppData\\Local\\Temp\\BlueBrickState2-20260927\\bb04-state2-part.sldprt",
+  "DisposableHash": "D171DAFB4FA34A02AAD2BA3C83BE314097E0E8A8BFE1671D71CBEE2E1234DDC3",
+  "Evidence": "C:\\Users\\cweir\\Documents\\GitHub\\VIRA GITHUB\\Bluebrick\\artifacts\\beta-acceptance\\BB04-STATE2-READONLY-20260927-R01",
+  "RecordedUtc": "2026-09-27T04:36:21.5177325Z"
+}

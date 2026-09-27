@@ -1,0 +1,1 @@
+{"status":"healthy","timestamp":"2026-09-27T04:41:51.7927994Z","uptime_seconds":18.64,"components":[{"name":"bridge","status":"healthy","latency_ms":14,"message":""},{"name":"telemetry","status":"healthy","latency_ms":0,"message":""}],"traceId":"4ab6b363-be47-4b09-a89c-a9161832044a"}

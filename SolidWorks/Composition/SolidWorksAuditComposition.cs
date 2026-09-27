@@ -97,9 +97,10 @@ namespace BlueBrick.SolidWorks.Composition
                 return new AuditRunResult { Snapshot = snap, Errors = errors, Receipt = blockedReceipt, Evidence = new System.Collections.Generic.List<AuditEvidence>(), Findings = new System.Collections.Generic.List<AuditFinding>() };
             }
             sw.Stop();
+            var stateVersion = AuditStateVersionBuilder.BuildStateVersion(snap);
             var status = errors.Count==0?"Completed": "Partial";
             var message = errors.Count==0?"Snapshot captured": errors.Exists(e => e.Code == AuditErrorCodes.COM_THREAD_VIOLATION) ? "Snapshot partial — COM thread violation (call on main STA thread or marshal via dispatcher)." : "Snapshot partial — some properties unavailable.";
-            var receipt = _receiptFactory.Create(req, _adapter.AdapterName, _runtime.Version?.DisplayVersion ?? "", _runtime.Classification.ToString(), snap?.Identity?.DocumentIdentityHash ?? "", snap?.Identity?.DocumentType ?? "Unknown", snap?.Identity?.ActiveConfiguration ?? "", snap?.State?.DirtyBefore ?? false, snap?.State?.DirtyAfter ?? false, snap?.State?.IsReadOnly ?? false, "", AuditStateVersionBuilder.BuildStateVersion(snap), new string[0], new string[0], new System.Collections.Generic.List<AuditEvidence>(), new System.Collections.Generic.List<AuditFinding>(), status, message, errors, new string[0], "");
+            var receipt = _receiptFactory.Create(req, _adapter.AdapterName, _runtime.Version?.DisplayVersion ?? "", _runtime.Classification.ToString(), snap?.Identity?.DocumentIdentityHash ?? "", snap?.Identity?.DocumentType ?? "Unknown", snap?.Identity?.ActiveConfiguration ?? "", snap?.State?.DirtyBefore ?? false, snap?.State?.DirtyAfter ?? false, snap?.State?.IsReadOnly ?? false, stateVersion, stateVersion, new string[0], new string[0], new System.Collections.Generic.List<AuditEvidence>(), new System.Collections.Generic.List<AuditFinding>(), status, message, errors, new string[0], "");
             var result = new AuditRunResult { Snapshot = snap, Errors = errors, Receipt = receipt, Evidence = new System.Collections.Generic.List<AuditEvidence>(), Findings = new System.Collections.Generic.List<AuditFinding>() };
             return result;
         }

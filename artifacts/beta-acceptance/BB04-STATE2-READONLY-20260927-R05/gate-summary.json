@@ -1,0 +1,43 @@
+{
+  "runId": "BB04-STATE2-READONLY-20260927-R05",
+  "buildId": "BB04-STATE2-READONLY-20260927-R05",
+  "sourceCommit": "c877aa4be2402bb92a7e175702fae19ed98d3e60",
+  "checks": {
+    "envelope": true,
+    "http200": true,
+    "receipts": true,
+    "classification": true,
+    "snapshotStatus": true,
+    "documentIdentity": true,
+    "stateStable": true,
+    "disposableNotDirtied": true,
+    "auditCompleted": true,
+    "noSideEffects": true,
+    "adapter": true,
+    "stateVersionEqual": true,
+    "noRollbackOrFindings": true,
+    "toolIdentity": true,
+    "noMutation": true,
+    "readOnlyNoApproval": true,
+    "readOnlyMode": true,
+    "allowPolicy": true,
+    "noToolErrors": true,
+    "itemMetadata": true,
+    "toolResult": true,
+    "auditVisible": true,
+    "partHash": true,
+    "smokeClean": false,
+    "productionClean": true,
+    "teardownClean": true,
+    "webviewIdentity": true,
+    "hostStatus": true
+  },
+  "passed": 27,
+  "total": 28,
+  "result": "FAIL",
+  "observations": [
+    "interop_GetPropertyNames_unavailable",
+    "tool receipt DocumentType Unknown; audit receipt and item Part",
+    "native visual capture unavailable"
+  ]
+}

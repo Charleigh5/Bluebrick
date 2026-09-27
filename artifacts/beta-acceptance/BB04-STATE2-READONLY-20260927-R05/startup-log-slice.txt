@@ -1,0 +1,19 @@
+2026-09-27T07:58:42.7711663-04:00 | AssemblyResolve handler registered
+2026-09-27T07:58:42.7722595-04:00 | ConnectToSW start
+2026-09-27T07:58:42.7722595-04:00 | SetAddinCallbackInfo complete
+2026-09-27T07:58:42.8774123-04:00 | Command manager initialized
+2026-09-27T07:58:42.8787443-04:00 | Event handlers attached
+2026-09-27T07:58:42.8926844-04:00 | Task pane icons prepared
+2026-09-27T07:58:42.9084180-04:00 | Creating FrmPane instance
+2026-09-27T07:58:44.4686444-04:00 | FrmPane constructed
+2026-09-27T07:58:44.4980783-04:00 | FrmPane handle created: 2756418
+2026-09-27T07:58:44.9885356-04:00 | Task pane hosted from handle
+2026-09-27T07:58:44.9885356-04:00 | Task pane created
+2026-09-27T07:58:44.9909987-04:00 | AgentConfig.Load complete
+2026-09-27T07:58:44.9927004-04:00 | AgentOverlay created
+2026-09-27T07:58:44.9948525-04:00 | AuditComposition dispatcher control ready: True
+2026-09-27T07:58:44.9948525-04:00 | AuditComposition wired: Sw2025Target
+2026-09-27T07:58:45.0024516-04:00 | AgentHttpServer created
+2026-09-27T07:58:45.0118842-04:00 | AgentHttpServer started
+2026-09-27T07:58:45.0528607-04:00 | Assistant window shown
+2026-09-27T07:58:45.0538602-04:00 | ConnectToSW success

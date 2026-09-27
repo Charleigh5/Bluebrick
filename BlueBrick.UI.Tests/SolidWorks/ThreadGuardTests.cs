@@ -138,6 +138,16 @@ namespace BlueBrick.UI.Tests.SolidWorks
         }
 
         [TestMethod]
+        public void Runtime_LiveRevisionNumber_33_5_0MapsToSw2025Target()
+        {
+            var info = SolidWorksRuntimeInfoFactory.FromLiveRevisionNumber("33.5.0");
+            Assert.AreEqual(SolidWorksRuntimeClassification.Sw2025Target, info.Classification);
+            Assert.AreEqual(RuntimeInfoCaptureSource.FromLiveInstance, info.CaptureSource);
+            Assert.AreEqual(2025, info.Version.MajorVersion);
+            Assert.AreEqual("33.5.0", info.Version.RawRevisionString);
+        }
+
+        [TestMethod]
         public void Runtime_LiveRevisionNumber_2026MapsToForwardUnverified()
         {
             var info = SolidWorksRuntimeInfoFactory.FromLiveRevisionNumber("SolidWorks 2026 SP0.0");

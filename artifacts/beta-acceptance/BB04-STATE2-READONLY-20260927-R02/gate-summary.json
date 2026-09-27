@@ -1,0 +1,155 @@
+{
+  "runId": "BB04-STATE2-READONLY-20260927-R02",
+  "buildId": "BB04-STATE2-READONLY-20260927-R02",
+  "sourceCommit": "c877aa4be2402bb92a7e175702fae19ed98d3e60",
+  "gates": [
+    {
+      "id": "G1",
+      "pass": true,
+      "detail": "snapshot envelope ok/schema/correlation/error"
+    },
+    {
+      "id": "G2",
+      "pass": true,
+      "detail": "HTTP 200 for snapshot/tool/audit/status/selfcheck"
+    },
+    {
+      "id": "G3",
+      "pass": true,
+      "detail": "audit + tool receipts present"
+    },
+    {
+      "id": "G4",
+      "pass": true,
+      "detail": "live 33.5.0 classified Sw2025Target"
+    },
+    {
+      "id": "G5",
+      "pass": true,
+      "detail": "snapshot status ok/errors empty"
+    },
+    {
+      "id": "G6",
+      "pass": true,
+      "detail": "Part identity/hash"
+    },
+    {
+      "id": "G7",
+      "pass": true,
+      "detail": "dirty false and configuration stable"
+    },
+    {
+      "id": "G8",
+      "pass": true,
+      "detail": "disposable copy not dirtied"
+    },
+    {
+      "id": "G9",
+      "pass": true,
+      "detail": "audit receipt Completed"
+    },
+    {
+      "id": "G10",
+      "pass": true,
+      "detail": "audit side effects empty"
+    },
+    {
+      "id": "G11",
+      "pass": true,
+      "detail": "adapter/runtime identity"
+    },
+    {
+      "id": "G12",
+      "pass": true,
+      "detail": "state versions equal/non-empty"
+    },
+    {
+      "id": "G13",
+      "pass": true,
+      "detail": "no rollback/findings"
+    },
+    {
+      "id": "G14",
+      "pass": true,
+      "detail": "tool/capability/boundary"
+    },
+    {
+      "id": "G15",
+      "pass": true,
+      "detail": "tool mutation count 0"
+    },
+    {
+      "id": "G16",
+      "pass": true,
+      "detail": "read-only/no approval"
+    },
+    {
+      "id": "G17",
+      "pass": true,
+      "detail": "read-only mode/version"
+    },
+    {
+      "id": "G18",
+      "pass": true,
+      "detail": "Lab allow decision (observed policy safe_tool_name)"
+    },
+    {
+      "id": "G19",
+      "pass": true,
+      "detail": "tool receipt errors/warnings empty"
+    },
+    {
+      "id": "G20",
+      "pass": true,
+      "detail": "tool item metadata"
+    },
+    {
+      "id": "G21",
+      "pass": true,
+      "detail": "tool result read-only/message"
+    },
+    {
+      "id": "G22",
+      "pass": true,
+      "detail": "receipt visible in tool audit"
+    },
+    {
+      "id": "G23",
+      "pass": true,
+      "detail": "disposable part hash unchanged"
+    },
+    {
+      "id": "G24",
+      "pass": true,
+      "detail": "smoke asset unchanged/no journal or checkpoints"
+    },
+    {
+      "id": "G25",
+      "pass": true,
+      "detail": "Production DLL/config unchanged"
+    },
+    {
+      "id": "G26",
+      "pass": true,
+      "detail": "no owned process/ports/record"
+    },
+    {
+      "id": "G27",
+      "pass": true,
+      "detail": "R02 WebView identity/React"
+    },
+    {
+      "id": "G28",
+      "pass": true,
+      "detail": "selfcheck + generation match"
+    }
+  ],
+  "passed": 28,
+  "total": 28,
+  "result": "PASS",
+  "observations": [
+    "interop_GetPropertyNames_unavailable recorded in snapshot scopes",
+    "tool receipt DocumentType is Unknown while snapshot receipt/Item are Part",
+    "visual native capture unavailable: owned window could not be foregrounded into capture session"
+  ]
+}
