@@ -1,4 +1,7 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using BlueBrick.Agent;
 using BlueBrick.Audit.Contracts;
@@ -23,6 +26,114 @@ namespace BlueBrick.UI.Tests.SolidWorks
         [TestMethod] public void W09_SerializerDeterministic() { var o=new {a=1,b="x"}; var j1=AuditCanonicalSerializer.ToCanonicalJson(o); var j2=AuditCanonicalSerializer.ToCanonicalJson(o); Assert.AreEqual(j1,j2); }
         [TestMethod] public void W10_VersionDtoSerializes() { var v=new SolidWorksVersion{DisplayVersion="33.5",MajorVersion=2025}; var j=AuditCanonicalSerializer.ToCanonicalJson(v); Assert.IsTrue(j.Contains("2025")); }
         [TestMethod] public void W11_UnknownVersion_ReadOnlySafe() { var ri=SolidWorksRuntimeInfoFactory.FromInstallRegistry(new SolidWorksVersion{DisplayVersion="unknown"}); Assert.AreEqual(SolidWorksRuntimeClassification.UnknownReadOnly, ri.Classification); }
-        [TestMethod] public void W12_Disconnect_NoSaveQuit() { Assert.IsTrue(true); }
+        [TestMethod]
+        public void W12_PreviewLifetime_CloseCancelsAndCompletes()
+        {
+            var lifetime = new AssistantPreviewLifetime();
+            var stream = lifetime.BeginStream();
+            var token = stream.Token;
+
+            Assert.IsFalse(lifetime.PageReady.IsCompleted);
+            Assert.IsTrue(lifetime.TryBeginClose());
+            Assert.IsFalse(lifetime.TryBeginClose());
+            Assert.IsTrue(lifetime.IsClosing);
+            Assert.IsTrue(lifetime.PageReady.IsCompleted);
+            Assert.IsTrue(token.IsCancellationRequested);
+
+            lifetime.EndStream(stream);
+            lifetime.Dispose();
+        }
+
+        [TestMethod]
+        public void W13_PreviewLifetime_OlderStreamCannotDisposeNewerStream()
+        {
+            var lifetime = new AssistantPreviewLifetime();
+            var first = lifetime.BeginStream();
+            var firstToken = first.Token;
+            var second = lifetime.BeginStream();
+            var secondToken = second.Token;
+
+            Assert.IsTrue(firstToken.IsCancellationRequested);
+            Assert.IsFalse(secondToken.IsCancellationRequested);
+            lifetime.EndStream(first);
+            Assert.IsFalse(secondToken.IsCancellationRequested);
+            lifetime.EndStream(second);
+            lifetime.Dispose();
+        }
+
+        [TestMethod]
+        public void W14_DisconnectCleanupContinuesAfterFailure()
+        {
+            var events = new List<string>();
+
+            SwAddin.RunCleanupStep("first", () => throw new InvalidOperationException("test"));
+            SwAddin.RunCleanupStep("second", () => events.Add("second"));
+
+            CollectionAssert.AreEqual(new[] { "second" }, events);
+        }
+
+        [TestMethod]
+        public void W15_DisconnectClosesLabPreviewBeforeComRelease()
+        {
+            var source = File.ReadAllText(FindRepositoryFile("swaddin.cs"));
+            var preview = source.IndexOf("RunCleanupStep(\"assistant preview\"", System.StringComparison.Ordinal);
+            var comRelease = source.IndexOf("RunCleanupStep(\"COM release\"", System.StringComparison.Ordinal);
+
+            Assert.IsTrue(preview >= 0);
+            Assert.IsTrue(comRelease > preview);
+            StringAssert.Contains(source, "assistantWindow?.CloseAssistantPreview();");
+        }
+
+        [TestMethod]
+        public void W16_DisconnectStopsServerAfterPreviewAndBeforeComRelease()
+        {
+            var source = File.ReadAllText(FindRepositoryFile("swaddin.cs"));
+            var preview = source.IndexOf("RunCleanupStep(\"assistant preview\"", StringComparison.Ordinal);
+            var server = source.IndexOf("RunCleanupStep(\"agent server\"", StringComparison.Ordinal);
+            var comRelease = source.IndexOf("RunCleanupStep(\"COM release\"", StringComparison.Ordinal);
+
+            Assert.IsTrue(preview >= 0);
+            Assert.IsTrue(server > preview);
+            Assert.IsTrue(comRelease > server);
+            StringAssert.Contains(source, "_agentServer?.Stop();");
+        }
+
+        [TestMethod]
+        public void W17_StatusAndStreamFinalizerKeepBestEffortErrorContainment()
+        {
+            var source = File.ReadAllText(FindRepositoryFile("FrmAssistantWindow.cs"));
+            var refreshStart = source.IndexOf("private async Task RefreshStatusAsync()", StringComparison.Ordinal);
+            var refreshEnd = source.IndexOf("private async Task CaptureAsync()", refreshStart, StringComparison.Ordinal);
+            var refresh = source.Substring(refreshStart, refreshEnd - refreshStart);
+            var modelScript = refresh.IndexOf("await ExecuteScriptIfActiveAsync", StringComparison.Ordinal);
+            var beforeModelScript = refresh.Substring(0, modelScript);
+            var afterModelScript = refresh.Substring(modelScript);
+
+            Assert.IsTrue(beforeModelScript.LastIndexOf("try", StringComparison.Ordinal) > beforeModelScript.LastIndexOf("}", StringComparison.Ordinal));
+            Assert.IsTrue(afterModelScript.IndexOf("catch", StringComparison.Ordinal) >= 0);
+
+            var sendStart = source.IndexOf("private async Task SendAsync()", StringComparison.Ordinal);
+            var sendEnd = source.IndexOf("private async Task TestConnectionAsync()", sendStart, StringComparison.Ordinal);
+            var send = source.Substring(sendStart, sendEnd - sendStart);
+            var finallyIndex = send.IndexOf("finally", StringComparison.Ordinal);
+            var refreshCall = send.IndexOf("await RefreshStatusAsync()", finallyIndex, StringComparison.Ordinal);
+            var finalizer = send.Substring(finallyIndex, send.Length - finallyIndex);
+
+            Assert.IsTrue(refreshCall > finallyIndex);
+            Assert.IsTrue(finalizer.Substring(0, refreshCall - finallyIndex).LastIndexOf("try", StringComparison.Ordinal) >= 0);
+            Assert.IsTrue(finalizer.IndexOf("catch", refreshCall - finallyIndex, StringComparison.Ordinal) >= 0);
+        }
+
+        private static string FindRepositoryFile(string relativePath)
+        {
+            var directory = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+            while (directory != null)
+            {
+                var candidate = Path.Combine(directory.FullName, relativePath);
+                if (File.Exists(candidate)) return candidate;
+                directory = directory.Parent;
+            }
+            throw new FileNotFoundException("Repository file not found.", relativePath);
+        }
     }
 }

@@ -654,6 +654,58 @@ namespace BlueBrick.UI.Tests.Agent
             Assert.AreEqual("CONFIG_PRESENT_INVALID", fallbackSeen.ConfigurationDiagnostics.ConfigurationLoadStatus);
         }
 
+        [TestMethod]
+        public void LabController_ReloadUsesManagedRestartAndGuardedDirectLoad()
+        {
+            var script = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "bluebrick.ps1")));
+            var control = File.ReadAllText(FindRepositoryFile(Path.Combine("tools", "lab-addin-control.vbs")));
+
+            StringAssert.Contains(script, "[ValidateSet('doctor','build','prepare','launch','reload','smoke','rollback')]");
+            StringAssert.Contains(script, "Stop-LabSolidWorksForReload $SolidWorksPid");
+            StringAssert.Contains(script, "Start-LabSolidWorks $RunId");
+            StringAssert.Contains(script, "Invoke-LabAddInControl 'probe'");
+            StringAssert.Contains(script, "Wait-LabAddInControlReady $process.Id 60");
+            StringAssert.Contains(script, "no force-close was attempted");
+            StringAssert.Contains(script, "SOLIDWORKS process exists but its ownership record is missing; Lab rollback was refused.");
+            StringAssert.Contains(script, "$record.startedUtc -is [datetime]");
+            StringAssert.Contains(script, "SOLIDWORKS is running; unload the Lab add-in before rollback.");
+            Assert.IsTrue(script.IndexOf("Stop-Process", StringComparison.OrdinalIgnoreCase) < 0);
+            Assert.IsTrue(script.IndexOf(".Kill(", StringComparison.OrdinalIgnoreCase) < 0);
+
+            StringAssert.Contains(control, "sw.LoadAddIn(dllPath)");
+            StringAssert.Contains(control, "sw.UnloadAddIn(dllPath)");
+            StringAssert.Contains(control, "sw.ExitApp");
+            StringAssert.Contains(control, "RefusingExit=ActiveDocumentPresent");
+            StringAssert.Contains(control, "SOLIDWORKS ActiveDoc query failed=");
+            StringAssert.Contains(control, "LoadAddInFailed=");
+            StringAssert.Contains(control, "UnloadAddInFailed=");
+        }
+
+        [TestMethod]
+        public void LabController_ReloadDryRunDoesNotRequireOwnedPid()
+        {
+            var script = File.ReadAllText(FindRepositoryFile(Path.Combine("scripts", "bluebrick.ps1")));
+            var reloadStart = script.IndexOf("    'reload' {", StringComparison.Ordinal);
+            var smokeStart = script.IndexOf("    'smoke' {", StringComparison.Ordinal);
+            var reload = script.Substring(reloadStart, smokeStart - reloadStart);
+
+            StringAssert.Contains(reload, "if (-not $Execute)");
+            StringAssert.Contains(reload, "reload requires -Execute");
+            Assert.IsTrue(reload.IndexOf("if (-not $Execute)", StringComparison.Ordinal) < reload.IndexOf("Stop-LabSolidWorksForReload $SolidWorksPid", StringComparison.Ordinal));
+        }
+
+        private static string FindRepositoryFile(string relativePath)
+        {
+            var directory = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+            while (directory != null)
+            {
+                var candidate = Path.Combine(directory.FullName, relativePath);
+                if (File.Exists(candidate)) return candidate;
+                directory = directory.Parent;
+            }
+            throw new FileNotFoundException("Repository file not found.", relativePath);
+        }
+
         private static string CreateConfigRoot()
         {
             var root = Path.Combine(

@@ -9,7 +9,7 @@
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [ValidateSet('doctor','build','prepare','launch','smoke','rollback')]
+    [ValidateSet('doctor','build','prepare','launch','reload','smoke','rollback')]
     [string]$Action = 'doctor',
     [ValidateSet('Lab')]
     [string]$Target = 'Lab',
@@ -17,6 +17,8 @@ param(
     [string]$Configuration = 'Lab',
     [string]$BackupRoot = '',
     [string]$RunId = '',
+    [ValidateRange(0, 2147483647)]
+    [int]$SolidWorksPid = 0,
     [switch]$Execute,
     [switch]$LibraryOnly,
     [switch]$Json
@@ -34,6 +36,10 @@ $sourceFrontendRoot = Join-Path $repo 'AssistantWeb\dist'
 $labFrontendSource = Join-Path $repo 'bin\Lab\AssistantWeb\dist'
 $labFrontendTarget = Join-Path $labRoot 'AssistantWeb\dist'
 $labRuntimeManifestTarget = Join-Path $labRoot 'runtime-manifest.json'
+$labOwnedProcessTarget = Join-Path $labRoot 'owned-solidworks-process.json'
+$labAddInControl = Join-Path $repo 'tools\lab-addin-control.vbs'
+$labStartupLog = Join-Path $labRoot 'bluebrick-startup.log'
+$labBridgePort = 17179
 $labCatalogSource = Join-Path $repo 'SharedAI\catalog'
 $labCatalogTarget = Join-Path $labRoot 'SharedAI\catalog'
 $requiredCatalogArtifacts = @('providers.json','models.json','routes.json')
@@ -250,6 +256,149 @@ function Resolve-SolidWorks {
     }
     return $null
 }
+function Get-LabLogLength {
+    if (Test-Path -LiteralPath $labStartupLog) { return (Get-Item -LiteralPath $labStartupLog).Length }
+    return 0
+}
+function Assert-NoSolidWorksProcess {
+    $processes = @(Get-Process -Name SLDWORKS -ErrorAction SilentlyContinue)
+    if ($processes.Count -ne 0) { Fail 'SOLIDWORKS is already running; refusing ambiguous Lab launch.' }
+}
+function Wait-SolidWorksMainWindow([Diagnostics.Process]$process) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(120)
+    do {
+        $process.Refresh()
+        if ($process.HasExited) { Fail "SOLIDWORKS exited before its main window was ready (pid=$($process.Id))." }
+        if ($process.MainWindowHandle -ne 0 -and $process.MainWindowTitle -and $process.MainWindowTitle -notmatch '^(splash|SOLIDWORKS Professional \d+ SP\d+\.\d+ - Loading.*)$') { return $process }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Fail "SOLIDWORKS main window did not become ready (pid=$($process.Id))."
+}
+function Write-LabOwnedProcessRecord([Diagnostics.Process]$process, [string]$buildId) {
+    $record = [ordered]@{
+        schema = 'bluebrick-lab-owned-process.v1'
+        pid = $process.Id
+        startedUtc = $process.StartTime.ToUniversalTime().ToString('o')
+        executable = [IO.Path]::GetFullPath($process.Path)
+        user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        buildId = $buildId
+        recordedUtc = [DateTime]::UtcNow.ToString('o')
+    }
+    $record | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $labOwnedProcessTarget -Encoding UTF8
+}
+function Read-LabOwnedProcessRecord {
+    if (-not (Test-Path -LiteralPath $labOwnedProcessTarget)) { Fail "Owned SOLIDWORKS record not found: $labOwnedProcessTarget" }
+    return Read-ContractJson $labOwnedProcessTarget
+}
+function Assert-OwnedSolidWorksProcess([int]$expectedPid) {
+    if ($expectedPid -le 0) { Fail 'reload requires -SolidWorksPid for the owned Lab process.' }
+    $processes = @(Get-Process -Name SLDWORKS -ErrorAction SilentlyContinue)
+    if ($processes.Count -ne 1) { Fail "Expected exactly one SOLIDWORKS process; observed $($processes.Count)." }
+    $process = $processes[0]
+    if ($process.Id -ne $expectedPid) { Fail "SOLIDWORKS pid mismatch: expected $expectedPid, observed $($process.Id)." }
+    $expectedExecutable = Resolve-SolidWorks
+    $actualExecutable = if ($process.Path) { [IO.Path]::GetFullPath($process.Path) } else { '' }
+    if (-not $expectedExecutable -or -not $actualExecutable -or -not $actualExecutable.Equals([IO.Path]::GetFullPath($expectedExecutable), [StringComparison]::OrdinalIgnoreCase)) {
+        Fail "SOLIDWORKS executable mismatch: expected '$expectedExecutable', observed '$actualExecutable'."
+    }
+    $record = Read-LabOwnedProcessRecord
+    if ($record.schema -cne 'bluebrick-lab-owned-process.v1' -or [int]$record.pid -ne $process.Id) { Fail 'Owned SOLIDWORKS record does not match the target process.' }
+    if ($record.user -cne [Security.Principal.WindowsIdentity]::GetCurrent().Name) { Fail 'Owned SOLIDWORKS record belongs to a different Windows user.' }
+    if (-not $actualExecutable.Equals([IO.Path]::GetFullPath([string]$record.executable), [StringComparison]::OrdinalIgnoreCase)) { Fail 'Owned SOLIDWORKS executable record mismatch.' }
+    $expectedStart = if ($record.startedUtc -is [datetime]) {
+        ([datetime]$record.startedUtc).ToUniversalTime()
+    } else {
+        [datetime]::Parse([string]$record.startedUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    }
+    if ([math]::Abs(($process.StartTime.ToUniversalTime() - $expectedStart).TotalSeconds) -gt 1) { Fail 'Owned SOLIDWORKS start-time record mismatch.' }
+    return $process
+}
+function Assert-DeployedLabIdentity {
+    Assert-FrontendParity $labFrontendSource $labFrontendTarget 'build-to-deployed frontend'
+    if (-not (Test-Path -LiteralPath $labRuntimeManifestTarget)) { Fail "Lab runtime manifest not found: $labRuntimeManifestTarget" }
+    $manifest = Read-ContractJson $labRuntimeManifestTarget
+    if ($manifest.schema -cne 'bluebrick-lab-runtime-manifest.v2' -or $manifest.channel -cne 'Lab') { Fail 'Lab runtime manifest identity is invalid.' }
+    if ([int]$manifest.bridgePort -ne $labBridgePort) { Fail "Lab runtime manifest bridge port mismatch: $($manifest.bridgePort)." }
+    if (-not ([IO.Path]::GetFullPath([string]$manifest.dll.path)).Equals([IO.Path]::GetFullPath($labTarget), [StringComparison]::OrdinalIgnoreCase)) { Fail 'Lab runtime manifest DLL path mismatch.' }
+    foreach ($pair in @(@($labTarget, [string]$manifest.dll.sha256), @($labConfigTarget, [string]$manifest.config.sha256))) {
+        if ((Get-FileHash -LiteralPath $pair[0] -Algorithm SHA256).Hash -ine $pair[1]) { Fail "Deployed Lab identity mismatch: $($pair[0])" }
+    }
+    foreach ($name in $requiredFrontendArtifacts) {
+        $expected = [string]$manifest.frontend.artifacts.$name.sha256
+        if ((Get-FileHash -LiteralPath (Join-Path $labFrontendTarget $name) -Algorithm SHA256).Hash -ine $expected) { Fail "Deployed frontend identity mismatch: $name" }
+    }
+    return $manifest
+}
+function Invoke-LabAddInControl([string]$mode, [int]$expectedPid) {
+    $process = Assert-OwnedSolidWorksProcess $expectedPid
+    if (-not (Test-Path -LiteralPath $labAddInControl)) { Fail "Lab add-in control helper not found: $labAddInControl" }
+    & cscript.exe //nologo $labAddInControl $mode $labTarget
+    if ($LASTEXITCODE -ne 0) { Fail "Lab add-in control '$mode' failed for pid=$($process.Id) with exit $LASTEXITCODE." }
+}
+function Wait-LabAddInControlReady([int]$expectedPid, [int]$timeoutSeconds = 60) {
+    $process = Assert-OwnedSolidWorksProcess $expectedPid
+    if (-not (Test-Path -LiteralPath $labAddInControl)) { Fail "Lab add-in control helper not found: $labAddInControl" }
+    $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
+    do {
+        $output = @(& cscript.exe //nologo $labAddInControl 'probe' $labTarget 2>&1)
+        $code = $LASTEXITCODE
+        if ($code -eq 0) { return }
+        if ($code -ne 69) { Fail "Lab add-in control probe failed for pid=$($process.Id) with exit ${code}: $($output -join ' ')" }
+        $process.Refresh()
+        if ($process.HasExited) { Fail "SOLIDWORKS exited before its COM object became available (pid=$($process.Id))." }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Fail "SOLIDWORKS COM object did not become available within $timeoutSeconds seconds (pid=$($process.Id))."
+}
+function Wait-LabBridge([bool]$expected, [int]$timeoutSeconds = 30) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
+    do {
+        $listener = @(Get-NetTCPConnection -State Listen -LocalPort $labBridgePort -ErrorAction SilentlyContinue).Count -gt 0
+        if ($listener -eq $expected) { return }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Fail "Lab bridge port $labBridgePort did not reach expected state '$expected'."
+}
+function Wait-LabLoadEvidence([Diagnostics.Process]$process, [long]$logLength) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    do {
+        $process.Refresh()
+        if ($process.HasExited) { Fail "SOLIDWORKS exited during direct Lab load (pid=$($process.Id))." }
+        $listener = @(Get-NetTCPConnection -State Listen -LocalPort $labBridgePort -ErrorAction SilentlyContinue).Count -gt 0
+        $appended = ''
+        if (Test-Path -LiteralPath $labStartupLog) {
+            $text = [IO.File]::ReadAllText($labStartupLog)
+            $appended = if ($text.Length -gt $logLength) { $text.Substring([int]$logLength) } else { $text }
+        }
+        if ($listener -and $appended.Contains('ConnectToSW success')) { return }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Fail "Direct Lab load did not produce both ConnectToSW success and port $labBridgePort within 60 seconds."
+}
+function Start-LabSolidWorks([string]$buildId) {
+    Assert-NoSolidWorksProcess
+    $sw = Resolve-SolidWorks
+    if (-not $sw) { Fail 'SOLIDWORKS executable was not found; Lab deployment remains staged.' }
+    $logLength = Get-LabLogLength
+    $process = Start-Process -FilePath $sw -PassThru
+    Write-LabOwnedProcessRecord $process $buildId
+    Wait-SolidWorksMainWindow $process | Out-Null
+    Wait-LabAddInControlReady $process.Id 60
+    Invoke-LabAddInControl 'load' $process.Id
+    Wait-LabLoadEvidence $process $logLength
+    Write-Step "SOLIDWORKS Lab direct load verified pid=$($process.Id) bridge=$labBridgePort"
+    return $process
+}
+function Stop-LabSolidWorksForReload([int]$expectedPid) {
+    $process = Assert-OwnedSolidWorksProcess $expectedPid
+    Invoke-LabAddInControl 'probe' $process.Id
+    Invoke-LabAddInControl 'unload' $process.Id
+    Wait-LabBridge $false 30
+    Invoke-LabAddInControl 'exit' $process.Id
+    if (-not $process.WaitForExit(30000)) { Fail "Owned SOLIDWORKS process did not exit within 30 seconds (pid=$($process.Id)); no force-close was attempted." }
+    if (Test-Path -LiteralPath $labOwnedProcessTarget) { Remove-Item -LiteralPath $labOwnedProcessTarget -Force }
+    Write-Step "Owned SOLIDWORKS process exited cleanly pid=$expectedPid"
+}
 function Invoke-Build([string]$configuration) {
     $msbuild = Resolve-MSBuild
     $project = if ($configuration -eq 'Lab') { Join-Path $repo 'BlueBrick.csproj' } else { Join-Path $repo 'BlueBrick.sln' }
@@ -355,6 +504,7 @@ function Write-LabRuntimeManifest([string]$deploymentRunId) {
     Write-Step "runtime manifest written: $labRuntimeManifestTarget"
 }
 function Invoke-LabRollback([string]$root) {
+    if (@(Get-Process -Name SLDWORKS -ErrorAction SilentlyContinue).Count -gt 0) { Fail 'SOLIDWORKS is running; unload the Lab add-in before rollback.' }
     if ([string]::IsNullOrWhiteSpace($root)) { Fail 'rollback requires -BackupRoot pointing to one exact Lab backup.' }
     Assert-LabPath $root 'BackupRoot'
     Assert-NoReparseTree $root
@@ -407,6 +557,7 @@ function Invoke-LabRollback([string]$root) {
         & reg.exe import $regFile.FullName | Out-Null
         if ($LASTEXITCODE -ne 0) { Fail "Lab registry restore failed: $($regFile.FullName)" }
     }
+    if (Test-Path -LiteralPath $labOwnedProcessTarget) { Remove-Item -LiteralPath $labOwnedProcessTarget -Force }
     Write-Step 'rollback complete; Production paths were not targeted'
 }
 
@@ -434,10 +585,11 @@ switch ($Action) {
     'launch' {
         Assert-Source
         if (-not $Execute) {
-            Write-Step "dry-run Lab launch: backup $labRoot, copy Lab DLL/config, register PerUser Lab, start SOLIDWORKS"
+            Write-Step "dry-run Lab launch: backup $labRoot, copy Lab DLL/config, register PerUser Lab, start owned SOLIDWORKS, direct-load Lab, verify port $labBridgePort"
             Write-Step 'no changes made; re-run with -Execute after T0-T3 and rollback gates are green'
             break
         }
+        Assert-NoSolidWorksProcess
         $runRoot = New-LabBackup
         try {
             $stagingRoot = Join-Path $labRoot ('.staging-' + [Guid]::NewGuid().ToString('N'))
@@ -470,15 +622,43 @@ switch ($Action) {
             Invoke-PowerShell $register @('-Mode','PerUser','-LabDllPath',$labTarget,'-BackupRoot',(Join-Path $runRoot 'registry'))
             Remove-Item -LiteralPath $stagingRoot -Recurse -Force
             Write-Step "Lab deployment verified: $labTarget"
-            $sw = Resolve-SolidWorks
-            if (-not $sw) { Fail 'SOLIDWORKS executable was not found on PATH; Lab deployment remains staged.' }
-            $process = Start-Process -FilePath $sw -PassThru
-            Write-Step "SOLIDWORKS launch requested pid=$($process.Id); use smoke to collect read-only Lab registration/process evidence"
+            $effectiveRunId = Get-FrontendBuildId $labFrontendTarget $RunId
+            Start-LabSolidWorks $effectiveRunId | Out-Null
         } catch {
+            $solidWorksProcesses = @(Get-Process -Name SLDWORKS -ErrorAction SilentlyContinue)
+            if ($solidWorksProcesses.Count -gt 0) {
+                if (-not (Test-Path -LiteralPath $labOwnedProcessTarget)) {
+                    Write-Step 'SOLIDWORKS process exists but its ownership record is missing; Lab rollback was refused.'
+                    throw
+                }
+                try {
+                    $owned = Read-LabOwnedProcessRecord
+                    Stop-LabSolidWorksForReload ([int]$owned.pid)
+                }
+                catch {
+                    Write-Step 'Owned SOLIDWORKS cleanup failed; Lab rollback was refused to avoid replacing loaded files.'
+                    throw
+                }
+            }
             Write-Step "Lab launch failed; attempting automatic Lab-only rollback from $runRoot"
             Invoke-LabRollback $runRoot
             throw
         }
+    }
+    'reload' {
+        if ([string]::IsNullOrWhiteSpace($RunId)) { $RunId = Get-FrontendBuildId $labFrontendSource }
+        Assert-Source
+        $manifest = Assert-DeployedLabIdentity
+        if ($manifest.buildId -cne $RunId) { Fail "Reload run id mismatch: manifest '$($manifest.buildId)', requested '$RunId'." }
+        if (-not $Execute) {
+            Write-Step "dry-run Lab reload: verify owned pid=$SolidWorksPid and empty document state, unload Lab, exit without force-close, start a fresh process, direct-load $RunId, verify port $labBridgePort"
+            Write-Step 'no changes made; reload requires -Execute'
+            break
+        }
+        $owned = Read-LabOwnedProcessRecord
+        if ($owned.buildId -cne $RunId) { Fail "Owned process build mismatch: record '$($owned.buildId)', requested '$RunId'." }
+        Stop-LabSolidWorksForReload $SolidWorksPid
+        Start-LabSolidWorks $RunId | Out-Null
     }
     'smoke' {
         Assert-Source

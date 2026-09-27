@@ -13,6 +13,100 @@ using Newtonsoft.Json.Linq;
 
 namespace BlueBrick
 {
+    internal sealed class AssistantPreviewLifetime : IDisposable
+    {
+        private readonly object _sync = new object();
+        private readonly TaskCompletionSource<bool> _pageReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly CancellationTokenSource _lifetimeCts = new CancellationTokenSource();
+        private readonly CancellationToken _token;
+        private CancellationTokenSource _streamCts;
+        private bool _closing;
+
+        public AssistantPreviewLifetime()
+        {
+            _token = _lifetimeCts.Token;
+        }
+
+        public bool IsClosing
+        {
+            get { lock (_sync) return _closing; }
+        }
+
+        public CancellationToken Token
+        {
+            get { return _token; }
+        }
+
+        public Task PageReady
+        {
+            get { return _pageReady.Task; }
+        }
+
+        public bool TrySetPageReady()
+        {
+            lock (_sync)
+            {
+                if (_closing) return false;
+                return _pageReady.TrySetResult(true);
+            }
+        }
+
+        public CancellationTokenSource BeginStream()
+        {
+            CancellationTokenSource previous;
+            CancellationTokenSource current;
+            lock (_sync)
+            {
+                if (_closing) return null;
+                previous = _streamCts;
+                current = new CancellationTokenSource();
+                _streamCts = current;
+            }
+            if (previous != null)
+            {
+                try { previous.Cancel(); } catch { }
+                previous.Dispose();
+            }
+            return current;
+        }
+
+        public void EndStream(CancellationTokenSource streamCts)
+        {
+            if (streamCts == null) return;
+            lock (_sync)
+            {
+                if (ReferenceEquals(_streamCts, streamCts)) _streamCts = null;
+            }
+            streamCts.Dispose();
+        }
+
+        public bool TryBeginClose()
+        {
+            CancellationTokenSource activeStream;
+            lock (_sync)
+            {
+                if (_closing) return false;
+                _closing = true;
+                activeStream = _streamCts;
+                _streamCts = null;
+                _pageReady.TrySetResult(false);
+            }
+            try { _lifetimeCts.Cancel(); } catch { }
+            if (activeStream != null)
+            {
+                try { activeStream.Cancel(); } catch { }
+                activeStream.Dispose();
+            }
+            return true;
+        }
+
+        public void Dispose()
+        {
+            TryBeginClose();
+            _lifetimeCts.Dispose();
+        }
+    }
+
     public class FrmAssistantWindow : Form
     {
         private readonly WebView2 _webView;
@@ -29,13 +123,14 @@ namespace BlueBrick
         private readonly Button _toggleMode;
         private readonly Label _status;
         private readonly TextBox _previewInfo;
-        private readonly TaskCompletionSource<bool> _pageReady = new TaskCompletionSource<bool>();
+        private readonly AssistantPreviewLifetime _lifetime = new AssistantPreviewLifetime();
+        private EventHandler<CoreWebView2NavigationStartingEventArgs> _navigationStartingHandler;
+        private EventHandler<CoreWebView2NewWindowRequestedEventArgs> _newWindowRequestedHandler;
         private string _sessionId;
         private string _pendingAttachment;
         private string _assistantMode;
         private string _activeModel = "AionUI";
         private bool _isStreaming;
-        private CancellationTokenSource _streamCts;
         private bool _initialized;
         private bool _initFailed;
         private readonly object _errorLogLock = new object();
@@ -106,15 +201,23 @@ namespace BlueBrick
             _toggleMode.Click += async (s, e) => await ToggleModeAsync();
             _send.Click += async (s, e) => await SendAsync();
             Shown += async (s, e) => await InitializeAsync();
-            _webView.NavigationCompleted += (s, e) => _pageReady.TrySetResult(true);
+            _webView.NavigationCompleted += (s, e) => _lifetime.TrySetPageReady();
         }
+
+    private bool CanInteract
+    {
+        get { return !_lifetime.IsClosing && !IsDisposed && _webView != null && !_webView.IsDisposed; }
+    }
 
     private async Task InitializeAsync()
     {
         try
         {
+            if (!CanInteract) return;
             var env = await CoreWebView2Environment.CreateAsync(userDataFolder: Path.GetTempPath());
+            if (!CanInteract) return;
             await _webView.EnsureCoreWebView2Async(env);
+            if (!CanInteract) return;
 
             _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
@@ -122,34 +225,76 @@ namespace BlueBrick
             _webView.CoreWebView2.Settings.IsWebMessageEnabled = false;
             _webView.CoreWebView2.Settings.IsScriptEnabled = true;
 
-            _webView.CoreWebView2.NavigationStarting += (s, e) =>
+            _navigationStartingHandler = (s, e) =>
             {
                 if (!AssistantWebViewSecurity.IsNavigationAllowed(e.Uri))
                 {
                     e.Cancel = true;
                 }
             };
-            _webView.CoreWebView2.NewWindowRequested += (s, e) =>
-            {
-                e.Handled = true;
-            };
+            _newWindowRequestedHandler = (s, e) => e.Handled = true;
+            _webView.CoreWebView2.NavigationStarting += _navigationStartingHandler;
+            _webView.CoreWebView2.NewWindowRequested += _newWindowRequestedHandler;
             _webView.NavigateToString(BuildShellHtml());
-            await _pageReady.Task;
+            await _lifetime.PageReady;
+            if (!CanInteract) return;
 
             _initialized = true;
             await RefreshStatusAsync();
-            await StartSessionAsync();
+            if (CanInteract) await StartSessionAsync();
+        }
+        catch (OperationCanceledException) when (_lifetime.IsClosing)
+        {
         }
         catch (Exception)
         {
+            if (_lifetime.IsClosing || IsDisposed) return;
             _initFailed = true;
             _status.Text = "WebView2 unavailable";
         }
     }
 
+    private async Task<bool> ExecuteScriptIfActiveAsync(string script)
+    {
+        if (!CanInteract) return false;
+        try
+        {
+            await _webView.ExecuteScriptAsync(script);
+            return true;
+        }
+        catch (Exception)
+        {
+            if (_lifetime.IsClosing || IsDisposed) return false;
+            throw;
+        }
+    }
+
+    private void DetachCoreHandlers()
+    {
+        try
+        {
+            if (_webView?.CoreWebView2 == null) return;
+            if (_navigationStartingHandler != null)
+            {
+                _webView.CoreWebView2.NavigationStarting -= _navigationStartingHandler;
+                _navigationStartingHandler = null;
+            }
+            if (_newWindowRequestedHandler != null)
+            {
+                _webView.CoreWebView2.NewWindowRequested -= _newWindowRequestedHandler;
+                _newWindowRequestedHandler = null;
+            }
+        }
+        catch
+        {
+        }
+    }
+
         private async Task StartSessionAsync()
         {
-            var result = await AgentPanelClient.PostJsonAsync("/assistant/session", new JObject());
+            if (!CanInteract) return;
+            var result = await AgentPanelClient.PostJsonAsync("/assistant/session", new JObject(), _lifetime.Token);
+            if (!CanInteract) return;
             if (!result.Ok)
             {
                 _status.Text = result.Error;
@@ -160,12 +305,14 @@ namespace BlueBrick
             _pendingAttachment = null;
             _status.Text = "Session ready";
             await ResetTranscriptAsync();
-            await RefreshStatusAsync();
+            if (CanInteract) await RefreshStatusAsync();
         }
 
         private async Task RefreshStatusAsync()
         {
+            if (!CanInteract) return;
             var result = await AgentPanelClient.GetJsonAsync("/assistant/status");
+            if (!CanInteract) return;
             if (!result.Ok)
             {
                 _status.Text = result.Error;
@@ -210,16 +357,21 @@ namespace BlueBrick
 
             try
             {
-                await _webView.ExecuteScriptAsync("if(window.bbSetModel)window.bbSetModel(" + JsonConvert.SerializeObject(_activeModel) + ");");
+                await ExecuteScriptIfActiveAsync("if(window.bbSetModel)window.bbSetModel(" + JsonConvert.SerializeObject(_activeModel) + ");");
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         private async Task CaptureAsync()
         {
+            if (!CanInteract) return;
             if (string.IsNullOrWhiteSpace(_sessionId)) await StartSessionAsync();
+            if (!CanInteract) return;
             var payload = new JObject { ["sessionId"] = _sessionId };
-            var result = await AgentPanelClient.PostJsonAsync("/assistant/screenshot", payload);
+            var result = await AgentPanelClient.PostJsonAsync("/assistant/screenshot", payload, _lifetime.Token);
+            if (!CanInteract) return;
             if (!result.Ok)
             {
                 _status.Text = result.Error;
@@ -232,6 +384,7 @@ namespace BlueBrick
 
         private void Attach_Click(object sender, EventArgs e)
         {
+            if (!CanInteract) return;
             using (var dialog = new OpenFileDialog())
             {
                 dialog.Filter = "Images and PDFs|*.png;*.jpg;*.jpeg;*.bmp;*.pdf";
@@ -243,13 +396,16 @@ namespace BlueBrick
 
         private async Task SendAsync()
         {
+            if (!CanInteract) return;
             var text = _input.Text.Trim();
             if ((text.Length == 0 || text == "Chat") && string.IsNullOrWhiteSpace(_pendingAttachment)) return;
             if (text == "Chat") text = "";
             if (string.IsNullOrWhiteSpace(_sessionId)) await StartSessionAsync();
+            if (!CanInteract) return;
 
             var userText = text;
             await AppendMessageAsync("user", userText, _pendingAttachment);
+            if (!CanInteract) return;
             _input.Text = "";
 
             var payload = new JObject
@@ -262,13 +418,11 @@ namespace BlueBrick
             };
             _pendingAttachment = null;
 
+            var streamCts = _lifetime.BeginStream();
+            if (streamCts == null) return;
             _isStreaming = true;
-            _streamCts?.Cancel();
-            _streamCts?.Dispose();
-            _streamCts = new CancellationTokenSource();
-
             _status.Text = _activeModel;
-            await _webView.ExecuteScriptAsync("window.bbTypingStart();");
+            await ExecuteScriptIfActiveAsync("window.bbTypingStart();");
 
             var fullResponse = new StringBuilder();
             try
@@ -282,20 +436,20 @@ namespace BlueBrick
                         if (textChunk != null)
                         {
                             fullResponse.Append(textChunk);
-                            _webView.ExecuteScriptAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject(textChunk) + ");");
+                            _ = ExecuteScriptIfActiveAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject(textChunk) + ");");
                         }
                     }
                     catch
                     {
                         fullResponse.Append(chunk);
-                        _webView.ExecuteScriptAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject(chunk) + ");");
+                        _ = ExecuteScriptIfActiveAsync("window.bbAppendChunk(" + JsonConvert.SerializeObject(chunk) + ");");
                     }
-                }, _streamCts.Token);
+                }, streamCts.Token);
 
                 var finalText = fullResponse.ToString();
                 if (string.IsNullOrWhiteSpace(finalText))
                 {
-                    var fallback = await AgentPanelClient.PostJsonAsync("/assistant/message", payload);
+                    var fallback = await AgentPanelClient.PostJsonAsync("/assistant/message", payload, streamCts.Token);
                     if (fallback.Ok)
                     {
                         var error = fallback.Data.Value<string>("error");
@@ -322,34 +476,45 @@ namespace BlueBrick
                     }
                 }
 
-                await _webView.ExecuteScriptAsync("window.bbTypingStop();");
+                await ExecuteScriptIfActiveAsync("window.bbTypingStop();");
                 await AppendMessageAsync("assistant", finalText, null);
             }
             catch (OperationCanceledException)
             {
-                await _webView.ExecuteScriptAsync("window.bbTypingStop();");
+                await ExecuteScriptIfActiveAsync("window.bbTypingStop();");
             }
             catch (Exception ex)
             {
-                await _webView.ExecuteScriptAsync("window.bbTypingStop();");
+                if (!CanInteract) return;
+                await ExecuteScriptIfActiveAsync("window.bbTypingStop();");
                 await AppendMessageAsync("assistant", "Request failed: " + ex.Message, null);
                 await LogErrorAsync(ex.Message, ex.StackTrace, "SendAsync-streaming");
             }
             finally
             {
                 _isStreaming = false;
-                _streamCts?.Dispose();
-                _streamCts = null;
-                _status.Text = "Ready";
-                await RefreshStatusAsync();
-                await SaveSessionAsync();
+                _lifetime.EndStream(streamCts);
+                if (CanInteract)
+                {
+                    try
+                    {
+                        _status.Text = "Ready";
+                        await RefreshStatusAsync();
+                        if (CanInteract) await SaveSessionAsync();
+                    }
+                    catch
+                    {
+                    }
+                }
             }
         }
 
         private async Task TestConnectionAsync()
         {
+            if (!CanInteract) return;
             _status.Text = "Testing assistant...";
-            var result = await AgentPanelClient.PostJsonAsync("/assistant/test", new JObject());
+            var result = await AgentPanelClient.PostJsonAsync("/assistant/test", new JObject(), _lifetime.Token);
+            if (!CanInteract) return;
             if (!result.Ok)
             {
                 _status.Text = result.Error;
@@ -369,8 +534,10 @@ namespace BlueBrick
 
         private async Task ToggleModeAsync()
         {
+            if (!CanInteract) return;
             var nextMode = string.Equals(_assistantMode, "real", StringComparison.OrdinalIgnoreCase) ? "mock" : "real";
-            var result = await AgentPanelClient.PostJsonAsync("/assistant/mode", new JObject { ["mode"] = nextMode });
+            var result = await AgentPanelClient.PostJsonAsync("/assistant/mode", new JObject { ["mode"] = nextMode }, _lifetime.Token);
+            if (!CanInteract) return;
             if (!result.Ok)
             {
                 _status.Text = result.Error;
@@ -382,10 +549,12 @@ namespace BlueBrick
 
         private async Task OpenChatGptAsync()
         {
+            if (!CanInteract) return;
             if (string.IsNullOrWhiteSpace(_sessionId))
             {
                 await StartSessionAsync();
             }
+            if (!CanInteract) return;
 
             _status.Text = "Preparing ChatGPT handoff...";
             var payload = new JObject();
@@ -394,7 +563,8 @@ namespace BlueBrick
                 payload["lastScreenshotPath"] = _pendingAttachment;
             }
 
-            var result = await AgentPanelClient.PostJsonAsync("/chatgpt/session/create", payload);
+            var result = await AgentPanelClient.PostJsonAsync("/chatgpt/session/create", payload, _lifetime.Token);
+            if (!CanInteract) return;
             if (!result.Ok)
             {
                 _status.Text = result.Error;
@@ -434,31 +604,35 @@ namespace BlueBrick
 
         private async Task CallVaultAsync(string path, string statusText)
         {
-            var result = await AgentPanelClient.PostJsonAsync(path, new JObject());
+            if (!CanInteract) return;
+            var result = await AgentPanelClient.PostJsonAsync(path, new JObject(), _lifetime.Token);
+            if (!CanInteract) return;
             _status.Text = result.Ok ? statusText : result.Error;
             await RefreshStatusAsync();
         }
 
         private void OpenWorkingFolder()
         {
+            if (!CanInteract) return;
             Directory.CreateDirectory(AppIdentity.DefaultWorkingFolder);
             Process.Start("explorer.exe", AppIdentity.DefaultWorkingFolder);
         }
 
         private async Task ResetTranscriptAsync()
         {
-            await _webView.ExecuteScriptAsync("window.bbReset();");
+            await ExecuteScriptIfActiveAsync("window.bbReset();");
         }
 
         private async Task AppendMessageAsync(string role, string text, string attachmentPath)
         {
+            if (!CanInteract) return;
             var payload = new JObject
             {
                 ["role"] = role,
                 ["text"] = text ?? string.Empty,
                 ["attachment"] = attachmentPath == null ? string.Empty : Path.GetFileName(attachmentPath)
             };
-            await _webView.ExecuteScriptAsync("window.bbAppend(" + payload.ToString(Formatting.None) + ");");
+            await ExecuteScriptIfActiveAsync("window.bbAppend(" + payload.ToString(Formatting.None) + ");");
         }
 
     private async Task LogErrorAsync(string error, string stack, string context)
@@ -489,25 +663,77 @@ namespace BlueBrick
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(_sessionId)) return;
+                if (!CanInteract || string.IsNullOrWhiteSpace(_sessionId)) return;
                 var dir = AppIdentity.AssistantHistoryRoot;
                 Directory.CreateDirectory(dir);
                 var path = Path.Combine(dir, "session-" + _sessionId + ".json");
-        var transcript = await _webView.ExecuteScriptAsync("window.bbGetTranscript ? window.bbGetTranscript() : [];");
-        JArray transcriptArr;
-        try { transcriptArr = JArray.Parse(transcript ?? "[]"); }
-        catch { transcriptArr = new JArray(); }
-        var session = new JObject
-        {
-            ["sessionId"] = _sessionId,
-            ["savedUtc"] = DateTime.UtcNow.ToString("o"),
-            ["model"] = _activeModel ?? "",
-            ["mode"] = _assistantMode ?? "",
-            ["transcript"] = transcriptArr
+                if (!CanInteract) return;
+                var transcript = await _webView.ExecuteScriptAsync("window.bbGetTranscript ? window.bbGetTranscript() : [];");
+                if (!CanInteract) return;
+                JArray transcriptArr;
+                try { transcriptArr = JArray.Parse(transcript ?? "[]"); }
+                catch { transcriptArr = new JArray(); }
+                var session = new JObject
+                {
+                    ["sessionId"] = _sessionId,
+                    ["savedUtc"] = DateTime.UtcNow.ToString("o"),
+                    ["model"] = _activeModel ?? "",
+                    ["mode"] = _assistantMode ?? "",
+                    ["transcript"] = transcriptArr
                 };
                 await Task.Run(() => File.WriteAllText(path, session.ToString(Formatting.Indented)));
             }
-            catch { }
+            catch
+            {
+            }
+        }
+
+        internal void CloseAssistantPreview()
+        {
+            if (IsDisposed)
+            {
+                _lifetime.Dispose();
+                return;
+            }
+            if (InvokeRequired)
+            {
+                if (IsHandleCreated)
+                {
+                    BeginInvoke(new Action(CloseAssistantPreview));
+                }
+                else
+                {
+                    _lifetime.Dispose();
+                }
+                return;
+            }
+            _lifetime.Dispose();
+            try
+            {
+                Hide();
+                Close();
+            }
+            catch
+            {
+                Dispose();
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _lifetime.Dispose();
+                DetachCoreHandlers();
+                try
+                {
+                    if (_webView != null && !_webView.IsDisposed) _webView.Dispose();
+                }
+                catch
+                {
+                }
+            }
+            base.Dispose(disposing);
         }
 
         private static string BuildShellHtml()

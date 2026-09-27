@@ -218,9 +218,9 @@ namespace BlueBrick
                         addInKey.SetValue("Icon Path", sPath);
                     }
 
-                    keyName = "Software\\SolidWorks\\AddInsStartup\\{" + t.GUID + "}";
                 }
 
+                keyName = "Software\\SolidWorks\\AddInsStartup\\{" + t.GUID + "}";
                 addInKey = hkcu.CreateSubKey(keyName);
                 addInKey?.SetValue(null, Convert.ToInt32(SWattr.LoadAtStartup), RegistryValueKind.DWord);
             }
@@ -467,44 +467,75 @@ namespace BlueBrick
 
         public bool DisconnectFromSW()
         {
-            if (_developmentSandbox != null)
+            TraceDiagnostic("DisconnectFromSW start");
+            RunCleanupStep("development sandbox", () =>
             {
-                if (!_developmentSandbox.IsDisposed)
-                {
-                    _developmentSandbox.Close();
-                    _developmentSandbox.Dispose();
-                }
-
+                var sandbox = _developmentSandbox;
                 _developmentSandbox = null;
-            }
-
-            RemoveCommandMgr();
-            DetachEventHandlers();
-
-            try { _auditComposition = null; } catch { }
-            try
+                if (sandbox == null) return;
+                if (!sandbox.IsDisposed) sandbox.Close();
+                sandbox.Dispose();
+            });
+#if LAB_BUILD
+            RunCleanupStep("assistant preview", () =>
+            {
+                var assistantWindow = _assistantWindow;
+                _assistantWindow = null;
+                assistantWindow?.CloseAssistantPreview();
+            });
+#endif
+            RunCleanupStep("command manager", RemoveCommandMgr);
+            RunCleanupStep("event handlers", () => { DetachEventHandlers(); });
+            RunCleanupStep("audit composition", () => _auditComposition = null);
+            RunCleanupStep("agent server", () =>
             {
                 _agentServer?.Stop();
+                _agentServer = null;
+            });
+            RunCleanupStep("agent overlay", () =>
+            {
                 _agentOverlay?.HideOverlay();
                 _agentOverlay?.Dispose();
-            }
-            catch
+                _agentOverlay = null;
+            });
+            RunCleanupStep("task pane", () =>
             {
-                // ignore
-            }
+                var taskPane = TaskPanWinFormControl;
+                TaskPanWinFormControl = null;
+                if (taskPane == null) return;
+                if (!taskPane.IsDisposed) taskPane.Close();
+                taskPane.Dispose();
+            });
+            RunCleanupStep("COM release", () =>
+            {
+                if (CmdMgr != null && Marshal.IsComObject(CmdMgr)) Marshal.ReleaseComObject(CmdMgr);
+                CmdMgr = null;
+                if (SwApp != null && Marshal.IsComObject(SwApp)) Marshal.ReleaseComObject(SwApp);
+                SwApp = null;
+                SwEventPtr = null;
+                OpenDocs = null;
+            });
 
-            Marshal.ReleaseComObject(CmdMgr);
-            CmdMgr = null;
-            Marshal.ReleaseComObject(SwApp);
-            SwApp = null;
-            //The add-in _must_ call GC.Collect() here in order to retrieve all managed code pointers
             GC.Collect();
             GC.WaitForPendingFinalizers();
-
             GC.Collect();
             GC.WaitForPendingFinalizers();
-
+            TraceDiagnostic("DisconnectFromSW success");
             return true;
+        }
+
+        internal static void RunCleanupStep(string name, Action action)
+        {
+            TraceDiagnostic("Cleanup begin (" + name + ")");
+            try
+            {
+                action?.Invoke();
+                TraceDiagnostic("Cleanup complete (" + name + ")");
+            }
+            catch (Exception ex)
+            {
+                TraceDiagnostic("Cleanup failed (" + name + "): " + ex);
+            }
         }
 
         #endregion
@@ -837,7 +868,10 @@ var cmdIndex12 = cmdGroup.AddCommandItem2("Agent", -1, "Open VIRA Agent",
 
         public void RemoveCommandMgr()
         {
-            iBmp.Dispose();
+            var bitmap = iBmp;
+            iBmp = null;
+            bitmap?.Dispose();
+            if (CmdMgr == null) return;
             CmdMgr.RemoveCommandGroup(mainCmdGroupID);
             CmdMgr.RemoveFlyoutGroup(flyoutGroupID);
         }
