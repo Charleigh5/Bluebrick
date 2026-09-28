@@ -102,8 +102,8 @@ try {
         "cancelMessage",
         "reviewScreenshotItem"
       ];
-      // Frozen browser→host contract: exactly these ten message types may cross.
-      const frozenBridgeTypesExact10 = [
+      // Frozen browser→host contract: exactly these eleven message types may cross.
+      const frozenBridgeTypesExact11 = [
         "newSession",
         "captureScreenshot",
         "attach",
@@ -113,9 +113,10 @@ try {
         "sendMessage",
         "cancelMessage",
         "saveScreenshotAnnotation",
-        "reviewScreenshotItem"
+        "reviewScreenshotItem",
+        "captureActiveDocumentSnapshot"
       ];
-      const unexpectedBridgeTypes = bridgeTypes.filter((type) => !frozenBridgeTypesExact10.includes(type));
+      const unexpectedBridgeTypes = bridgeTypes.filter((type) => !frozenBridgeTypesExact11.includes(type));
 
       // Verify all 17 bb* callbacks are installed on window
       const expectedCallbacks = [

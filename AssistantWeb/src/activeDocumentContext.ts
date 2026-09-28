@@ -122,8 +122,10 @@ function normalizeDocumentType(raw: string): string {
 function stateFromStatus(status: string): ActiveDocumentContextState {
   switch (status.toLowerCase()) {
     case "ok":
+    case "partial":
       return "ready";
     case "no_active_document":
+    case "empty":
       return "no-document";
     case "loading":
       return "loading";
@@ -269,11 +271,13 @@ export function normalizeActiveDocumentContext(raw: unknown): ActiveDocumentCont
   return {
     state,
     message,
-    documentType: normalizeDocumentType(text(metadata, "document_type", "DocumentType")),
+    documentType: normalizeDocumentType(
+      text(metadata, "document_type", "DocumentType") || text(asRecord(firstItem), "title", "Title"),
+    ),
     titleHash: text(metadata, "document_title_hash", "DocumentTitleHash", "redacted"),
     pathHash: text(metadata, "document_path_hash", "DocumentPathHash", "redacted"),
     activeConfigurationHash: text(metadata, "active_configuration_hash", "ActiveConfigurationHash", "redacted"),
-    runtimeVersion: text(metadata, "runtime_version", "RuntimeVersion", "unknown"),
+    runtimeVersion: text(metadata, "runtime_version", "RuntimeVersion") || text(metadata, "runtime", "Runtime", "unknown"),
     isDirty: bool(metadata, "is_dirty", "IsDirty"),
     isReadOnly: bool(metadata, "is_read_only", "IsReadOnly"),
     customPropertyCount: count(metadata, "custom_property_count", "CustomPropertyCount"),
@@ -281,7 +285,7 @@ export function normalizeActiveDocumentContext(raw: unknown): ActiveDocumentCont
     componentEvidence: componentPayload.items,
     assemblyTraversal,
     assemblyPayloadStatus: componentPayload.status,
-    mutationActions: count(metadata, "mutation_actions", "MutationActions")
+    mutationActions: count(metadata, "mutation_actions", "MutationActions") || count(metadata, "mutation_count", "MutationCount")
   };
 }
 
@@ -292,8 +296,10 @@ export function activeDocumentContextFromToolResult(raw: unknown): ActiveDocumen
   const label = text(result, "label", "Label");
   const isActiveDocumentResult =
     toolName.toLowerCase() === "read_active_document_context" ||
+    toolName.toLowerCase() === "solidworks.get_active_document_snapshot" ||
     label.toLowerCase() === "read active document context" ||
-    label.toLowerCase() === "read_active_document_context";
+    label.toLowerCase() === "read_active_document_context" ||
+    label.toLowerCase() === "active document snapshot";
 
   return isActiveDocumentResult ? normalizeActiveDocumentContext(result) : null;
 }

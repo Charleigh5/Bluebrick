@@ -6,12 +6,12 @@
  * AssistantPanel.cs and verified at runtime. The frontend must NOT
  * narrow them to guessed DTOs.
  *
- * Browser -> Host: 10 exact message names.
+ * Browser -> Host: 11 exact message names.
  * Host -> Browser: 17 exact callback names installed on window.bb*.
  */
 
 // ---------------------------------------------------------------------------
-// Browser -> Host (10 message names)
+// Browser -> Host (11 message names)
 // ---------------------------------------------------------------------------
 export type BrowserToHostMessageName =
   | "newSession"
@@ -23,7 +23,8 @@ export type BrowserToHostMessageName =
   | "sendMessage"
   | "cancelMessage"
   | "saveScreenshotAnnotation"
-  | "reviewScreenshotItem";
+  | "reviewScreenshotItem"
+  | "captureActiveDocumentSnapshot";
 
 export type PayloadFor<TName extends BrowserToHostMessageName> =
   TName extends "newSession"
@@ -56,17 +57,19 @@ export type PayloadFor<TName extends BrowserToHostMessageName> =
                   ? { type: "cancelMessage" }
                   : TName extends "saveScreenshotAnnotation"
                     ? { type: "saveScreenshotAnnotation"; screenshotId?: string; annotation?: unknown }
-                    : TName extends "reviewScreenshotItem"
-                      ? {
-                          type: "reviewScreenshotItem";
-                          operationId?: string;
-                          screenshotId: string;
-                          targetType?: string;
-                          targetId?: string;
-                          reviewStatus?: string;
-                          reviewNote?: string;
-                        }
-                      : never;
+                      : TName extends "reviewScreenshotItem"
+                        ? {
+                            type: "reviewScreenshotItem";
+                            operationId?: string;
+                            screenshotId: string;
+                            targetType?: string;
+                            targetId?: string;
+                            reviewStatus?: string;
+                            reviewNote?: string;
+                          }
+                        : TName extends "captureActiveDocumentSnapshot"
+                          ? { type: "captureActiveDocumentSnapshot"; operationId?: string }
+                          : never;
 
 // ---------------------------------------------------------------------------
 // Host -> Browser (17 callback names)
@@ -270,6 +273,15 @@ export const reviewScreenshotItem = (
     targetId,
     reviewStatus,
     reviewNote,
+  });
+
+export const captureActiveDocumentSnapshot = (
+  bridge: BlueBrickBridge,
+  operationId?: string,
+): void =>
+  bridge.post("captureActiveDocumentSnapshot", {
+    type: "captureActiveDocumentSnapshot",
+    operationId,
   });
 
 export {};

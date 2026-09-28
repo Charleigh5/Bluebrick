@@ -591,6 +591,10 @@ namespace BlueBrick
                 {
                     await SaveScreenshotAnnotationAsync(msg).ConfigureAwait(true);
                 }
+                else if (string.Equals(type, "captureActiveDocumentSnapshot", StringComparison.OrdinalIgnoreCase))
+                {
+                    await CaptureActiveDocumentSnapshotAsync().ConfigureAwait(true);
+                }
             }
             catch
             {
@@ -1462,6 +1466,46 @@ namespace BlueBrick
             if (!_initialized || _webView.CoreWebView2 == null || artifact == null) return;
             var payload = NormalizeScreenshotArtifact(artifact);
             await _webView.ExecuteScriptAsync("if(window.bbAppendScreenshotArtifact)window.bbAppendScreenshotArtifact(" + payload.ToString(Formatting.None) + ");");
+        }
+
+        private async Task CaptureActiveDocumentSnapshotAsync()
+        {
+            const string toolName = "solidworks.get_active_document_snapshot";
+            const string label = "Active Document Snapshot";
+            var descriptor = GetToolDescriptor(toolName);
+            var enabled = descriptor?.Value<bool?>("Enabled") ?? descriptor?.Value<bool?>("enabled") ?? false;
+            if (!enabled)
+            {
+                var reason = descriptor?.Value<string>("UnavailableReason") ?? descriptor?.Value<string>("unavailableReason") ?? "not exposed by the host tool catalog";
+                await AppendToolResultAsync(label, string.Empty, "unavailable", label + " unavailable: " + reason, new JArray(), new JObject
+                {
+                    ["ToolName"] = toolName,
+                    ["RiskLevel"] = "low",
+                    ["Allowed"] = false,
+                    ["ApprovalRequired"] = false,
+                    ["PolicyCode"] = "tool_unavailable",
+                    ["ResultStatus"] = "unavailable"
+                }).ConfigureAwait(true);
+                return;
+            }
+
+            var result = await AgentPanelClient.ExecuteToolAsync(toolName, string.Empty, 0).ConfigureAwait(true);
+            if (!result.Ok)
+            {
+                await AppendToolResultAsync(label, string.Empty, "unavailable", result.Error ?? "Snapshot request failed.", new JArray(), new JObject
+                {
+                    ["ToolName"] = toolName,
+                    ["ResultStatus"] = "unavailable"
+                }).ConfigureAwait(true);
+                return;
+            }
+
+            var status = result.Data.Value<string>("Status") ?? result.Data.Value<string>("status") ?? "unknown";
+            var message = result.Data.Value<string>("Message") ?? result.Data.Value<string>("message") ?? label + " completed.";
+            var items = result.Data["Items"] as JArray ?? result.Data["items"] as JArray ?? new JArray();
+            var receipt = result.Data["Receipt"] as JObject ?? result.Data["receipt"] as JObject;
+            await AppendToolResultAsync(label, string.Empty, status, message, items, receipt).ConfigureAwait(true);
+            await LoadToolAuditAsync().ConfigureAwait(true);
         }
 
         private async Task CreateScreenshotReviewReportAsync(JObject artifact)

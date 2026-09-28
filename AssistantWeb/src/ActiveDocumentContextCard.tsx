@@ -45,6 +45,7 @@ export function ActiveDocumentContextCard({ context }: { context: ActiveDocument
           <ContextMetric label="Unsaved changes" value={yesNo(context.isDirty)} />
           <ContextMetric label="Read-only" value={yesNo(context.isReadOnly)} />
           <ContextMetric label="Custom properties" value={String(context.customPropertyCount)} />
+          <ContextMetric label="Runtime" value={context.runtimeVersion} />
         </div>
       ) : null}
 

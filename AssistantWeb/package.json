@@ -16,6 +16,7 @@
     "verify:output-lab": "node ./scripts/verify-packaged-output-contract.mjs --configuration=Lab",
     "verify:responsive": "node ./scripts/verify-responsive-contract.mjs",
     "verify:replay": "node ./scripts/verify-replay-state.mjs",
+    "verify:active-document-snapshot": "node ./scripts/verify-active-document-snapshot-button.mjs",
     "smoke:narrow": "node ./scripts/narrow-smoke.mjs",
     "prebuild": "node ./scripts/check-deps.mjs",
     "build": "vite build",

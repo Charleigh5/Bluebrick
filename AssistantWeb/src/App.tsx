@@ -8,6 +8,8 @@ import {
 import { HardwareCadPanel } from "./hardware-cad/HardwareCadPanel";
 import { ExecutionBoardApp } from "./execution-board/ExecutionBoardApp";
 import { ViraLabApp } from "./vira-lab/ViraLabApp";
+import { ActiveDocumentContextCard } from "./ActiveDocumentContextCard";
+import { activeDocumentContextFromToolResult, type ActiveDocumentContext } from "./activeDocumentContext";
 import { RuntimeIdentitySurface } from "./runtimeIdentity";
 import { resolveAssistantSurface } from "./surfaceRouting";
 import { analyzePacketFile, renderPacketPage } from "./packet-review/analyzePacketFile";
@@ -143,6 +145,7 @@ const BUILT_IN_TOOLBAR_ITEMS: ToolbarItem[] = [
   { id: "new", label: "New", description: "Start a new assistant session", symbol: "new", category: "workspace" },
   { id: "capture", label: "Capture", description: "Capture the current local screen", symbol: "capture", category: "workspace" },
   { id: "search", label: "Search", description: "Search the selected engineering scope", symbol: "search", category: "workspace" },
+  { id: "active-document-snapshot", label: "Snapshot", description: "Read the active SOLIDWORKS document without a model", symbol: "new", category: "workspace", hostRequired: true },
   { id: "packet-pdf", label: "Packet PDF", description: "Generate a governed drawing packet PDF", symbol: "pdf", category: "generator", hostRequired: true },
   { id: "sheet-png", label: "Sheet PNG", description: "Export drawing sheets as PNG images", symbol: "png", category: "generator", hostRequired: true },
   { id: "step-export", label: "STEP", description: "Export the active model as a STEP file", symbol: "step", category: "generator", hostRequired: true },
@@ -603,6 +606,7 @@ export function App() {
   const [input, setInput] = useState("");
   const [screenshots, setScreenshots] = useState<ScreenshotArtifact[]>([]);
   const [toolResults, setToolResults] = useState<ToolResult[]>([]);
+  const [activeDocumentContext, setActiveDocumentContext] = useState<ActiveDocumentContext | null>(null);
   const [screenshotReviews, setScreenshotReviews] = useState<Record<string, string>>({});
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>("offline");
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -616,6 +620,7 @@ export function App() {
   const isPacketDemo = new URLSearchParams(window.location.search).get("demo") === "packet-upload";
 
   const reviewOperationsRef = useRef<Record<string, string>>({});
+  const snapshotOperationRef = useRef<string | null>(null);
   const bridgeRef = useRef<BlueBrickBridge | null>(null);
   const streamingIdRef = useRef<string | null>(null);
   const messagesRef = useRef<Message[]>(messages);
@@ -660,6 +665,9 @@ export function App() {
       syncScreenshots();
       setScreenshotReviews({});
       setToolResults([]);
+      setActiveDocumentContext(null);
+      snapshotOperationRef.current = null;
+      setToolbarNotice("");
       setPendingAttachments([]);
       setPacketDemoNotice("");
       setStreaming(false);
@@ -848,6 +856,12 @@ export function App() {
     onAppendToolResult: (result: unknown) => {
       const r = result as ToolResult;
       setToolResults((prev) => [...prev, r ?? {}]);
+      const context = activeDocumentContextFromToolResult(result);
+      if (context) {
+        snapshotOperationRef.current = null;
+        setToolbarNotice("");
+        setActiveDocumentContext(context);
+      }
     },
 
     onAppendScreenshotArtifact: (artifact: unknown) => {
@@ -998,6 +1012,25 @@ export function App() {
 
   const handleCapture = useCallback(() => {
     bridgeRef.current?.post("captureScreenshot", { type: "captureScreenshot" });
+  }, []);
+
+  const handleActiveDocumentSnapshot = useCallback(() => {
+    if (snapshotOperationRef.current) return;
+    if (!bridgeRef.current?.isHostAvailable()) {
+      setOperationError("Active document snapshot unavailable: host is offline.");
+      return;
+    }
+    const operationId = cryptoId();
+    snapshotOperationRef.current = operationId;
+    setOperationError("");
+    setToolbarNotice("Reading active document context…");
+    bridgeRef.current?.post("captureActiveDocumentSnapshot", { type: "captureActiveDocumentSnapshot", operationId });
+    window.setTimeout(() => {
+      if (snapshotOperationRef.current !== operationId) return;
+      snapshotOperationRef.current = null;
+      setToolbarNotice("");
+      setOperationError("Active document snapshot timed out. No result was received.");
+    }, 30000);
   }, []);
 
   const queueFiles = useCallback(async (incoming: FileList | File[]) => {
@@ -1223,8 +1256,9 @@ export function App() {
     if (item.id === "new") return handleNewSession();
     if (item.id === "capture") return handleCapture();
     if (item.id === "search") return handleSearch();
+    if (item.id === "active-document-snapshot") return handleActiveDocumentSnapshot();
     setToolbarNotice(`${item.label} is configured as a host-required ${item.category} action. This browser demo does not execute SOLIDWORKS or PDM operations.`);
-  }, [handleCapture, handleNewSession, handleSearch]);
+  }, [handleActiveDocumentSnapshot, handleCapture, handleNewSession, handleSearch]);
 
   const runTemplate = useCallback((template: PromptTemplate) => {
     handleSend(template.prompt);
@@ -1702,6 +1736,7 @@ export function App() {
           </div>
         ))}
 
+        {activeDocumentContext ? <ActiveDocumentContextCard context={activeDocumentContext} /> : null}
         {toolResults.map((t, i) => (
           <div key={i} className="tool-card">
             <div className="tool-head">
