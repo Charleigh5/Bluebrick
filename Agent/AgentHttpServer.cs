@@ -81,6 +81,11 @@ namespace BlueBrick.Agent
         {
             try
             {
+                // Activation-slice shutdown signal (Sprint 04 contract C2): synchronous, under
+                // the ownership lock; commits permanent fail-closed admission stop, bumps the
+                // execution generation, and cancels pending prompts through the issuer path.
+                // No restart path exists; swaddin shutdown needs no further change here.
+                BlueBrick.Agent.MutationExecutionOwnership.NotifyShutdownShared();
                 _cts?.Cancel();
                 _listener?.Stop();
                 _listener?.Close();

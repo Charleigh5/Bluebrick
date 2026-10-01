@@ -414,20 +414,31 @@ namespace BlueBrick.Agent
                 AppIdentity.TelemetryFolderName,
                 "telemetry");
             var telemetryLogger = new TelemetryLogger(telemetryLogDir, "events", 0.1, 7, 2048, 500);
+            // Persistent issuance (D15): one process-wide issuer behind single-flight, fed by a
+            // reusable prompt host with fresh dialogs per admission. Small per-call construction
+            // (host/router/ledger) is discarded when already initialized; mutation calls are
+            // human-paced, so the waste is negligible next to a native dialog round-trip.
+            var routing = new RoutingPreviewBuilder();
+            var host = dispatcher == null ? null : new ApprovalPromptHost(dispatcher, null);
+            var ledger = new AssistantApprovalLedger();
+            if (dispatcher != null)
+            {
+                MutationExecutionOwnership.Shared.EnsureInitialized(
+                    () => host == null
+                        ? null
+                        : new AssistantApprovalService(_config, host, routing, ledger, telemetryLogger),
+                    routing);
+            }
             var executor = new SetCustomPropertyExecutor(
                 _config,
                 _policy,
                 _auditLog,
                 new MutationTelemetryLoggerSink(telemetryLogger),
-                new AssistantApprovalLedger(),
-                new ApprovalLifecycleTelemetrySink(telemetryLogger),
+                ledger,
                 dispatcher,
                 adapter,
                 catalog,
-                () => dispatcher == null ? null : (IApprovalPrompt)new ApprovalDialog(dispatcher),
-                // Sink parameters carry the executor's fakes in tests; production binds the
-                // concrete defaults the issuer runtime ctor requires (ledger + TelemetryLogger).
-                (prompt, builder, ledgerSink, issuerTelemetrySink) => new AssistantApprovalService(_config, prompt, builder, new AssistantApprovalLedger(), telemetryLogger),
+                MutationExecutionOwnership.Shared,
                 () =>
                 {
                     if (composition == null) return null;
@@ -442,7 +453,26 @@ namespace BlueBrick.Agent
                         return null;
                     }
                     return new SwLiveMutationSession(liveModel, liveApp);
-                });
+                },
+                () => new SwComAdmissionReader(
+                    dispatcher,
+                    configuration =>
+                    {
+                        if (composition == null) throw new InvalidOperationException("No live composition.");
+                        global::SolidWorks.Interop.sldworks.IModelDoc2 liveModel;
+                        global::SolidWorks.Interop.sldworks.ISldWorks liveApp;
+                        try
+                        {
+                            if (!composition.TryGetActiveMutationTarget(out liveModel, out liveApp) || liveModel == null) throw new InvalidOperationException("No live target.");
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new InvalidOperationException("Live target resolution failed.", ex);
+                        }
+                        return new SwComSource(liveModel, configuration ?? string.Empty);
+                    }),
+                () => DateTime.UtcNow);
+            executor.LockerListProvider = SetCustomPropertyExecutor.QueryRestartManagerLockers;
             return await executor.ExecuteAsync(request, traceId).ConfigureAwait(false);
         }
 

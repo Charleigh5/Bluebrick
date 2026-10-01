@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
+using BlueBrick.Audit.Core;
 using Newtonsoft.Json;
 
 namespace BlueBrick.Agent
@@ -15,6 +17,7 @@ namespace BlueBrick.Agent
         internal const string Prepared = "prepared";
         internal const string WriteStarted = "write_started";
         internal const string SaveAttempted = "save_attempted";
+        internal const string SaveReturned = "save_returned";
         internal const string SavedVerified = "saved_verified";
         internal const string EvidenceComplete = "evidence_complete";
         internal const string Reconciled = "reconciled";
@@ -30,8 +33,8 @@ namespace BlueBrick.Agent
 
     internal sealed class MutationJournalRecord
     {
-        [JsonProperty("targetId")]
-        public string TargetId { get; set; }
+        [JsonProperty("targetHash")]
+        public string TargetHash { get; set; }
         [JsonProperty("requestId")]
         public string RequestId { get; set; }
         [JsonProperty("approvalId")]
@@ -56,25 +59,30 @@ namespace BlueBrick.Agent
 
     // Durable per-transaction execution journal (Sprint 04 contract C7), distinct from the
     // issuer ledger (which is evidence-only and can never clear this block). One JSON object
-    // per line; stages flushed before the corresponding irreversible step. Admission reads the
-    // journal through on every mutation call (disk truth — restart-safe with no latch hazard);
-    // a static fast-path cache is refreshed by the explicitly named EnsureScanned, called at
-    // executor admission start.
+    // per line, appended through FileStream WriteThrough under a static lock shared with
+    // readers (no torn-line reads; flush precedes every irreversible step). Exact paths never
+    // persist: matching runs on the SHA256 of the canonical path, and request/approval IDs
+    // are redacted+bounded at the single Append choke point. Admission reads the journal
+    // through on every mutation call (disk truth — restart-safe with no latch hazard); a
+    // static fast-path cache is refreshed by the explicitly named EnsureScanned, called at
+    // executor admission start after target ownership is acquired.
     internal sealed class MutationExecutionJournal
     {
-        private static readonly object _cacheSync = new object();
+        private const int EvidenceIdentifierLimit = 128;
+
+        private static readonly object _writerSync = new object();
         private static readonly Dictionary<string, bool> _blockedCache = new Dictionary<string, bool>(StringComparer.Ordinal);
 
         private readonly string _journalPath;
 
-        internal string JournalPath
-        {
-            get { return _journalPath; }
-        }
-
         internal MutationExecutionJournal(string journalPath)
         {
             _journalPath = journalPath ?? string.Empty;
+        }
+
+        internal string JournalPath
+        {
+            get { return _journalPath; }
         }
 
         internal static string DefaultJournalPath(string testFileRoot)
@@ -82,40 +90,83 @@ namespace BlueBrick.Agent
             return Path.Combine(testFileRoot ?? string.Empty, ".execution-journal", "journal.jsonl");
         }
 
-        internal static string DefaultCheckpointPath(string testFileRoot, string targetHash, string requestId)
+        internal static string DefaultCheckpointPath(string testFileRoot, string targetHash, string requestHash)
         {
-            return Path.Combine(testFileRoot ?? string.Empty, ".checkpoints", targetHash + "-" + requestId + ".sldprt");
+            return Path.Combine(testFileRoot ?? string.Empty, ".checkpoints", targetHash + "-" + requestHash + ".sldprt");
         }
 
-        internal void Append(MutationJournalRecord record)
+        internal static string HashTarget(string canonicalPath)
         {
-            if (record == null) throw new ArgumentNullException(nameof(record));
+            using (var sha = SHA256.Create())
+            {
+                var bytes = Encoding.UTF8.GetBytes(canonicalPath ?? string.Empty);
+                return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", string.Empty).ToLowerInvariant();
+            }
+        }
+
+        internal static string HashRequest(string requestId)
+        {
+            var full = HashTarget(requestId ?? string.Empty);
+            return full.Length <= 16 ? full : full.Substring(0, 16);
+        }
+
+        internal void Append(string targetId, string requestId, string approvalId, string stage, string baselineHash, string checkpointHash)
+        {
             if (string.IsNullOrWhiteSpace(_journalPath))
                 throw new InvalidOperationException("Mutation journal path is not configured.");
-            var directory = Path.GetDirectoryName(_journalPath);
-            if (!string.IsNullOrWhiteSpace(directory))
+            if (string.IsNullOrWhiteSpace(targetId))
+                throw new ArgumentException("Target identity is required.", "targetId");
+            if (string.IsNullOrWhiteSpace(stage))
+                throw new ArgumentException("Stage is required.", "stage");
+            var record = new MutationJournalRecord
             {
-                Directory.CreateDirectory(directory);
+                TargetHash = HashTarget(targetId),
+                RequestId = Evidence(requestId),
+                ApprovalId = Evidence(approvalId),
+                Stage = stage,
+                BaselineHash = baselineHash ?? string.Empty,
+                CheckpointHash = checkpointHash ?? string.Empty,
+                TimestampUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)
+            };
+            var directory = Path.GetDirectoryName(_journalPath);
+            lock (_writerSync)
+            {
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+                using (var stream = new FileStream(_journalPath, FileMode.Append, FileAccess.Write, FileShare.Read, 4096, FileOptions.WriteThrough))
+                using (var writer = new StreamWriter(stream, Encoding.UTF8))
+                {
+                    writer.WriteLine(JsonConvert.SerializeObject(record, Formatting.None));
+                    writer.Flush();
+                    stream.Flush(true);
+                }
             }
-            record.TimestampUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
-            File.AppendAllText(_journalPath, JsonConvert.SerializeObject(record, Formatting.None) + Environment.NewLine, Encoding.UTF8);
         }
 
         internal IReadOnlyList<MutationJournalRecord> ReadAll()
         {
             var records = new List<MutationJournalRecord>();
-            if (string.IsNullOrWhiteSpace(_journalPath) || !File.Exists(_journalPath))
+            if (string.IsNullOrWhiteSpace(_journalPath))
             {
                 return records;
             }
             string[] lines;
-            try
+            lock (_writerSync)
             {
-                lines = File.ReadAllLines(_journalPath, Encoding.UTF8);
-            }
-            catch (Exception ex)
-            {
-                throw new MutationJournalCorruptException("Mutation journal unreadable: " + ex.Message);
+                if (!File.Exists(_journalPath))
+                {
+                    return records;
+                }
+                try
+                {
+                    lines = File.ReadAllLines(_journalPath, Encoding.UTF8);
+                }
+                catch (Exception ex)
+                {
+                    throw new MutationJournalCorruptException("Mutation journal unreadable: " + ex.Message);
+                }
             }
             for (int i = 0; i < lines.Length; i++)
             {
@@ -129,7 +180,7 @@ namespace BlueBrick.Agent
                 {
                     record = null;
                 }
-                if (record == null || string.IsNullOrWhiteSpace(record.TargetId) || string.IsNullOrWhiteSpace(record.Stage))
+                if (record == null || string.IsNullOrWhiteSpace(record.TargetHash) || string.IsNullOrWhiteSpace(record.Stage))
                 {
                     throw new MutationJournalCorruptException("Mutation journal line " + (i + 1) + " is corrupt.");
                 }
@@ -138,33 +189,31 @@ namespace BlueBrick.Agent
             return records;
         }
 
-        // Read-through admission check: the latest line per target decides. Throws corrupt
+        // Read-through admission check: the latest line per target hash decides. Throws corrupt
         // (mapped by the caller to a global block) on unreadable/corrupt journals.
         internal bool IsBlocked(string targetId)
         {
+            var wanted = HashTarget(targetId);
             MutationJournalRecord latest = null;
             foreach (var record in ReadAll())
             {
-                if (string.Equals(record.TargetId, targetId, StringComparison.OrdinalIgnoreCase))
-                {
-                    latest = record;
-                }
+                if (string.Equals(record.TargetHash, wanted, StringComparison.Ordinal)) latest = record;
             }
             return latest != null && !MutationStage.IsTerminal(latest.Stage);
         }
 
         // Named startup-scan entry: refreshes the fast-path cache for one journal file.
-        // Called at executor admission start (never relied upon for correctness — the
-        // read-through check above is always authoritative).
+        // Called at executor admission start after target ownership is acquired (never relied
+        // upon for correctness — the read-through check above is always authoritative).
         internal static void EnsureScanned(string journalPath)
         {
             var records = new MutationExecutionJournal(journalPath).ReadAll();
-            var latestByTarget = new Dictionary<string, MutationJournalRecord>(StringComparer.OrdinalIgnoreCase);
+            var latestByTarget = new Dictionary<string, MutationJournalRecord>(StringComparer.Ordinal);
             foreach (var record in records)
             {
-                latestByTarget[record.TargetId] = record;
+                latestByTarget[record.TargetHash] = record;
             }
-            lock (_cacheSync)
+            lock (_writerSync)
             {
                 var stale = new List<string>();
                 foreach (var key in _blockedCache.Keys)
@@ -172,10 +221,7 @@ namespace BlueBrick.Agent
                     string path;
                     string dummy;
                     SplitKey(key, out path, out dummy);
-                    if (string.Equals(path, journalPath ?? string.Empty, StringComparison.Ordinal))
-                    {
-                        stale.Add(key);
-                    }
+                    if (string.Equals(path, journalPath ?? string.Empty, StringComparison.Ordinal)) stale.Add(key);
                 }
                 foreach (var key in stale)
                 {
@@ -190,29 +236,35 @@ namespace BlueBrick.Agent
 
         internal static bool IsBlockedCached(string journalPath, string targetId)
         {
-            lock (_cacheSync)
+            lock (_writerSync)
             {
                 bool blocked;
-                return _blockedCache.TryGetValue(MakeKey(journalPath, targetId), out blocked) && blocked;
+                return _blockedCache.TryGetValue(MakeKey(journalPath, HashTarget(targetId)), out blocked) && blocked;
             }
         }
 
-        private static string MakeKey(string journalPath, string targetId)
+        private static string Evidence(string value)
         {
-            return (journalPath ?? string.Empty) + "\0" + (targetId ?? string.Empty).ToUpperInvariant();
+            var redacted = AuditRedactionService.RedactSecrets(value ?? string.Empty);
+            return redacted.Length <= EvidenceIdentifierLimit ? redacted : redacted.Substring(0, EvidenceIdentifierLimit);
         }
 
-        private static void SplitKey(string key, out string journalPath, out string targetId)
+        private static string MakeKey(string journalPath, string targetHash)
+        {
+            return (journalPath ?? string.Empty) + "\0" + (targetHash ?? string.Empty);
+        }
+
+        private static void SplitKey(string key, out string journalPath, out string targetHash)
         {
             var at = (key ?? string.Empty).IndexOf('\0');
             if (at < 0)
             {
                 journalPath = key;
-                targetId = string.Empty;
+                targetHash = string.Empty;
                 return;
             }
             journalPath = key.Substring(0, at);
-            targetId = key.Substring(at + 1);
+            targetHash = key.Substring(at + 1);
         }
     }
 }

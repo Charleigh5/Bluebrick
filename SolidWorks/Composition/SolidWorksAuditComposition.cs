@@ -120,6 +120,7 @@ namespace BlueBrick.SolidWorks.Composition
             app = null;
             try
             {
+                if (_guard != null) _guard.VerifyAccess();
                 app = _app;
                 model = _app.IActiveDoc2 as IModelDoc2;
             }
